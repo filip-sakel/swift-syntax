@@ -45,3 +45,19 @@ extension NominalTypeDeclSyntax {
     }
   }
 }
+
+extension SyntaxProtocol {
+  /// Check whether the non-type erased version of this syntax node conforms to
+  /// `BracedSyntax`.
+  /// Note that this will incur an existential conversion.
+  @_spi(Experimental) public func isProtocol(_: NominalTypeDeclSyntax.Protocol) -> Bool {
+    return self.asProtocol(BracedSyntax.self) != nil
+  }
+
+  /// Return the non-type erased version of this syntax node if it conforms to
+  /// `BracedSyntax`. Otherwise return `nil`.
+  /// Note that this will incur an existential conversion.
+  @_spi(Experimental) public func asProtocol(_: NominalTypeDeclSyntax.Protocol) -> NominalTypeDeclSyntax? {
+    return Syntax(self).asProtocol(SyntaxProtocol.self) as? NominalTypeDeclSyntax
+  }
+}

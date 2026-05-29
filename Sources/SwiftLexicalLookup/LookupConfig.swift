@@ -34,6 +34,8 @@ public struct LookupConfig {
   /// returned by lookup would be the `a` declaration from inside function body.
   public var finishInSequentialScope: Bool
   public var configuredRegions: ConfiguredRegions?
+  /// Documentated at internal init
+  internal var _lookupTopScope: Bool = false
 
   /// Creates a new lookup configuration.
   ///
@@ -45,5 +47,22 @@ public struct LookupConfig {
   ) {
     self.finishInSequentialScope = finishInSequentialScope
     self.configuredRegions = configuredRegions
+    self._lookupTopScope = false
+  }
+
+  /// Creates a new lookup configuration, setting `_lookupTopScope`.
+  ///
+  /// - `finishInSequentialScope` - specifies whether lookup should finish
+  ///   in the closest sequential scope. `false` by default.
+  /// - `_lookupTopScope` - Whether the top-level scope (SourceFileSyntax) introduces name
+  ///    to the lookup (other than what's introduced from guard statements).
+  internal init(
+    finishInSequentialScope: Bool = false,
+    configuredRegions: ConfiguredRegions? = nil,
+    _lookupTopScope: Bool
+  ) {
+    self.finishInSequentialScope = finishInSequentialScope
+    self.configuredRegions = configuredRegions
+    self._lookupTopScope = _lookupTopScope
   }
 }

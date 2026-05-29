@@ -47,16 +47,26 @@ import SwiftSyntax
     at lookUpPosition: AbsolutePosition,
     with config: LookupConfig
   ) -> [LookupResult] {
-    return statements.flatMap { codeBlockItem in
-      if let guardStmt = codeBlockItem.item.as(GuardStmtSyntax.self) {
-        return guardStmt.lookupFromSequentialParent(
-          identifier,
-          at: lookUpPosition,
-          with: config
-        )
-      } else {
-        return []
+    // Default is not to lookup the top scope
+    if !config._lookupTopScope {
+      return statements.flatMap { codeBlockItem in
+        if let guardStmt = codeBlockItem.item.as(GuardStmtSyntax.self) {
+          return guardStmt.lookupFromSequentialParent(
+            identifier,
+            at: lookUpPosition,
+            with: config
+          )
+        } else {
+          return []
+        }
       }
+    } else {  // if config._lookupTopScope
+      return sequentialLookup(
+        in: statements,
+        identifier,
+        at: lookUpPosition,
+        with: config
+      )
     }
   }
 }

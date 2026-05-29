@@ -43,16 +43,32 @@ public struct QualifiedTableLookupConfig {
 }
 
 public struct DeclGroupSyntaxType: DeclGroupSyntax {
+  // TODO: Consider using an enum representing a union of NominalTypeDeclSyntax
+  // ProtocolDeclSyntax and ExtensionDeclSyntax.
+  //
+  //  private enum _Storage {
+  //   case typeDecl(any NominalTypeDeclSyntax)
+  //   case protocolDecl(ProtocolDeclSyntax)
+  //   case extensionDecl(ExtensionDeclSyntax)
+  // }
+  //
+  // private let box: _Storage
+  //
+  // public init?(_ node: borrowing some SyntaxProtocol) {
+  //   if let castNode = node.asProtocol((any NominalTypeDeclSyntax).self) {
+  //     box = .typeDecl(castNode)
+  //   } else if let castNode = node.as(ProtocolDeclSyntax.self) {
+  //     box = .protocolDecl(castNode)
+  //   } else if let castNode = node.as(ExtensionDeclSyntax.self) {
+  //     box = .extensionDecl(castNode)
+  //   } else {
+  //     return nil
+  //   }
+  // }
   private var box: any DeclGroupSyntax
 
-  public init?(_ node: __shared some SyntaxProtocol) {
-    if let castNode = node.as(StructDeclSyntax.self) {
-      box = castNode
-    } else if let castNode = node.as(EnumDeclSyntax.self) {
-      box = castNode
-    } else if let castNode = node.as(ClassDeclSyntax.self) {
-      box = castNode
-    } else if let castNode = node.as(ActorDeclSyntax.self) {
+  public init?(_ node: borrowing some SyntaxProtocol) {
+    if let castNode = node.asProtocol((any NominalTypeDeclSyntax).self) {
       box = castNode
     } else if let castNode = node.as(ProtocolDeclSyntax.self) {
       box = castNode
@@ -60,6 +76,44 @@ public struct DeclGroupSyntaxType: DeclGroupSyntax {
       box = castNode
     } else {
       return nil
+    }
+  }
+
+  fileprivate init(exactly node: some DeclGroupSyntax) {
+    box = node
+  }
+  // public var identifier: Identifier? {
+  //   if let castNode = box.as(StructDeclSyntax.self) {
+  //     castNode.name.identifier
+  //   } else if let castNode = box.as(EnumDeclSyntax.self) {
+  //     castNode.name.identifier
+  //   } else if let castNode = box.as(ClassDeclSyntax.self) {
+  //     castNode.name.identifier
+  //   } else if let castNode = box.as(ActorDeclSyntax.self) {
+  //     castNode.name.identifier
+  //   } else if let castNode = box.as(ProtocolDeclSyntax.self) {
+  //     castNode.name.identifier
+  //   } else { /* extensions have types not identifiers */
+  //     nil
+  //   }
+  // }
+
+  // TODO: Implement canonical type
+  public var type: TypeSyntax? {
+    if let castNode = box.as(StructDeclSyntax.self) {
+      TypeSyntax(castNode.name)
+    } else if let castNode = box.as(EnumDeclSyntax.self) {
+      TypeSyntax(castNode.name)
+    } else if let castNode = box.as(ClassDeclSyntax.self) {
+      TypeSyntax(castNode.name)
+    } else if let castNode = box.as(ActorDeclSyntax.self) {
+      TypeSyntax(castNode.name)
+    } else if let castNode = box.as(ProtocolDeclSyntax.self) {
+      TypeSyntax(castNode.name)
+    } else if let castNode = box.as(ExtensionDeclSyntax.self) {
+      castNode.extendedType
+    } else {
+      nil
     }
   }
 
@@ -162,9 +216,10 @@ public enum QualifiedLookupResult {
     potentialMacroDecl: [DeclSyntax],
     introducedIn: DeclGroupSyntaxType
   )
-  /// Look for any types we encountered in the lookup that weren't in
-  /// the SymbolTable syntax trees (e.g. the looked up type conforms to
-  /// a protocol from a different module).
+  /// Look for any "supertypes" we encountered in the lookup and which
+  /// we didn't retrieve from the symbol table (if we performed `SymbolTable`
+  /// lookup with the `lookupSuperprotocols` or `lookupSuperclasses`
+  /// options).
   case lookForSupertypes(
     inheritedFrom: InheritanceClauseSyntax,
     genericClause: GenericWhereClauseSyntax?
@@ -173,11 +228,81 @@ public enum QualifiedLookupResult {
 
 public class SymbolTable {
   let fileSyntax: SourceFileSyntax
-
+  lazy var globalTypes: [IdentifierTypeSyntax: [(DeclGroupSyntaxType, InheritanceClauseSyntax?, WhereClauseSyntax?)] = _comuteMapping(fileSyntax: fileSyntax)
   /// Construct a table for caching symbol lookup
   /// for the given file syntax.
   public init(fileSyntax: SourceFileSyntax) {
     self.fileSyntax = fileSyntax
+  }
+
+  static func addCodeBlock(
+    decl: DeclSyntax,
+    types: inout [Identifier: [DeclGroupSyntaxType]],
+    extensions: inout [TypeSyntax: [ExtensionDeclSyntax]],
+    aliases: inout [Identifier: [TypeAliasDeclSyntax]]
+  ) {
+    // Look for declaration groups:
+    // 1. nominal types (structs, enums, classes, actors)
+    if let nominalType = decl.asProtocol((any NominalTypeDeclSyntax).self),
+        let typeName = nominalType.name.identifier
+    {
+      types[typeName, default: []].append(DeclGroupSyntaxType(exactly: nominalType))
+    // 2. protocols (same as nominal types)
+    } else if let protocolDecl = decl.as(ProtocolDeclSyntax.self),
+       let typeName = protocolDecl.name.identifier
+    {
+      types[typeName, default: []].append(DeclGroupSyntaxType(exactly: protocolDecl))
+    // 3. extensions (different because extensions can have a member type, e.g. `extension A.B {}`)
+    } else if let extensionDecl = decl.as(ExtensionDeclSyntax.self) {
+      extensions[extensionDecl.extendedType, default: []].append(extensionDecl)
+
+    // Look for type aliases
+    } else if let typeAlias = decl.as(TypeAliasDeclSyntax.self),
+              let typeName = typeAlias.name.identifier
+    {
+      aliases[typeName, default: []].append(typeAlias)
+    }
+  }
+
+  // TODO: Technically, we know this can never be a protocol/extension (we can't nest
+  // these under types)
+  //
+  /// Retrieve all types nested in the given declaration group (no recursion).
+  static func getNestedTypes(of group: DeclGroupSyntaxType) -> (
+    nestedTypes: [Identifier: [DeclGroupSyntaxType]],
+    aliases: [Identifier: [TypeAliasDeclSyntax]]
+  ) {
+    var nestedTypes = [Identifier: [DeclGroupSyntaxType]]()
+    var aliases = [Identifier: [TypeAliasDeclSyntax]]()
+    for member in group.memberBlock.members {
+      var extensions = [TypeSyntax: [ExtensionDeclSyntax]]()
+      addCodeBlock(decl: member.decl, types: &nestedTypes, extensions: &extensions, aliases: &aliases)
+      // TODO Handle extensions (tho they can't actually be nested, we could do it for diagnostic purposes)
+      _ = extensions
+    }
+
+    return (nestedTypes, aliases)
+  }
+
+  /// Retrieve all declaration groups in the top level of the given file syntax
+  /// (no recursion).
+  static func getTypes(of fileSyntax: SourceFileSyntax) -> (
+    nestedTypes: [IdentifierTypeSyntax: DeclGroupSyntaxType],
+    aliases: [Identifier: TypeAliasDeclSyntax]
+  ) {
+    var nestedTypes  = [IdentifierTypeSyntax: any NominalTypeDeclSyntax]()
+    var aliases = [Identifier: TypeAliasDeclSyntax]()
+
+    for stmt in fileSyntax.statements {
+      // Only declarations can introduce types
+      guard case .decl(let decl) = stmt.item else { continue }
+      // Process nominal types and protocols
+    }
+  }
+
+  static func _computeMapping(fileSyntax: SourceFileSyntax) -> [IdentifierTypeSyntax: DeclGroupSyntaxType] {
+    // TODO: Ensure extensions with `Any` aren't introduced
+
   }
 }
 
@@ -211,5 +336,71 @@ extension DeclGroupSyntax {
   ) -> [QualifiedLookupResult] {
     // FIXME: Implement
     []
+  }
+
+  // FIXME: Should support all Types
+  // where identifier -> base global lookup
+  //       member -> recursive on first, then it's our bread&butter
+  //       compositions -> look into composing protocols&/types
+  //       some T -> look into T (protocol or composition thereof, or class)
+  //       any T -> look into (protocol or composition thereof, or class)
+  //                -- don't care if it's final; will be diagnosed later
+  //       T.self -> look into static members of T (look for static members)
+  //       tuple -> if arity is known, return `.0, .1, ...` (no other members because
+  //                that's not allowed for non-nominal types)
+  //       [unwrapped]optional, array, dictionary, inline array,
+  //       class restriction -> look into said class?
+  //       function -> definitionally no results
+  //       pack element -> look into inheritance/where clauses of pack decl?
+  //       suppressed type -> can't do anything yet (return dedicated result type)
+  // TODO: Handle cycles
+  public func lookupType() {
+
+  }
+}
+
+// Helper to aid with getting the main nominal-type declaration
+// on which we can actually perform qualified lookup.
+extension SymbolTable {
+  func lookupDeclGroups(_ type: IdentifierTypeSyntax?, config: LookupConfig) -> [DeclGroupSyntaxType] {
+    // TODO: Look into using unqualified lookup for this (look at reproducer example)
+    // TODO: Decide how to handle generic arguments, etc.
+    // FIXME: Support modules & module selectors
+    // FIXME: Use canonical types (perhaps when adding to symboltable hash using canonical names?)
+    // FIXME: Handle type aliases (handle no generics first; then with generics)
+    //        [how does the compiler handle type aliases?]
+    //        [typealiases only matter for extensions (nominal types can't use a type alias as a name),
+    //        so we could just internally know why we emitted an extension with a type alias but
+    //        not modify the extension decl (let the type checker deal with that) [but maybe include some more context]]
+    // let typeAlias = (1 as any Any) as! TypeAliasDeclSyntax
+
+    precondition(
+      type.moduleSelector == nil,
+      "[SwiftLexicalLookup] Internal eror: Name lookup doesn't support module selectors yet."
+    )
+    // Get the identifier from the name.
+    //
+    // According to the `IdentifierTypeSyntax.name` documentation, the name will be
+    // a valid identifier, `Any`, `Self` or `_`. The last three are invalid and hence
+    // not useful for top-level lookup.
+    // guard let typeName = type.name.identifier else { return [] }
+    // // Look up the type in the given file syntax.
+    // let types = fileSyntax.sequentialLookup(
+    //   in: fileSyntax.statements,
+    //   type.name,
+    //   at: type.position,
+    //   with: config
+    // )
+
+    // According to the `IdentifierTypeSyntax.name` documentation, the name will be
+    // a valid identifier, `Any`, `Self` or `_`. The last three are invalid and hence
+    // not useful for top-level lookup.
+    guard let typeName = type.map({ $0.name.identifier }) else { return [] }
+
+    return fileSyntax.statements.lazy
+
+      .compactMap({ stmt in DeclGroupSyntaxType(stmt.item) })
+      // Return declarations with matching types
+      .filter({ declGroup in declGroup.type == TypeSyntax(type) })
   }
 }
