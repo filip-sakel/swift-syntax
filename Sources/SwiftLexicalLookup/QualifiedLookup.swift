@@ -228,57 +228,73 @@ public enum QualifiedLookupResult {
 
 public class SymbolTable {
   let fileSyntax: SourceFileSyntax
-  lazy var globalTypes: [IdentifierTypeSyntax: [(DeclGroupSyntaxType, InheritanceClauseSyntax?, WhereClauseSyntax?)] = _comuteMapping(fileSyntax: fileSyntax)
+  lazy var globalTypes:
+    (
+      types: [Identifier: [DeclGroupSyntaxType]],
+      extensions: [TypeSyntax: [ExtensionDeclSyntax]],
+      aliases: [Identifier: [TypeAliasDeclSyntax]]
+    ) = SymbolTable._getTypes(of: fileSyntax)
   /// Construct a table for caching symbol lookup
   /// for the given file syntax.
   public init(fileSyntax: SourceFileSyntax) {
     self.fileSyntax = fileSyntax
   }
 
-  static func addCodeBlock(
+  static func _addCodeBlock(
     decl: DeclSyntax,
     types: inout [Identifier: [DeclGroupSyntaxType]],
     extensions: inout [TypeSyntax: [ExtensionDeclSyntax]],
     aliases: inout [Identifier: [TypeAliasDeclSyntax]]
   ) {
     // Look for declaration groups:
-    // 1. nominal types (structs, enums, classes, actors)
+    //   1. nominal types (structs, enums, classes, actors)
     if let nominalType = decl.asProtocol((any NominalTypeDeclSyntax).self),
-        let typeName = nominalType.name.identifier
+      let typeName = nominalType.name.identifier
     {
       types[typeName, default: []].append(DeclGroupSyntaxType(exactly: nominalType))
-    // 2. protocols (same as nominal types)
+      //   2. protocols (same as nominal types)
     } else if let protocolDecl = decl.as(ProtocolDeclSyntax.self),
-       let typeName = protocolDecl.name.identifier
+      let typeName = protocolDecl.name.identifier
     {
       types[typeName, default: []].append(DeclGroupSyntaxType(exactly: protocolDecl))
-    // 3. extensions (different because extensions can have a member type, e.g. `extension A.B {}`)
+      //   3. extensions (different because extensions can have a member type, e.g. `extension A.B {}`)
     } else if let extensionDecl = decl.as(ExtensionDeclSyntax.self) {
-      extensions[extensionDecl.extendedType, default: []].append(extensionDecl)
+      // Check the extended type isn't `Any` or `Self`; these are caught in Semantic Analysis
+      // but we don't want name lookup to get confused
+      // TODO: Check if this actually happens
+      // Make sure
+      guard extensionDecl.extendedType.description != "Any",
+        extensionDecl.extendedType.description != "Self"
+      else {
+        return
+      }
 
-    // Look for type aliases
+      extensions[extensionDecl.extendedType, default: []].append(extensionDecl)
+      // Look for type aliases
     } else if let typeAlias = decl.as(TypeAliasDeclSyntax.self),
-              let typeName = typeAlias.name.identifier
+      let typeName = typeAlias.name.identifier
     {
       aliases[typeName, default: []].append(typeAlias)
     }
   }
 
   // TODO: Technically, we know this can never be a protocol/extension (we can't nest
-  // these under types)
+  //       these under types)
   //
   /// Retrieve all types nested in the given declaration group (no recursion).
-  static func getNestedTypes(of group: DeclGroupSyntaxType) -> (
+  static func _getNestedTypes(
+    of group: DeclGroupSyntaxType
+  ) -> (
     nestedTypes: [Identifier: [DeclGroupSyntaxType]],
     aliases: [Identifier: [TypeAliasDeclSyntax]]
   ) {
     var nestedTypes = [Identifier: [DeclGroupSyntaxType]]()
     var aliases = [Identifier: [TypeAliasDeclSyntax]]()
     for member in group.memberBlock.members {
-      var extensions = [TypeSyntax: [ExtensionDeclSyntax]]()
-      addCodeBlock(decl: member.decl, types: &nestedTypes, extensions: &extensions, aliases: &aliases)
+      var nestedExtensions = [TypeSyntax: [ExtensionDeclSyntax]]()
+      _addCodeBlock(decl: member.decl, types: &nestedTypes, extensions: &nestedExtensions, aliases: &aliases)
       // TODO Handle extensions (tho they can't actually be nested, we could do it for diagnostic purposes)
-      _ = extensions
+      _ = nestedExtensions
     }
 
     return (nestedTypes, aliases)
@@ -286,23 +302,24 @@ public class SymbolTable {
 
   /// Retrieve all declaration groups in the top level of the given file syntax
   /// (no recursion).
-  static func getTypes(of fileSyntax: SourceFileSyntax) -> (
-    nestedTypes: [IdentifierTypeSyntax: DeclGroupSyntaxType],
-    aliases: [Identifier: TypeAliasDeclSyntax]
+  static func _getTypes(
+    of fileSyntax: SourceFileSyntax
+  ) -> (
+    types: [Identifier: [DeclGroupSyntaxType]],
+    extensions: [TypeSyntax: [ExtensionDeclSyntax]],
+    aliases: [Identifier: [TypeAliasDeclSyntax]]
   ) {
-    var nestedTypes  = [IdentifierTypeSyntax: any NominalTypeDeclSyntax]()
-    var aliases = [Identifier: TypeAliasDeclSyntax]()
+    var types = [Identifier: [DeclGroupSyntaxType]]()
+    var extensions = [TypeSyntax: [ExtensionDeclSyntax]]()
+    var aliases = [Identifier: [TypeAliasDeclSyntax]]()
 
     for stmt in fileSyntax.statements {
       // Only declarations can introduce types
       guard case .decl(let decl) = stmt.item else { continue }
-      // Process nominal types and protocols
+      // Process
+      _addCodeBlock(decl: decl, types: &types, extensions: &extensions, aliases: &aliases)
     }
-  }
-
-  static func _computeMapping(fileSyntax: SourceFileSyntax) -> [IdentifierTypeSyntax: DeclGroupSyntaxType] {
-    // TODO: Ensure extensions with `Any` aren't introduced
-
+    return (types, extensions, aliases)
   }
 }
 
@@ -337,14 +354,16 @@ extension DeclGroupSyntax {
     // FIXME: Implement
     []
   }
+}
 
+extension SymbolTable {
   // FIXME: Should support all Types
   // where identifier -> base global lookup
   //       member -> recursive on first, then it's our bread&butter
   //       compositions -> look into composing protocols&/types
   //       some T -> look into T (protocol or composition thereof, or class)
   //       any T -> look into (protocol or composition thereof, or class)
-  //                -- don't care if it's final; will be diagnosed later
+  //                (don't care if it's final; will be diagnosed later)
   //       T.self -> look into static members of T (look for static members)
   //       tuple -> if arity is known, return `.0, .1, ...` (no other members because
   //                that's not allowed for non-nominal types)
@@ -354,7 +373,113 @@ extension DeclGroupSyntax {
   //       pack element -> look into inheritance/where clauses of pack decl?
   //       suppressed type -> can't do anything yet (return dedicated result type)
   // TODO: Handle cycles
-  public func lookupType() {
+  public func _lookupType(type: TypeSyntax, config: QualifiedTableLookupConfig, into results: inout [LookupResult]) {
+    guard let identifier
+  }
+
+  /// Look up (named) members declared inside the given group declaration.
+  /// If an identifier is given, only return declaration matching that name.
+  /// If a given config-region is given, filter by that.
+  /// Handles if-configs
+  private func _lookupDirect(
+    on groupDecl: DeclGroupSyntax,
+    identifier: Identifier?,
+    configuredRegions: ConfiguredRegions?
+  ) -> [any NamedDeclSyntax] {
+    /// Process a member or a member nested inside an if-config declaration.
+    func processMemberInRegion(member: MemberBlockItemSyntax, configuredRegions: ConfiguredRegions) -> [any NamedDeclSyntax] {
+      // Add named-declaration members
+      if let namedDecl = member.decl.asProtocol((any NamedDeclSyntax).self) {
+        [namedDecl]
+      // For if-configs with an active clause constisting of declarations,
+      // process each declaration.
+      //
+      // We do this recursively to handle nested if-config declarations
+      } else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self),
+                      case .decls(let decls) = configuredRegions.activeClause(for: ifConfigDecl)?.elements {
+        decls.flatMap({ processMemberInRegion(member: $0, configuredRegions: configuredRegions) })
+      // No name, no gain
+      } else {
+        []
+      }
+    }
+
+    /// Process a member or a member nested inside an if-config declaration.
+    func processMember(member: MemberBlockItemSyntax) -> [any NamedDeclSyntax] {
+      if let namedDecl = member.decl.asProtocol((any NamedDeclSyntax).self) {
+        [namedDecl]
+      // Like above, but process all if-config clauses
+      } else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self) {
+        ifConfigDecl.clauses.flatMap({ clause -> [NamedDeclSyntax] in
+          guard case .decls(let members) = clause.elements else { return [] }
+          return members.flatMap({ processMember(member: $0) })
+        })
+      } else {
+        []
+      }
+    }
+
+    // Look up each member in the group declaration
+    return if let configuredRegions {
+      groupDecl.memberBlock.members.flatMap({ processMemberInRegion(member: $0, configuredRegions: configuredRegions) })
+    } else {
+      groupDecl.memberBlock.members.flatMap(processMember(member:))
+    }
+  }
+
+  private func _visitSupertypes(
+    of groupDecl: DeclGroupSyntax,
+    lookingFor identifier: Identifier?,
+    from lookupLocation: AbsolutePosition?,
+  )
+
+  // Finds decl groups nested in identifier types
+  // TODO: Attach inheritance&where clauses from extensions/typealiases
+  private func _lookupGlobalType(
+    type: IdentifierTypeSyntax,
+    identifier: Identifier?,
+    config: QualifiedTableLookupConfig,
+    into results: [QualifiedLookupResult]
+  ) {
+    // FIXME: Handle modules and module selectors
+    precondition(type.moduleSelector == nil, "[SwiftLexicalLookup] Internal error: Module selector not implemented yet.")
+    // Ensure identifier is valid (can't do lookup with invalid identifier)
+    guard let typeIdentifier = type.name.identifier else { return }
+
+    // Look inside main declaration (duplicate declarations should be diagnosed in
+    // later stages)
+    // If there are many declarations, assume last one is valid
+    // TODO: Check if compiler also gets the last decl
+    if let matchingTypeDecl = globalTypes.types[typeIdentifier]?.last {
+      results.append(.members(matchingTypeDecl.lookupMember(identifier, configuredRegions: config.configuredRegions), introducedIn: matchingTypeDecl))
+      matchingTypeDecl.lookupSuper
+      // TODO: Handle implicit-conformances/type-constraints from where clauses,
+      // along with inheritance clause + config.lookUpSuper[classes/protocols]
+      // E.g.
+      // let supertypeQuery = matchingTypeDecl.supertypes(config: config)
+      // if supertypeQuery.lookIntoWhere { results.append(.lookIntoWhereClause(matchingTypeDecl.genericWhereClause)) }
+      // if supertypeQuery.lookIntoInheritance { results.append(.lookIntoInheritanceClause(matchingTypeDecl.inheritanceClause)) }
+      // for supertype in supertypeQuery.supertypes {
+      //   _lookupType(type: supertype, config: config, into: &results)
+      // }
+    }
+    // Check out all extensions matching the name
+    // TODO: Ensure hashing works as expected for TypeSyntax (i.e. we use canonical type)
+    for extensionDecl in globalTypes.extensions[TypeSyntax(type)] ?? [] {
+      results.append(.exte)
+      extensionDecl.lookupMember(identifier, configuredRegions: config.configuredRegions)
+    }
+    // TODO: What if we have `struct A {}; typealias A = Int`? do we look up `Int` too?
+    if let typealiasDecls =
+    return result
+  }
+
+  func lookupNestedType(
+    type: MemberTypeSyntax,
+    identifier: Identifier?,
+    config: QualifiedTableLookupConfig,
+    into results: [QualifiedLookupResult]
+  ) {
 
   }
 }
