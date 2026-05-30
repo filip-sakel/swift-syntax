@@ -157,8 +157,17 @@ public struct DeclGroupSyntaxType: DeclGroupSyntax {
   ])
 }
 
+public enum QualifiedLookupResult2 {
+  case members([DeclSyntax], constraints: [GenericWhereClauseSyntax])
+}
+
 /// Contains the results of a qualified lookup request
 public enum QualifiedLookupResult {
+  public enum ImplicitDeclaration {
+    case `Type`
+    case `self`
+  }
+
   /// Explicitly declared members.
   ///
   /// Includes static/class/instance stored and computed properties,
@@ -175,7 +184,7 @@ public enum QualifiedLookupResult {
   /// Note that qualified lookup won't surface
   /// operator functions, objc functions using dynamic lookup, and
   /// generic parameters like `MyStruct.T` (semantically wrong).
-  case members([DeclSyntax], introducedIn: DeclSyntax)
+  case members([DeclSyntax], introducedIn: DeclGroupSyntaxType)
   /// Members declared in conditional extensions, e.g.
   /// ```
   /// extension Array where Element == Int {
@@ -187,13 +196,13 @@ public enum QualifiedLookupResult {
   /// clause.
   case conditionalMembers(
     [DeclSyntax],
-    introducedIn: DeclSyntax,
+    introducedIn: DeclGroupSyntaxType,
     inheritanceClause: InheritanceClauseSyntax?,
     genericClause: GenericWhereClauseSyntax?
   )
   /// Implicit members in the given group declaration like `self`,
   /// `Type` and synthesized initializers.
-  case implicitMembers([DeclSyntax], introducedIn: DeclGroupSyntaxType)
+  case implicitMembers([ImplicitDeclaration], introducedIn: DeclGroupSyntaxType)
   /// Types and protocols annotated with `@dynamicMemberLookup` have
   /// one or more subscripts with a `dynamicMember` string or keypath
   /// argument. We defer to the type-checker to determine what members
@@ -228,10 +237,10 @@ public enum QualifiedLookupResult {
 
 public class SymbolTable {
   let fileSyntax: SourceFileSyntax
-  lazy var globalTypes:
+  lazy var globalGroups:
     (
       types: [Identifier: [DeclGroupSyntaxType]],
-      extensions: [TypeSyntax: [ExtensionDeclSyntax]],
+      extensions: [CanonicalType: [ExtensionDeclSyntax]],
       aliases: [Identifier: [TypeAliasDeclSyntax]]
     ) = SymbolTable._getTypes(of: fileSyntax)
   /// Construct a table for caching symbol lookup
@@ -240,10 +249,110 @@ public class SymbolTable {
     self.fileSyntax = fileSyntax
   }
 
+  // indirect enum ResolvedType: Hashable {
+  //   case id(IdentifierTypeSyntax)
+  //   case member(MemberTypeSyntax, baseTypeMap: ResolvedType)
+  //   // TODO: Other types
+  //
+  //   case idMap(IdentifierTypeSyntax, canonicalType: ResolvedType, using: TypeAliasDeclSyntax)
+  //   case memberMap(MemberTypeSyntax, canonicalType: ResolvedType, using: TypeAliasDeclSyntax)
+  //
+  //   static func from(type: TypeSyntax, nestedAliases: borrowing [ResolvedType?: [Identifier: [TypeAliasDeclSyntax]]) -> [ResolvedType] {
+  //     // TODO: Other types
+  //     if let idType = type.as(IdentifierTypeSyntax.self) {
+  //       // Can't do anything with non-identifier name
+  //       guard let identifier = idType.name.identifier else { return [] }
+  //       // nil because it's not nested
+  //       let relevantMappings = nestedAliases[ResolvedType?.none, default: [:]][identifier, default: []]
+  //       let possibleResolutions = relevantMappings.map {
+  //         ResolvedType.idMap(idType, canonicalIdentifier: )
+  //       }
+  //     } else if let memberType = type.as(MemberTypeSyntax)
+  //   }
+  //
+  //   func hash(into hasher: inout Hasher) {
+  //     hasher.combine(canonicalType)
+  //   }
+  //   static func == (a: ResolvedType, b: ResolvedType) -> Bool {
+  //     a.canonicalType == b.canonicalType
+  //   }
+  //
+  //   var canonicalType: TypeSyntax {
+  //     // switch self {
+  //     // case let .id(idType):
+  //     //   TypeSyntax(idType)
+  //     // case let .member(memberType, baseTypeMap):
+  //     //   TypeSyntax(memberType.with(\.baseType, baseTypeMap.canonicalType))
+  //     // case let .idMap(idType, resolvedType, _):
+  //     //   resolvedType.canonicalType
+  //     // case let .memberMap(memberType, resolvedMemberType, _):
+  //     //   let canonicalMemberType = resolvedMemberType.canonicalType
+  //     //   switch resolvedMemberType {
+  //     //     case let .id(idType):
+  //     //       memberType.with(\.name, idType.name)
+  //     //     case let .
+  //     //   }
+  //     //   TypeSyntax(memberType.with(\.name, TokenSyntax.identifier(canonicalIdentifier.name)))
+  //     // }
+  //   }
+  // }
+  // TODO: Implement kinda like above
+  // FIXME: Add type-alias resolving
+  // E.g.
+  // struct LongStructNameElement {}
+  // struct LongStructName {
+  //   struct LongNestedName {}
+  //   typealias Element = LongStructNameElement
+  // }
+  // extension LongStructName.Element {} // This should match LongStructNameElement
+
+  // A unique way to refer to types.
+  //
+  // Note that at this stage, there may be multiple main
+  // declarations for each resolved type (invalid but diagnosed later),
+  // or none (e.g. extension references unknown type without type-aliases).
+  // `CanonicalType`s just provide unique identifier for looking up types.
+  struct CanonicalType: Hashable {
+    private let _type: TypeSyntax
+    private init(_type: TypeSyntax) {
+      self._type = _type
+    }
+
+    static func from(type: TypeSyntax) -> [CanonicalType] {
+      [CanonicalType(_type: type)]
+    }
+
+    /// Note that the resulting type may not refer to any valid main declaration
+    init(topLevelName: Identifier) {
+      _type = TypeSyntax(IdentifierTypeSyntax(name: .identifier(topLevelName.name)))
+    }
+
+    /// Returns nil if id token can't be converted to an identifier
+    private init?(_topLevelNominalType name: TokenSyntax) {
+      guard name.identifier != nil else { return nil }
+      _type = TypeSyntax(IdentifierTypeSyntax(name: name))
+    }
+    /// Nil if type's name can't be converted to an identifier.
+    init?(topLevelDecl: some NominalTypeDeclSyntax) {
+      self.init(_topLevelNominalType: topLevelDecl.name)
+    }
+    /// Nil if type's name can't be converted to an identifier.
+    init?(topLevelDecl: ProtocolDeclSyntax) {
+      self.init(_topLevelNominalType: topLevelDecl.name)
+    }
+  }
+
   static func _addCodeBlock(
     decl: DeclSyntax,
     types: inout [Identifier: [DeclGroupSyntaxType]],
-    extensions: inout [TypeSyntax: [ExtensionDeclSyntax]],
+    // TODO: Consider making this lazy
+    // Useful for quick member(nested)-type lookup. E.g.
+    // `UnicodeScalarIndex {}` is canonicalized to `String.UnicodeScalarView.Index`
+    // Also consider the following test case (should we do lookup on Int or not)?
+    //   struct A {}
+    //   typealias A = Int
+    // here, do we look up `Int` too?
+    extensions: inout [CanonicalType: [ExtensionDeclSyntax]],
     aliases: inout [Identifier: [TypeAliasDeclSyntax]]
   ) {
     // Look for declaration groups:
@@ -269,7 +378,10 @@ public class SymbolTable {
         return
       }
 
-      extensions[extensionDecl.extendedType, default: []].append(extensionDecl)
+      let possibleResolutions = CanonicalType.from(type: extensionDecl.extendedType)
+      for resolvedType in possibleResolutions {
+        extensions[resolvedType, default: []].append(extensionDecl)
+      }
       // Look for type aliases
     } else if let typeAlias = decl.as(TypeAliasDeclSyntax.self),
       let typeName = typeAlias.name.identifier
@@ -291,7 +403,7 @@ public class SymbolTable {
     var nestedTypes = [Identifier: [DeclGroupSyntaxType]]()
     var aliases = [Identifier: [TypeAliasDeclSyntax]]()
     for member in group.memberBlock.members {
-      var nestedExtensions = [TypeSyntax: [ExtensionDeclSyntax]]()
+      var nestedExtensions = [CanonicalType: [ExtensionDeclSyntax]]()
       _addCodeBlock(decl: member.decl, types: &nestedTypes, extensions: &nestedExtensions, aliases: &aliases)
       // TODO Handle extensions (tho they can't actually be nested, we could do it for diagnostic purposes)
       _ = nestedExtensions
@@ -306,11 +418,11 @@ public class SymbolTable {
     of fileSyntax: SourceFileSyntax
   ) -> (
     types: [Identifier: [DeclGroupSyntaxType]],
-    extensions: [TypeSyntax: [ExtensionDeclSyntax]],
+    extensions: [CanonicalType: [ExtensionDeclSyntax]],
     aliases: [Identifier: [TypeAliasDeclSyntax]]
   ) {
     var types = [Identifier: [DeclGroupSyntaxType]]()
-    var extensions = [TypeSyntax: [ExtensionDeclSyntax]]()
+    var extensions = [CanonicalType: [ExtensionDeclSyntax]]()
     var aliases = [Identifier: [TypeAliasDeclSyntax]]()
 
     for stmt in fileSyntax.statements {
@@ -357,6 +469,18 @@ extension DeclGroupSyntax {
 }
 
 extension SymbolTable {
+  enum MemberKind {
+    case all
+    case `static`(onlyTypes: Bool = false)
+
+    func addingStatic() -> MemberKind {
+      switch self {
+        case .all: .static()
+        case .static(let onlyTypes): .static(onlyTypes: onlyTypes)
+      }
+    }
+  }
+
   // FIXME: Should support all Types
   // where identifier -> base global lookup
   //       member -> recursive on first, then it's our bread&butter
@@ -373,19 +497,35 @@ extension SymbolTable {
   //       pack element -> look into inheritance/where clauses of pack decl?
   //       suppressed type -> can't do anything yet (return dedicated result type)
   // TODO: Handle cycles
-  public func _lookupType(type: TypeSyntax, config: QualifiedTableLookupConfig, into results: inout [LookupResult]) {
-    guard let identifier
+  private func _lookUpTypeMember(
+    type: TypeSyntax,
+    identifier: Identifier?,
+    kind memberKind: MemberKind,
+    config: QualifiedTableLookupConfig,
+    into results: inout [QualifiedLookupResult]
+  ) {
+    if let identifierType = type.as(IdentifierTypeSyntax.self) {
+      _lookUpGlobalTypeMember(type: identifierType, identifier: identifier, kind: memberKind, config: config, into: &results)
+    } else if let memberType = type.as(MemberTypeSyntax.self) {
+      _lookUpNestedTypeMember(type: memberType, identifier: identifier, kind: memberKind, config: config, into: &results)
+    } else {
+      fatalError("[SwiftLexicalLookup] Internal error: This type lookup \(type.kind) isn't implemented")
+    }
   }
 
-  /// Look up (named) members declared inside the given group declaration.
+  /// Find named member declarations in the given group declaration.
   /// If an identifier is given, only return declaration matching that name.
   /// If a configuredRegion is provided, consider only the active clause's
   /// members.
-  private func _lookupDirect(
-    on groupDecl: DeclGroupSyntax,
+  private func _addDirectMembers(
+    of groupDecl: DeclGroupSyntax,
     identifier: Identifier?,
-    configuredRegions: ConfiguredRegions?
-  ) -> [any NamedDeclSyntax] {
+    kind memberKind: MemberKind,
+    configuredRegions: ConfiguredRegions?,
+    to result: inout [any NamedDeclSyntax]
+  ) {
+    // FIXME: Filter by memberKind
+
     /// Process a member or a member nested inside an if-config declaration.
     func processMember(member: MemberBlockItemSyntax) -> [any NamedDeclSyntax] {
       // Add named-declaration members
@@ -411,15 +551,17 @@ extension SymbolTable {
       }
     }
 
-    // Look up each member in the group declaration
-    return groupDecl.memberBlock.members.flatMap(processMember(member:))
+    // Add each member in the group declaration
+    result.append(contentsOf: groupDecl.memberBlock.members.lazy.flatMap(processMember(member:)))
   }
 
   private func _visitSupertypes(
     of groupDecl: DeclGroupSyntax,
     lookingFor identifier: Identifier?,
-    from lookupLocation: AbsolutePosition?,
+    kind memberKind: MemberKind,
+    results: inout [QualifiedLookupResult]
   ) {
+    fatalError("[SwiftLexicalLookup] Internal error: Supertypes not implemented yet.")
     // Supertypes show up in:
     // 1. inheritance clauses
     //    (for nominal types+protocols+extensions)
@@ -433,54 +575,137 @@ extension SymbolTable {
     //    2. Contraints on generic parameter's don't impose supertype constraints on `Self`
   }
 
+  private func _lookUpGroupMembers(
+    group: DeclGroupSyntaxType,
+    identifier: Identifier?,
+    kind memberKind: MemberKind,
+    config: QualifiedTableLookupConfig,
+    into results: inout [QualifiedLookupResult]
+  ) {
+    // Add direct members
+    var directMembers = [any NamedDeclSyntax]()
+    _addDirectMembers(
+      of: group, identifier: identifier, kind: memberKind, configuredRegions: config.configuredRegions,
+      to: &directMembers)
+    // We assume NamedDeclSyntax is a DeclSyntax
+    // TODO: Look for more elegant solution
+    results.append(.members(directMembers.map({ DeclSyntax($0)! }), introducedIn: group))
+
+    // Visit supertypes
+    _visitSupertypes(of: group, lookingFor: identifier, kind: memberKind, results: &results)
+  }
+
   // Finds decl groups nested in identifier types
   // TODO: Attach inheritance&where clauses from extensions/typealiases
-  private func _lookupGlobalType(
+  private func _lookUpGlobalTypeMember(
     type: IdentifierTypeSyntax,
     identifier: Identifier?,
+    kind memberKind: MemberKind,
     config: QualifiedTableLookupConfig,
-    into results: [QualifiedLookupResult]
+    into results: inout [QualifiedLookupResult]
+  ) {
+    // FIXME: Handle modules and module selectors
+    precondition(type.moduleSelector == nil, "[SwiftLexicalLookup] Internal error: Module selector not implemented yet.")
+    // Ensure type identifier is valid (can't do lookup with invalid identifier)
+    guard let typeIdentifier = type.name.identifier else { return }
+
+    // Look inside main declaration
+    // If there are many declarations, assume last one is valid (duplicate
+    // declarations should be diagnosed in later stages)
+    // TODO: Check if compiler also gets the last decl
+    if let matchingTypeDecl = globalGroups.types[typeIdentifier]?.last {
+      _lookUpGroupMembers(group: matchingTypeDecl, identifier: identifier, kind: memberKind, config: config, into: &results)
+    }
+  }
+
+  func _findMainDeclsOfNestedType(
+    type: MemberTypeSyntax,
+    identifier: Identifier?,
+    config: QualifiedTableLookupConfig,
+    into results: inout [QualifiedLookupResult]
+  ) {
+    // TODO: Move _lookUpNestedTypeMember part into here
+  }
+  func _findExtensionsOfNestedType(
+
+  )
+
+  func _lookUpNestedTypeMember(
+    type: MemberTypeSyntax,
+    identifier: Identifier?,
+    kind memberKind: MemberKind,
+    config: QualifiedTableLookupConfig,
+    into results: inout [QualifiedLookupResult]
   ) {
     // FIXME: Handle modules and module selectors
     precondition(type.moduleSelector == nil, "[SwiftLexicalLookup] Internal error: Module selector not implemented yet.")
     // Ensure identifier is valid (can't do lookup with invalid identifier)
     guard let typeIdentifier = type.name.identifier else { return }
 
-    // Look inside main declaration (duplicate declarations should be diagnosed in
-    // later stages)
-    // If there are many declarations, assume last one is valid
-    // TODO: Check if compiler also gets the last decl
-    if let matchingTypeDecl = globalTypes.types[typeIdentifier]?.last {
-      results.append(.members(matchingTypeDecl.lookupMember(identifier, configuredRegions: config.configuredRegions), introducedIn: matchingTypeDecl))
-      matchingTypeDecl.lookupSuper
-      // TODO: Handle implicit-conformances/type-constraints from where clauses,
-      // along with inheritance clause + config.lookUpSuper[classes/protocols]
-      // E.g.
-      // let supertypeQuery = matchingTypeDecl.supertypes(config: config)
-      // if supertypeQuery.lookIntoWhere { results.append(.lookIntoWhereClause(matchingTypeDecl.genericWhereClause)) }
-      // if supertypeQuery.lookIntoInheritance { results.append(.lookIntoInheritanceClause(matchingTypeDecl.inheritanceClause)) }
-      // for supertype in supertypeQuery.supertypes {
-      //   _lookupType(type: supertype, config: config, into: &results)
-      // }
+    // Process "implicit" types that aren't really types
+    guard typeIdentifier.name != "self" else {
+      // Forward lookup to the base type
+      _lookUpTypeMember(type: type.baseType, identifier: identifier, kind: memberKind, config: config, into: &results)
+      return
     }
-    // Check out all extensions matching the name
-    // TODO: Ensure hashing works as expected for TypeSyntax (i.e. we use canonical type)
-    for extensionDecl in globalTypes.extensions[TypeSyntax(type)] ?? [] {
-      results.append(.exte)
-      extensionDecl.lookupMember(identifier, configuredRegions: config.configuredRegions)
+    // TODO: Figure out how to handle this (currently we include nothing)
+    guard typeIdentifier.name != "Type" else {
+      return
     }
-    // TODO: What if we have `struct A {}; typealias A = Int`? do we look up `Int` too?
-    if let typealiasDecls =
-    return result
-  }
 
-  func lookupNestedType(
-    type: MemberTypeSyntax,
-    identifier: Identifier?,
-    config: QualifiedTableLookupConfig,
-    into results: [QualifiedLookupResult]
-  ) {
+    // Two scopes can introduce members in nested types. The main declaration
+    // and any top-level extensions (nested extensions are currently illegal).
+    // Each of these scopes can either have member declarations or introduce
+    // supertypes.
 
+    // For one, get the main declaration.
+    // Get possible declarations by looking up through the base type
+    var nestedTypeDecls = [QualifiedLookupResult]()
+    _lookUpTypeMember(type: type.baseType, identifier: typeIdentifier, kind: .static(onlyTypes: true), config: config, into: &nestedTypeDecls)
+    // Filter down to nominal-type declarations.
+    //
+    // At this point, we may have many such declarations. Here's a
+    // well-formed example:
+    //    // FileA.swift
+    //    struct A { fileprivate struct B {} }
+    //    // FileB.swift
+    //    extension A { fileprivate struct B {} }
+    // But putting these in the same file makes the above an illegal program.
+    // Either way, for now we keep both.
+    // TODO: Look at how compiler handles many
+    // TODO: Look at how potential access control influences lookup
+    // TODO: Look at how to handle `lookFor[..]` queries
+    var extendedLookup = [QualifiedLookupResult]()
+    var mainDecls = [CanonicalType: DeclGroupSyntaxType]()
+    for result in nestedTypeDecls {
+      switch result {
+      case .members(let decls, _):
+        // Ensure look up gave us nominal declarations
+        mainDecls.append(contentsOf: decls.lazy.map({
+          guard let nominalType = $0.asProtocol((any NominalTypeDeclSyntax).self) else {
+            assertionFailure("[SwiftLexicalLookup] Internal assertion failure: Expected only nominal types after performing type-only lookup.")
+          }
+          return DeclGroupSyntaxType(exactly: nominalType)
+        })
+      case .implicitMembers(_, _):
+        // Handled above so lookup shouldn't surface implicit members when the requested
+        // identifier isn't one.
+        assertionFailure("[SwiftLexicalLookup] Internal assertion failure: Expected no implicit members aftering filtering out `Type` and `self`.")
+      case .conditionalMembers(let conditionalDecls, _, _, _):
+        // Ignore inheritance/where clauses for now
+        mainDecls.append(contentsOf: conditionalDecls.lazy.compactMap(DeclGroupSyntaxType.init(_:)))
+      case .lookForDynamicMembers, .lookForSupertypes, .lookForMacros:
+        extendedLookup.append(result)
+      }
+    }
+    let mainDecls =
+
+    // Find extensions for each main decl
+    for mainDeclType in mainDecls.keys {
+      let possibleExtensions = globalGroups.extensions[mainDeclType, default: []]
+      possibleExtensions
+    }
+    // Look up on main
   }
 }
 
