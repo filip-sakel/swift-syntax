@@ -533,8 +533,8 @@ extension SymbolTable {
     }
   }
 
-  private func _castAsNamedDecl(decl: DeclSyntax) -> (any (NamedDeclSyntax & DeclSyntaxProtocol))? {
-    Syntax(decl).asProtocol(SyntaxProtocol.self) as? any (NamedDeclSyntax & DeclSyntaxProtocol)
+  private func _castAsNamedDecl(decl: any NamedDeclSyntax) -> (any (NamedDeclSyntax & DeclSyntaxProtocol)) {
+    Syntax(decl).asProtocol(SyntaxProtocol.self) as! any (NamedDeclSyntax & DeclSyntaxProtocol)
   }
 
   /// Find named member declarations in the given group declaration.
@@ -550,9 +550,9 @@ extension SymbolTable {
     // FIXME: Filter by memberKind
 
     /// Process a member or a member nested inside an if-config declaration.
-    func processMember(member: MemberBlockItemSyntax) -> [any NamedDeclSyntax & DeclSyntaxProtocol] {
+    func processMember(member: MemberBlockItemSyntax) -> [NamedDeclSyntax] {
       // Add named-declaration members
-      if let namedDecl: any (NamedDeclSyntax & DeclSyntaxProtocol) = _castAsNamedDecl(decl: member.decl) {
+      if let namedDecl: any NamedDeclSyntax = member.decl.asProtocol((any NamedDeclSyntax).self) {
         [namedDecl]
 
         // If configuredRegions is set, visit the members of the active clause (if it exists)
@@ -576,7 +576,10 @@ extension SymbolTable {
     }
 
     // Add each member in the group declaration
-    return groupDecl.memberBlock.members.lazy.flatMap(processMember(member:))
+    return groupDecl.memberBlock.members.lazy
+      .flatMap(processMember(member:))
+      // We do this because NamedDeclSyntax doesn't inherit from DeclSyntaxProtocol
+      .map(_castAsNamedDecl(decl:))
   }
 
   private func _visitSupertypes(
@@ -725,7 +728,7 @@ extension SymbolTable {
     //     metaInt /*: Int.Type */ = metaMetaInt
     //   }
     // Both fail, showing that Int.Type.Type != Int.Type
-    guard typeIdentifier.name != "Type" else {}
+    guard typeIdentifier.name != "Type" else { return }
 
     // Two scopes can introduce members in nested types. The main declaration
     // and any top-level extensions (nested extensions are currently illegal).
@@ -790,7 +793,7 @@ extension SymbolTable {
             contentsOf: decls.lazy.map({
               // Ensure look up gave us nominal declarations
               guard let nominalType = $0.asProtocol((any NominalTypeDeclSyntax).self) else {
-                assertionFailure(
+                fatalError(
                   "[SwiftLexicalLookup] Internal assertion failure: Expected only nominal types after performing type-only lookup."
                 )
               }
