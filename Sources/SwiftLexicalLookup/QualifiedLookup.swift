@@ -379,59 +379,59 @@ extension SymbolTable {
 
   /// Look up (named) members declared inside the given group declaration.
   /// If an identifier is given, only return declaration matching that name.
-  /// If a given config-region is given, filter by that.
-  /// Handles if-configs
+  /// If a configuredRegion is provided, consider only the active clause's
+  /// members.
   private func _lookupDirect(
     on groupDecl: DeclGroupSyntax,
     identifier: Identifier?,
     configuredRegions: ConfiguredRegions?
   ) -> [any NamedDeclSyntax] {
     /// Process a member or a member nested inside an if-config declaration.
-    func processMemberInRegion(member: MemberBlockItemSyntax, configuredRegions: ConfiguredRegions) -> [any NamedDeclSyntax] {
+    func processMember(member: MemberBlockItemSyntax) -> [any NamedDeclSyntax] {
       // Add named-declaration members
       if let namedDecl = member.decl.asProtocol((any NamedDeclSyntax).self) {
         [namedDecl]
-      // For if-configs with an active clause constisting of declarations,
-      // process each declaration.
+
+      // If configuredRegions is set, visit the members of the active clause (if it exists)
       //
       // We do this recursively to handle nested if-config declarations
       } else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self),
-                      case .decls(let decls) = configuredRegions.activeClause(for: ifConfigDecl)?.elements {
-        decls.flatMap({ processMemberInRegion(member: $0, configuredRegions: configuredRegions) })
+                let configuredRegions,
+                case .decls(let members) = configuredRegions.activeClause(for: ifConfigDecl)?.elements {
+        members.flatMap(processMember(member:))
+      // If configuredRegions is nil, visit all if-config clauses
+      } else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self) {
+        ifConfigDecl.clauses.flatMap({ clause -> [NamedDeclSyntax] in
+          guard case .decls(let members) = clause.elements else { return [] }
+          return members.flatMap(processMember(member:))
+        })
       // No name, no gain
       } else {
         []
       }
     }
 
-    /// Process a member or a member nested inside an if-config declaration.
-    func processMember(member: MemberBlockItemSyntax) -> [any NamedDeclSyntax] {
-      if let namedDecl = member.decl.asProtocol((any NamedDeclSyntax).self) {
-        [namedDecl]
-      // Like above, but process all if-config clauses
-      } else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self) {
-        ifConfigDecl.clauses.flatMap({ clause -> [NamedDeclSyntax] in
-          guard case .decls(let members) = clause.elements else { return [] }
-          return members.flatMap({ processMember(member: $0) })
-        })
-      } else {
-        []
-      }
-    }
-
     // Look up each member in the group declaration
-    return if let configuredRegions {
-      groupDecl.memberBlock.members.flatMap({ processMemberInRegion(member: $0, configuredRegions: configuredRegions) })
-    } else {
-      groupDecl.memberBlock.members.flatMap(processMember(member:))
-    }
+    return groupDecl.memberBlock.members.flatMap(processMember(member:))
   }
 
   private func _visitSupertypes(
     of groupDecl: DeclGroupSyntax,
     lookingFor identifier: Identifier?,
     from lookupLocation: AbsolutePosition?,
-  )
+  ) {
+    // Supertypes show up in:
+    // 1. inheritance clauses
+    //    (for nominal types+protocols+extensions)
+    // 2. where clauses of the form `Self : Supertype`
+    //    (also for nominal types+protocols+extensions)
+    //    Note that it will always be `Self` because:
+    //    1. A supertype constraint in that position is a generic parameter or `Self`
+    //       1. It can't be a reference of `Self` like a typealias because the following fails:
+    //          typealias A<T> = B<T>
+    //          struct B<T> where A<T>: CustomStringConvertible {}
+    //    2. Contraints on generic parameter's don't impose supertype constraints on `Self`
+  }
 
   // Finds decl groups nested in identifier types
   // TODO: Attach inheritance&where clauses from extensions/typealiases
