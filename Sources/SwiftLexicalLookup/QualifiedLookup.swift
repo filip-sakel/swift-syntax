@@ -13,6 +13,14 @@
 import SwiftIfConfig
 import SwiftSyntax
 
+// TODO: Consider ValueDeclSyntax
+/// A declaration that provides a value; like `NamedDeclSyntax` but more specific?:
+///   value-decl := abstract-storage-decl | abstract-function-decl | type-decl | macro-decl | enum-element-decl
+
+// TODO: Consider making `NominalTypeDeclSyntax` include protocols
+// and make it a concrete type (instead of a protocol) like in the
+// compiler's version. This will simplify a lot of the handling here.
+
 public struct QualifiedLookupConfig {
   public var configuredRegions: ConfiguredRegions? = nil
 
@@ -79,7 +87,7 @@ public struct DeclGroupSyntaxType: DeclGroupSyntax {
     }
   }
 
-  fileprivate init(exactly node: some DeclGroupSyntax) {
+  init(exactly node: some DeclGroupSyntax) {
     box = node
   }
   // public var identifier: Identifier? {
@@ -155,11 +163,16 @@ public struct DeclGroupSyntaxType: DeclGroupSyntax {
     .node(StructDeclSyntax.self), .node(EnumDeclSyntax.self), .node(ClassDeclSyntax.self),
     .node(ActorDeclSyntax.self), .node(ProtocolDeclSyntax.self), .node(ExtensionDeclSyntax.self),
   ])
+
+  @_spi(Experimental)
+  public var _asLookInMembersScope: LookInMembersScopeSyntax? {
+    Syntax(self).asProtocol((any SyntaxProtocol).self) as? any LookInMembersScopeSyntax
+  }
 }
 
-public enum QualifiedLookupResult2 {
-  case members([DeclSyntax], constraints: [GenericWhereClauseSyntax])
-}
+// public enum QualifiedLookupResult2 {
+//   case members([DeclSyntax], constraints: [GenericWhereClauseSyntax])
+// }
 
 /// Contains the results of a qualified lookup request
 public enum QualifiedLookupResult {
@@ -541,6 +554,9 @@ extension SymbolTable {
   /// If an identifier is given, only return declaration matching that name.
   /// If a configuredRegion is provided, consider only the active clause's
   /// members.
+  ///
+  /// TODO: Add flags like (@abi, @_implements, macro expansions) like in the compiler's version
+  /// at Decl.h:16
   private func _getDirectMembers(
     of groupDecl: DeclGroupSyntax,
     identifier: Identifier?,
@@ -550,6 +566,9 @@ extension SymbolTable {
     // FIXME: Filter by memberKind
 
     /// Process a member or a member nested inside an if-config declaration.
+    ///
+    /// This pattern is similar to the SyntaxVisitor pattern, but a SyntaxVisitor
+    /// doesn't work because we use protocols like `NamedDeclSyntax`
     func processMember(member: MemberBlockItemSyntax) -> [NamedDeclSyntax] {
       // Add named-declaration members
       if let namedDecl: any NamedDeclSyntax = member.decl.asProtocol((any NamedDeclSyntax).self) {
@@ -851,4 +870,212 @@ extension SymbolTable {
       }
     }
   }
+}
+
+// MARK: - Compiler Validation
+
+extension SymbolTable {
+  // enum NLOptions : unsigned {
+  //   /// Consider declarations within protocols to which the context type conforms.
+  //   NL_ProtocolMembers = 1 << 0,
+  //
+  //   /// Remove non-visible declarations from the set of results.
+  //   NL_RemoveNonVisible = 1 << 1,
+  //
+  //   /// Remove overridden declarations from the set of results.
+  //   NL_RemoveOverridden = 1 << 2,
+  //
+  //   /// Remove associated type declarations from the set of results. This is used
+  //   /// by conformance checking for resolving type witnesses.
+  //   NL_RemoveAssociatedTypes = 1 << 3,
+  //
+  //   /// Don't check access when doing lookup into a type.
+  //   ///
+  //   /// When performing lookup into a module, this option only applies to
+  //   /// declarations in the same module the lookup is coming from.
+  //   NL_IgnoreAccessControl = 1 << 4,
+  //
+  //   /// This lookup should only return type declarations.
+  //   NL_OnlyTypes = 1 << 5,
+  //
+  //   /// Include synonyms declared with @_implements()
+  //   NL_IncludeAttributeImplements = 1 << 6,
+  //
+  //   // Include @usableFromInline and @inlinable
+  //   NL_IncludeUsableFromInline = 1 << 7,
+  //
+  //   /// Exclude names introduced by macro expansions in the top-level module.
+  //   NL_ExcludeMacroExpansions = 1 << 8,
+  //
+  //   /// This lookup should only return macro declarations.
+  //   NL_OnlyMacros = 1 << 9,
+  //
+  //   /// Include members that would otherwise be filtered out because they come
+  //   /// from a module that has not been imported.
+  //   NL_IgnoreMissingImports = 1 << 10,
+  //
+  //   /// If @abi attributes are present, return the decls representing the ABI,
+  //   /// not the API.
+  //   NL_ABIProviding = 1 << 11,
+  //
+  //   /// The default set of options used for qualified name lookup.
+  //   ///
+  //   /// FIXME: Eventually, add NL_ProtocolMembers to this, once all of the
+  //   /// callers can handle it.
+  //   NL_QualifiedDefault = NL_RemoveNonVisible | NL_RemoveOverridden,
+  //
+  //   /// The default set of options used for unqualified name lookup.
+  //   NL_UnqualifiedDefault = NL_RemoveNonVisible | NL_RemoveOverridden
+  // };
+  public struct LookupOptions: OptionSet, Sendable {
+    // TODO: Convert to option sets
+
+    // enum Source: UInt8 { case superProtocols, superClasses, macroExpansions, abi, implements }
+    // let sources: Set<Source>
+    // let includeMissingImports: Bool
+    //
+    // enum TargetDecl: UInt8 { case macros, static(onlyTypes: Bool = false), protocolMembers(withAssociatedTypes: Bool = true),   }
+    // let targetDecls: Set<TargetDecl>
+    // let nonVisible
+
+    public let rawValue: UInt32
+    public init(rawValue: UInt32) {
+      self.rawValue = rawValue
+    }
+
+    /// Consider declarations within protocols to which the context type conforms.
+    public static let protocolMembers =
+      LookupOptions(rawValue: 1 << 0)
+
+    /// Remove non-visible declarations from the set of results.
+    public static let removeNonVisible =
+      LookupOptions(rawValue: 1 << 1)
+
+    /// Remove overridden declarations from the set of results.
+    public static let removeOverridden =
+      LookupOptions(rawValue: 1 << 2)
+
+    /// Remove associated type declarations from the set of results.
+    /// This is used by conformance checking for resolving type witnesses.
+    public static let removeAssociatedTypes =
+      LookupOptions(rawValue: 1 << 3)
+
+    /// Don't check access when doing lookup into a type.
+    ///
+    /// When performing lookup into a module, this option only applies to
+    /// declarations in the same module the lookup is coming from.
+    public static let ignoreAccessControl =
+      LookupOptions(rawValue: 1 << 4)
+
+    /// This lookup should only return type declarations.
+    public static let onlyTypes =
+      LookupOptions(rawValue: 1 << 5)
+
+    /// Include synonyms declared with @_implements()
+    public static let includeAttributeImplements =
+      LookupOptions(rawValue: 1 << 6)
+
+    /// Include @usableFromInline and @inlinable
+    public static let includeUsableFromInline =
+      LookupOptions(rawValue: 1 << 7)
+
+    /// Exclude names introduced by macro expansions in the top-level module.
+    public static let excludeMacroExpansions =
+      LookupOptions(rawValue: 1 << 8)
+
+    /// This lookup should only return macro declarations.
+    public static let onlyMacros =
+      LookupOptions(rawValue: 1 << 9)
+
+    /// Include members that would otherwise be filtered out because they come
+    /// from a module that has not been imported.
+    public static let ignoreMissingImports =
+      LookupOptions(rawValue: 1 << 10)
+
+    /// If @abi attributes are present, return the decls representing the ABI,
+    /// not the API.
+    public static let abiProviding =
+      LookupOptions(rawValue: 1 << 11)
+
+    /// The default set of options used for qualified name lookup.
+    ///
+    /// FIXME: Eventually, add `protocolMembers` to this, once all callers can handle it.
+    public static let qualifiedDefault: LookupOptions = [.removeNonVisible, .removeOverridden]
+
+    /// The default set of options used for unqualified name lookup.
+    public static let unqualifiedDefault: LookupOptions = [.removeNonVisible, .removeOverridden]
+  }
+
+  /// Look for the set of declarations with the given name within a type,
+  /// its extensions and, optionally, its supertypes.
+  ///
+  /// This routine performs name lookup within a given type, its extensions
+  /// and, optionally, its supertypes and their extensions, from the perspective
+  /// of the current DeclContext. It can eliminate non-visible, hidden, and
+  /// overridden declarations from the result set. It does not, however, perform
+  /// any filtering based on the semantic usefulness of the results.
+  ///
+  /// \param type The type to look into.
+  ///
+  /// \param member The member to search for.
+  ///
+  /// \param options Options that control name lookup, based on the
+  /// \c NL_* constants in \c NameLookupOptions.
+  ///
+  /// \param[out] decls Will be populated with the declarations found by name
+  /// lookup.
+  ///
+  /// \returns true if anything was found.
+  // bool lookupQualified(Type type, DeclNameRef member,
+  //                      SourceLoc loc, NLOptions options,
+  //                      SmallVectorImpl<ValueDecl *> &decls) const;
+  public func lookupMember(
+    withIdentifier memberIdentifier: Identifier,
+    inType type: TypeSyntax,
+    atLocation location: AbsolutePosition,
+    options: LookupOptions
+  ) -> [any NamedDeclSyntax] {
+    var perTypeResults = [CanonicalType: [QualifiedLookupResult]]()
+    _lookUpTypeMember(
+      type: type,
+      identifier: memberIdentifier,
+      kind: options.contains(.onlyTypes) ? .static(onlyTypes: true) : .all,
+      config: QualifiedTableLookupConfig(
+        lookupSuperprotocols: options.contains(.protocolMembers),
+        lookupSuperclasses: true,  // TODO: I don't know if this is the compiler's default
+        configuredRegions: nil
+      ),
+      into: &perTypeResults
+    )
+
+    return perTypeResults.flatMap({ (_, results: [QualifiedLookupResult]) -> [any NamedDeclSyntax] in
+      results.flatMap({ (result: QualifiedLookupResult) -> [any NamedDeclSyntax] in
+        switch result {
+        case .members(let decls, _), .conditionalMembers(let decls, _, _, _):
+          decls.map({ $0.asProtocol((any NamedDeclSyntax).self)! })
+        case .implicitMembers, .lookForDynamicMembers, .lookForMacros, .lookForSupertypes:
+          []
+        }
+      })
+    })
+  }
+
+  /// Look for the set of declarations with the given name within the
+  /// given set of nominal type declarations.
+  ///
+  /// \param types The type declarations to look into.
+  ///
+  /// \param member The member to search for.
+  ///
+  /// \param options Options that control name lookup, based on the
+  /// \c NL_* constants in \c NameLookupOptions.
+  ///
+  /// \param[out] decls Will be populated with the declarations found by name
+  /// lookup.
+  ///
+  /// \returns true if anything was found.
+  // bool lookupQualified(ArrayRef<NominalTypeDecl *> types, DeclNameRef member,
+  //                      SourceLoc loc, NLOptions options,
+  //                      SmallVectorImpl<ValueDecl *> &decls) const;
+
 }
