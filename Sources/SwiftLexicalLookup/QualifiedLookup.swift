@@ -607,7 +607,7 @@ extension SymbolTable {
     kind memberKind: MemberKind,
     results: inout [CanonicalType: [QualifiedLookupResult]]
   ) {
-    fatalError("[SwiftLexicalLookup] Internal error: Supertypes not implemented yet.")
+    print("[SwiftLexicalLookup] Internal warning: Supertypes not implemented yet.")
     // Supertypes show up in:
     // 1. inheritance clauses
     //    (for nominal types+protocols+extensions)

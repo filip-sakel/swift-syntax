@@ -755,6 +755,42 @@ final class TestNameLookup: XCTestCase {
       ]
     )
   }
+  func testTypeDeclAvailabilityInTopLevel() {
+    let declExpectation: [ResultExpectation] = [
+      .fromScope(
+        CodeBlockSyntax.self,
+        expectedNames: [
+          NameExpectation.declaration("2️⃣"),
+          NameExpectation.declaration("5️⃣"),
+          NameExpectation.declaration("8️⃣"),
+        ]
+      )
+    ]
+
+    assertLexicalNameLookup(
+      source: """
+        1️⃣a
+        2️⃣class a {}
+        3️⃣a
+        guard let x = Optional(0) else { fatalError() }
+        4️⃣a
+        5️⃣actor a {}
+        6️⃣a
+        guard let x = Optional(1) else { fatalError() }
+        7️⃣a
+        8️⃣struct a {}
+        9️⃣a
+        """,
+      references: [
+        "1️⃣": declExpectation,
+        "3️⃣": declExpectation,
+        "4️⃣": declExpectation,
+        "6️⃣": declExpectation,
+        "7️⃣": declExpectation,
+        "9️⃣": declExpectation,
+      ]
+    )
+  }
 
   func testNonMatchingGuardScopeDoesntPartitionResult() {
     assertLexicalNameLookup(
