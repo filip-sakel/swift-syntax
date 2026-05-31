@@ -53,6 +53,10 @@ import SwiftSyntax
 // and make it a concrete type (instead of a protocol) like in the
 // compiler's version. This will simplify a lot of the handling here.
 
+public struct NamedDeclSyntax {
+  init?()
+}
+
 public struct QualifiedLookupConfig {
   public var configuredRegions: ConfiguredRegions? = nil
 
