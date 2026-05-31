@@ -226,6 +226,17 @@ public struct ValueDeclSyntax: DeclSyntaxProtocol, SyntaxHashable {
       fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
     }
   }
+
+  /// Whether the declaration is a type declaration, meaning it introduces a
+  /// new type (or alias thereof).
+  var isTypeDecl: Bool {
+    switch _syntaxNode.kind {
+    case .structDecl, .enumDecl, .classDecl, .actorDecl, .protocolDecl, .typeAliasDecl, .associatedTypeDecl:
+      return true
+    default:
+      return false
+    }
+  }
 }
 
 // MARK: Inits

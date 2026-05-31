@@ -531,12 +531,18 @@ enum MemberKind {
 
 extension NamedDeclSyntax {
   func isKind(_ memberKind: MemberKind) -> Bool {
-    switch self {
+    switch memberKind {
     case .all:
-      true
+      return true
     case .static(let onlyTypes):
-      decl.modifiers.contains(where: { $0.name.tokenKind == .staticKeyword })
-        && (!onlyTypes || decl.isProtocolOrExtensionDecl)
+      let valueDecl = self.as(ValueDeclSyntax.self)!
+      if onlyTypes {
+        return valueDecl.isTypeDecl
+      } else {
+        // If it's ambiguous whether this is static (e.g. a macro decl returns isStatic==nil),
+        // default to false to hide thid decl.
+        return valueDecl.isStatic ?? false
+      }
     }
   }
 }
