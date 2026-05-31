@@ -13,6 +13,38 @@
 import SwiftIfConfig
 import SwiftSyntax
 
+// TODO: Find more robust way to expose these.
+// TODO: Add a test for each one of these to ensure nothing breaks them.
+// We know the only possible `NamedDeclSyntax` types are:
+// 1. ActorDeclSyntax
+// 2. AssociatedTypeDeclSyntax
+// 3. ClassDeclSyntax
+// 4. EnumDeclSyntax
+// 5. FunctionDeclSyntax
+// 6. MacroDeclSyntax
+// 7. OperatorDeclSyntax
+// 8. PrecedenceGroupDeclSyntax
+// 9. ProtocolDeclSyntax
+// 10. StructDeclSyntax
+// 11. TypeAliasDeclSyntax
+//
+// All of these support both modifiers and attributes, so cast them.
+// extension NamedDeclSyntax {
+//   var modifiers: DeclModifierListSyntax {
+//     guard let withModifiers = asProtocol((any WithModifiersSyntax).self) else {
+//       fatalError("[SwiftLexicalLookup] Internal error: Since \(Self.self) conforms to `NamedDeclSyntax`, we expected it to also conform to `WithModifiersSyntax`.")
+//     }
+//     return withModifiers.modifiers
+//   }
+
+//   var attributes: AttributeListSyntax {
+//     guard let withAttributes = asProtocol((any WithAttributesSyntax).self) else {
+//       fatalError("[SwiftLexicalLookup] Internal error: Since \(Self.self) conforms to `NamedDeclSyntax`, we expected it to also conform to `WithAttributesSyntax`.")
+//     }
+//     return withAttributes.attributes
+//   }
+// }
+
 // TODO: Consider ValueDeclSyntax
 /// A declaration that provides a value; like `NamedDeclSyntax` but more specific?:
 ///   value-decl := abstract-storage-decl | abstract-function-decl | type-decl | macro-decl | enum-element-decl
@@ -482,20 +514,32 @@ public class SymbolTable {
 //   }
 // }
 
-// TODO: Extend to types within functions
-extension SymbolTable {
-  enum MemberKind {
-    case all
-    case `static`(onlyTypes: Bool = false)
+enum MemberKind {
+  case all
+  case `static`(onlyTypes: Bool = false)
 
-    func addingStatic() -> MemberKind {
-      switch self {
-      case .all: .static()
-      case .static(let onlyTypes): .static(onlyTypes: onlyTypes)
-      }
+  func addingStatic() -> MemberKind {
+    switch self {
+    case .all: .static()
+    case .static(let onlyTypes): .static(onlyTypes: onlyTypes)
     }
   }
+}
 
+extension NamedDeclSyntax {
+  func isKind(_ memberKind: MemberKind) -> Bool {
+    switch self {
+    case .all:
+      true
+    case .static(let onlyTypes):
+      decl.modifiers.contains(where: { $0.name.tokenKind == .staticKeyword })
+        && (!onlyTypes || decl.isProtocolOrExtensionDecl)
+    }
+  }
+}
+
+// TODO: Extend to types within functions
+extension SymbolTable {
   // FIXME: Should support all Types
   // where identifier -> base global lookup
   //       member -> recursive on first, then it's our bread&butter
@@ -572,24 +616,26 @@ extension SymbolTable {
     func processMember(member: MemberBlockItemSyntax) -> [NamedDeclSyntax] {
       // Add named-declaration members
       if let namedDecl: any NamedDeclSyntax = member.decl.asProtocol((any NamedDeclSyntax).self) {
-        [namedDecl]
-
-        // If configuredRegions is set, visit the members of the active clause (if it exists)
-        //
-        // We do this recursively to handle nested if-config declarations
-      } else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self),
+        namedDecl.isKind(memberKind) ? [namedDecl] : []
+      }
+      // If configuredRegions is set, visit the members of the active clause (if it exists)
+      //
+      // We do this recursively to handle nested if-config declarations
+      else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self),
         let configuredRegions,
         case .decls(let members) = configuredRegions.activeClause(for: ifConfigDecl)?.elements
       {
         members.flatMap(processMember(member:))
-        // If configuredRegions is nil, visit all if-config clauses
-      } else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self) {
+      }
+      // If configuredRegions is nil, visit all if-config clauses
+      else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self) {
         ifConfigDecl.clauses.flatMap({ clause -> [NamedDeclSyntax] in
           guard case .decls(let members) = clause.elements else { return [] }
           return members.flatMap(processMember(member:))
         })
-        // No name, no gain
-      } else {
+      }
+      // No name, no gain
+      else {
         []
       }
     }

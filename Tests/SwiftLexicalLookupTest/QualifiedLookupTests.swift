@@ -44,7 +44,8 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
     }
     mutating func appendInterpolation(
       references expectations: Expectation...,
-      file: StaticString = #file, line: UInt = #line
+      file: StaticString = #file,
+      line: UInt = #line
     ) {
       components.append(.expectations(expectations, file: file, line: line))
     }
@@ -155,7 +156,8 @@ final class TestQualifiedLookup: XCTestCase {
     XCTAssert(
       lookupSource.duplicateMarkers.isEmpty,
       "Unexpectedly found duplicate markers \(Array(lookupSource.duplicateMarkers))",
-      file: file, line: line
+      file: file,
+      line: line
     )
 
     /// IMPORTANT: Only use for `lookupSource.source` and `sourceFile`.
@@ -174,8 +176,9 @@ final class TestQualifiedLookup: XCTestCase {
       // The assertion expects this to be an introducer token
       guard let introducerToken = sourceFile.token(at: sourcePosition(of: sourceIndex)) else {
         XCTFail(
-          "[Internal Error] Unexpectedly couldn't find token for marker '\(marker)'", 
-          file: file, line: line
+          "[Internal Error] Unexpectedly couldn't find token for marker '\(marker)'",
+          file: file,
+          line: line
         )
         continue
       }
@@ -184,14 +187,16 @@ final class TestQualifiedLookup: XCTestCase {
       guard let introducerParent = introducerToken.parent else {
         XCTFail(
           "Marker '\(marker)' points to token without parent. Ensure marker is placed before the named declaration's introducer keyword, like 'struct'.",
-          file: file, line: line
+          file: file,
+          line: line
         )
         continue
       }
       guard let namedDecl = introducerParent.asProtocol((any NamedDeclSyntax).self) else {
         XCTFail(
           "Marker '\(marker)' points to token whose parent isn't a named declaration. Ensure marker is placed before the named declaration's introducer keyword, like 'struct'.",
-          file: file, line: line
+          file: file,
+          line: line
         )
         continue
       }
@@ -216,7 +221,8 @@ final class TestQualifiedLookup: XCTestCase {
           guard lookupSource.markerToIndexMap[marker] != nil else {
             XCTFail(
               "Expectation requires lookup to produce result to nonexistent marker \(marker).",
-              file: file, line: line
+              file: file,
+              line: line
             )
             return nil
           }
@@ -234,9 +240,10 @@ final class TestQualifiedLookup: XCTestCase {
       // Get all identifier tokens separated by dots
       guard let memberToken = sourceFile.token(at: sourcePosition(of: sourceIndex)) else {
         XCTFail(
-          "[Internal Error] Unexpectedly couldn't find token to look up for expectation", 
-          file: file, line: line
-         )
+          "[Internal Error] Unexpectedly couldn't find token to look up for expectation",
+          file: file,
+          line: line
+        )
         continue
       }
 
@@ -244,14 +251,16 @@ final class TestQualifiedLookup: XCTestCase {
       guard let memberIdentifier = memberToken.identifier else {
         XCTFail(
           "Expected tested token to be an identifier, but got \(memberToken.tokenKind) instead.",
-          file: file, line: line
+          file: file,
+          line: line
         )
         continue
       }
       guard let baseDeclRef = memberToken.parent?.as(DeclReferenceExprSyntax.self) else {
         XCTFail(
           "Expected tested token's parent to be a 'DeclReferenceExprSyntax', but got \(String(describing: memberToken.parent?.kind)).",
-          file: file, line: line
+          file: file,
+          line: line
         )
         continue
       }
@@ -267,18 +276,18 @@ final class TestQualifiedLookup: XCTestCase {
         //    to test the base type lookup)
         //    TODO: Look into expanding this as general name lookup
         XCTFail(
-          "Expected tested token's grandparent to be a 'MemberAccessExprSyntax' with a *valid* base, " +
-            "but got syntax type \(String(describing: baseDeclRef.parent?.kind)).",
-          file: file, line: line
+          "Expected tested token's grandparent to be a 'MemberAccessExprSyntax' with a *valid* base, but got syntax type \(String(describing: baseDeclRef.parent?.kind)).",
+          file: file,
+          line: line
         )
         continue
       }
 
       guard Syntax(memberAccessExpr.base) != Syntax(baseDeclRef) else {
         XCTFail(
-          "Expectation cannot refer to the base of a member access expression. " +
-            "This may be caused from a bare-type lookup, e.g. `MyStruct\\(references: ...)`.",
-          file: file, line: line
+          "Expectation cannot refer to the base of a member access expression. This may be caused from a bare-type lookup, e.g. `MyStruct\\(references: ...)`.",
+          file: file,
+          line: line
         )
         continue
       }
@@ -300,7 +309,9 @@ final class TestQualifiedLookup: XCTestCase {
       // Check expectations match
       var idsToFoundDecl = Dictionary(grouping: foundDecls, by: \.id).mapValues({ decls in
         guard let decl = decls.first, decls.count == 1 else {
-          fatalError("[Internal Error] Unexpectedly found multiple declarations with id \(String(describing: decls.first?.id))")
+          fatalError(
+            "[Internal Error] Unexpectedly found multiple declarations with id \(String(describing: decls.first?.id))"
+          )
         }
         return decl
       })
@@ -311,7 +322,8 @@ final class TestQualifiedLookup: XCTestCase {
           XCTAssert(
             idsToFoundDecl[expectedDecl.id] != nil,
             "Lookup of `\(typeSyntax.trimmed)/\(memberIdentifier.name)` didn't return declaration '\(marker)'.",
-            file: file, line: line
+            file: file,
+            line: line
           )
           // Check declaration off the list
           idsToFoundDecl[expectedDecl.id] = nil
@@ -321,7 +333,11 @@ final class TestQualifiedLookup: XCTestCase {
       // Ensure lookup didn't give us more than expected
       if !idsToFoundDecl.isEmpty {
         for (_, decl) in idsToFoundDecl {
-          XCTFail("Lookup of `\(typeSyntax.trimmed)/\(memberIdentifier.name)` found non-expected declaration of type '\(decl.kind)': \n`\(decl.description)`", file: file, line: line)
+          XCTFail(
+            "Lookup of `\(typeSyntax.trimmed)/\(memberIdentifier.name)` found non-expected declaration of type '\(decl.kind)': \n`\(decl.description)`",
+            file: file,
+            line: line
+          )
         }
       }
     }
@@ -343,4 +359,6 @@ final class TestQualifiedLookup: XCTestCase {
       """
     )
   }
+
+  // TODO: Test lookup of an associated type and how it interacts with MyProto.Type, etc.
 }
