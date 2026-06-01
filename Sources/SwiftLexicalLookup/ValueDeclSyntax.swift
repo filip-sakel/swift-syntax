@@ -21,9 +21,12 @@
 /// TODO: What about generic parameter types? `https://download.swift.org/docs/assets/generics.pdf`
 ///                                generic parameter declarations
 /// 2. Abstract function declarations (functions, initializers, deinitializers)
-/// 3. Abstract storage declarations (variables and subscripts)
+/// 3. Abstract storage declarations (variable identifier patterns and subscripts)
 /// 4. Macro declarations
 /// 5. Enum element declarations
+///
+/// Note that we use EnumCaseElementSyntax and variable pattern bindings (because
+/// an EnumCaseDeclSyntax can have multiple EnumCaseElementSyntax).
 ///
 /// Basically, anything that named lookup can return.
 public struct ValueDeclSyntax: DeclSyntaxProtocol, SyntaxHashable {
@@ -45,9 +48,9 @@ public struct ValueDeclSyntax: DeclSyntaxProtocol, SyntaxHashable {
       // Functions (funcs, inits, deinits)
       .functionDecl, .initializerDecl, .deinitializerDecl,
       // Storage (vars, subscripts)
-      .variableDecl, .subscriptDecl,
+      .identifierPattern, .subscriptDecl,
       // Macro & Enum element
-      .macroDecl, .enumCaseDecl:
+      .macroDecl, .enumCaseElement:
       _syntaxNode = node._syntaxNode
     default:
       return nil
@@ -69,56 +72,73 @@ public struct ValueDeclSyntax: DeclSyntaxProtocol, SyntaxHashable {
       .node(InitializerDeclSyntax.self),
       .node(DeinitializerDeclSyntax.self),
       // Storage
-      .node(VariableDeclSyntax.self),
+      .node(IdentifierPatternSyntax.self),
       .node(SubscriptDeclSyntax.self),
       // Macro
       .node(MacroDeclSyntax.self),
       // Enum element
-      .node(EnumCaseDeclSyntax.self),
+      .node(EnumCaseElementSyntax.self),
     ])
   }
 
-  var name: TokenSyntax {
-    return switch _syntaxNode.kind {
+  // TODO: Create something like `DeclName` (and `DeclRefName` likewise)
+  // to properly represent function arguments and subscripts?.
+  var names: TokenSyntax? {
+    switch _syntaxNode.kind {
     // Types
     case .structDecl:
-      _syntaxNode.cast(StructDeclSyntax.self).name
+      return _syntaxNode.cast(StructDeclSyntax.self).name
     case .enumDecl:
-      _syntaxNode.cast(EnumDeclSyntax.self).name
+      return _syntaxNode.cast(EnumDeclSyntax.self).name
     case .classDecl:
-      _syntaxNode.cast(ClassDeclSyntax.self).name
+      return _syntaxNode.cast(ClassDeclSyntax.self).name
     case .actorDecl:
-      _syntaxNode.cast(ActorDeclSyntax.self).name
+      return _syntaxNode.cast(ActorDeclSyntax.self).name
     case .protocolDecl:
-      _syntaxNode.cast(ProtocolDeclSyntax.self).name
+      return _syntaxNode.cast(ProtocolDeclSyntax.self).name
     case .typeAliasDecl:
-      _syntaxNode.cast(TypeAliasDeclSyntax.self).name
+      return _syntaxNode.cast(TypeAliasDeclSyntax.self).name
     case .associatedTypeDecl:
-      _syntaxNode.cast(AssociatedTypeDeclSyntax.self).name
+      return _syntaxNode.cast(AssociatedTypeDeclSyntax.self).name
     // Functions
     case .functionDecl:
-      _syntaxNode.cast(FunctionDeclSyntax.self).name
+      // TODO: Handle callAsFunction
+      return _syntaxNode.cast(FunctionDeclSyntax.self).name
     case .initializerDecl:
-      _syntaxNode.cast(InitializerDeclSyntax.self).name
+      // TODO: Handle inits like Hello() but also the fact that we can't do [1,2].map(String.)
+      return "init"
     case .deinitializerDecl:
-      _syntaxNode.cast(DeinitializerDeclSyntax.self).name
+      // deinits don't have a name
+      return nil
     // Storage
-    case .variableDecl:
-      _syntaxNode.cast(VariableDeclSyntax.self).name
+    case .identifierPattern:
+      return _syntaxNode.cast(IdentifierPatternSyntax.self).identifier
     case .subscriptDecl:
-      _syntaxNode.cast(SubscriptDeclSyntax.self).name
+      // TODO: Fix with DeclName
+      return nil
     // Macro
     case .macroDecl:
-      _syntaxNode.cast(MacroDeclSyntax.self).name
+      return _syntaxNode.cast(MacroDeclSyntax.self).name
     // Enum element
-    case .enumCaseDecl:
-      _syntaxNode.cast(EnumCaseDeclSyntax.self).name
+    case .enumCaseElement:
+      return _syntaxNode.cast(EnumCaseElementSyntax.self).name
     default:
       fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
     }
   }
+}
 
-  var modifiers: DeclModifierListSyntax {
+// MARK: Basic Queries
+extension ValueDeclSyntax {
+  private func _findVariableDeclSyntax(identifierPattern: IdentifierPatternSyntax) -> VariableDeclSyntax? {
+
+  }
+  private func _findEnumCaseDeclSyntax(enumElement: IdentifierPatternSyntax) -> EnumCaseDeclSyntax? {
+
+  }
+
+  // TODO: Query parents of identifier type
+  var modifiers: DeclModifierListSyntax? {
     return switch _syntaxNode.kind {
     // Types
     case .structDecl:
@@ -143,22 +163,22 @@ public struct ValueDeclSyntax: DeclSyntaxProtocol, SyntaxHashable {
     case .deinitializerDecl:
       _syntaxNode.cast(DeinitializerDeclSyntax.self).modifiers
     // Storage
-    case .variableDecl:
-      _syntaxNode.cast(VariableDeclSyntax.self).modifiers
+    case .identifierType:
+      _syntaxNode.cast(IdentifierTypeSyntax.self).modifiers
     case .subscriptDecl:
       _syntaxNode.cast(SubscriptDeclSyntax.self).modifiers
     // Macro
     case .macroDecl:
       _syntaxNode.cast(MacroDeclSyntax.self).modifiers
     // Enum element
-    case .enumCaseDecl:
-      _syntaxNode.cast(EnumCaseDeclSyntax.self).modifiers
+    case .enumCaseElement:
+      _syntaxNode.cast(EnumCaseElementSyntax.self).modifiers
     default:
       fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
     }
   }
 
-  var attributes: AttributeListSyntax {
+  var attributes: AttributeListSyntax? {
     return switch _syntaxNode.kind {
     // Types
     case .structDecl:
@@ -183,16 +203,16 @@ public struct ValueDeclSyntax: DeclSyntaxProtocol, SyntaxHashable {
     case .deinitializerDecl:
       _syntaxNode.cast(DeinitializerDeclSyntax.self).attributes
     // Storage
-    case .variableDecl:
-      _syntaxNode.cast(VariableDeclSyntax.self).attributes
+    case .identifierType:
+      _syntaxNode.cast(IdentifierTypeSyntax.self).attributes
     case .subscriptDecl:
       _syntaxNode.cast(SubscriptDeclSyntax.self).attributes
     // Macro
     case .macroDecl:
       _syntaxNode.cast(MacroDeclSyntax.self).attributes
     // Enum element
-    case .enumCaseDecl:
-      _syntaxNode.cast(EnumCaseDeclSyntax.self).attributes
+    case .enumCaseElement:
+      _syntaxNode.cast(EnumCaseElementSyntax.self).attributes
     default:
       fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
     }
@@ -207,15 +227,15 @@ public struct ValueDeclSyntax: DeclSyntaxProtocol, SyntaxHashable {
     case .structDecl, .enumDecl, .classDecl, .actorDecl, .protocolDecl, .typeAliasDecl, .associatedTypeDecl,
       // Inits are static, e.g., MyStruct.init(...)
       .initializerDecl,
-      // Enum cases are static, e.g., MyEnum.myCase.
-      .enumCaseDecl:
+      // Enum cases elements are static, e.g., MyEnum.myCase.
+      .enumCaseElement:
       return true
     // Deinits operate on instances, so not static.
     case .deinitializerDecl:
       return false
     // Functions, variables and subscripts can be static or non-static,
     // so check for 'static' or 'class' modifiers.
-    case .functionDecl, .variableDecl, .subscriptDecl:
+    case .functionDecl, .identifierPattern, .subscriptDecl:
       return self.modifiers.contains(where: { modifier in
         modifier.name.tokenKind == .keyword(.static) || modifier.name.tokenKind == .keyword(.class)
       })
@@ -236,6 +256,10 @@ public struct ValueDeclSyntax: DeclSyntaxProtocol, SyntaxHashable {
     default:
       return false
     }
+  }
+
+  var type: TypeSyntax? {
+    fatalError("[SwiftLexicalLookup] Internal Error: `type` query is not yet implemented for ValueDeclSyntax")
   }
 }
 
@@ -296,8 +320,8 @@ extension DeinitializerDeclSyntax {
   }
 }
 // Storage decls
-extension VariableDeclSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
+extension IdentifierPatternSyntax {
+  func `as`(_ syntaxType: IdentifierPatternSyntax.Type) -> ValueDeclSyntax {
     return ValueDeclSyntax(_syntaxNode)!
   }
 }
@@ -313,7 +337,7 @@ extension MacroDeclSyntax {
   }
 }
 // Enum element decl
-extension EnumCaseDeclSyntax {
+extension EnumCaseElementSyntax {
   func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
     return ValueDeclSyntax(_syntaxNode)!
   }
@@ -361,8 +385,8 @@ extension ValueDeclSyntax {
   public func `as`(_ syntaxType: DeinitializerDeclSyntax.Type) -> DeinitializerDeclSyntax? {
     return DeinitializerDeclSyntax(_syntaxNode)
   }
-  public func `as`(_ syntaxType: VariableDeclSyntax.Type) -> VariableDeclSyntax? {
-    return VariableDeclSyntax(_syntaxNode)
+  public func `as`(_ syntaxType: IdentifierPatternSyntax.Type) -> IdentifierTypeSyntax? {
+    return IdentifierPatternSyntax(_syntaxNode)
   }
   public func `as`(_ syntaxType: SubscriptDeclSyntax.Type) -> SubscriptDeclSyntax? {
     return SubscriptDeclSyntax(_syntaxNode)
@@ -370,8 +394,8 @@ extension ValueDeclSyntax {
   public func `as`(_ syntaxType: MacroDeclSyntax.Type) -> MacroDeclSyntax? {
     return MacroDeclSyntax(_syntaxNode)
   }
-  public func `as`(_ syntaxType: EnumCaseDeclSyntax.Type) -> EnumCaseDeclSyntax? {
-    return EnumCaseDeclSyntax(_syntaxNode)
+  public func `as`(_ syntaxType: EnumCaseElementSyntax.Type) -> EnumCaseElementSyntax? {
+    return EnumCaseElementSyntax(_syntaxNode)
   }
 
   @available(*, deprecated, message: "This cast will always fail")
@@ -413,7 +437,7 @@ extension ValueDeclSyntax {
   public func `is`(_ syntaxType: DeinitializerDeclSyntax.Type) -> Bool {
     return self.as(syntaxType) != nil
   }
-  public func `is`(_ syntaxType: VariableDeclSyntax.Type) -> Bool {
+  public func `is`(_ syntaxType: IdentifierPatternSyntax.Type) -> Bool {
     return self.as(syntaxType) != nil
   }
   public func `is`(_ syntaxType: SubscriptDeclSyntax.Type) -> Bool {
@@ -422,7 +446,7 @@ extension ValueDeclSyntax {
   public func `is`(_ syntaxType: MacroDeclSyntax.Type) -> Bool {
     return self.as(syntaxType) != nil
   }
-  public func `is`(_ syntaxType: EnumCaseDeclSyntax.Type) -> Bool {
+  public func `is`(_ syntaxType: EnumCaseElementSyntax.Type) -> Bool {
     return self.as(syntaxType) != nil
   }
 
