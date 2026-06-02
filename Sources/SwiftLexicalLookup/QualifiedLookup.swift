@@ -13,49 +13,6 @@
 import SwiftIfConfig
 import SwiftSyntax
 
-// TODO: Find more robust way to expose these.
-// TODO: Add a test for each one of these to ensure nothing breaks them.
-// We know the only possible `NamedDeclSyntax` types are:
-// 1. ActorDeclSyntax
-// 2. AssociatedTypeDeclSyntax
-// 3. ClassDeclSyntax
-// 4. EnumDeclSyntax
-// 5. FunctionDeclSyntax
-// 6. MacroDeclSyntax
-// 7. OperatorDeclSyntax
-// 8. PrecedenceGroupDeclSyntax
-// 9. ProtocolDeclSyntax
-// 10. StructDeclSyntax
-// 11. TypeAliasDeclSyntax
-//
-// All of these support both modifiers and attributes, so cast them.
-// extension NamedDeclSyntax {
-//   var modifiers: DeclModifierListSyntax {
-//     guard let withModifiers = asProtocol((any WithModifiersSyntax).self) else {
-//       fatalError("[SwiftLexicalLookup] Internal error: Since \(Self.self) conforms to `NamedDeclSyntax`, we expected it to also conform to `WithModifiersSyntax`.")
-//     }
-//     return withModifiers.modifiers
-//   }
-
-//   var attributes: AttributeListSyntax {
-//     guard let withAttributes = asProtocol((any WithAttributesSyntax).self) else {
-//       fatalError("[SwiftLexicalLookup] Internal error: Since \(Self.self) conforms to `NamedDeclSyntax`, we expected it to also conform to `WithAttributesSyntax`.")
-//     }
-//     return withAttributes.attributes
-//   }
-// }
-
-// TODO: Consider ValueDeclSyntax
-/// A declaration that provides a value; like `NamedDeclSyntax` but more specific?:
-///   value-decl := abstract-storage-decl | abstract-function-decl | type-decl | macro-decl | enum-element-decl
-
-// TODO: Consider making `NominalTypeDeclSyntax` include protocols
-// and make it a concrete type (instead of a protocol) like in the
-// compiler's version. This will simplify a lot of the handling here.
-// public struct NamedDeclSyntax {
-//   init?()
-// }
-
 public struct QualifiedLookupConfig {
   public var configuredRegions: ConfiguredRegions? = nil
 
@@ -232,7 +189,7 @@ public enum QualifiedLookupResult {
   /// Note that qualified lookup won't surface
   /// operator functions, objc functions using dynamic lookup, and
   /// generic parameters like `MyStruct.T` (semantically wrong).
-  case members([DeclSyntax], introducedIn: DeclGroupSyntaxType)
+  case members([ValueDeclSyntax], introducedIn: DeclGroupSyntaxType)
   /// Members declared in conditional extensions, e.g.
   /// ```
   /// extension Array where Element == Int {
@@ -243,7 +200,7 @@ public enum QualifiedLookupResult {
   /// the extension above together with the `where Element == Int`
   /// clause.
   case conditionalMembers(
-    [DeclSyntax],
+    [ValueDeclSyntax],
     introducedIn: DeclGroupSyntaxType,
     inheritanceClause: InheritanceClauseSyntax?,
     genericClause: GenericWhereClauseSyntax?
@@ -270,7 +227,7 @@ public enum QualifiedLookupResult {
   /// `@State` attribute expands to in the variable declaration above
   /// (if anything).
   case lookForMacros(
-    potentialMacroDecl: [DeclSyntax],
+    potentialMacroDecl: [ValueDeclSyntax],
     introducedIn: DeclGroupSyntaxType
   )
   /// Look for any "supertypes" we encountered in the lookup and which
@@ -518,31 +475,29 @@ public class SymbolTable {
 // }
 
 enum MemberKind {
-  case all
+  case anyMember
   case `static`(onlyTypes: Bool = false)
 
   func addingStatic() -> MemberKind {
     switch self {
-    case .all: .static()
+    case .anyMember: .static()
     case .static(let onlyTypes): .static(onlyTypes: onlyTypes)
     }
   }
 }
 
-extension NamedDeclSyntax {
+extension ValueDeclSyntax {
+  /// If it's the right member kind
   func isKind(_ memberKind: MemberKind) -> Bool {
+    // We shouldn't surface declarations that are always global,
+    // currently just macros.
+    guard !self.isAlwaysGlobal else { return false }
+
     switch memberKind {
-    case .all:
+    case .anyMember:
       return true
     case .static(let onlyTypes):
-      let valueDecl = self.as(ValueDeclSyntax.self)!
-      if onlyTypes {
-        return valueDecl.isTypeDecl
-      } else {
-        // If it's ambiguous whether this is static (e.g. a macro decl returns isStatic==nil),
-        // default to false to hide thid decl.
-        return valueDecl.isStatic ?? false
-      }
+      return onlyTypes ? self.isTypeDecl : ((try? self.isStatic.get()) ?? false)
     }
   }
 }
@@ -615,17 +570,17 @@ extension SymbolTable {
     identifier: Identifier?,
     kind memberKind: MemberKind,
     configuredRegions: ConfiguredRegions?
-  ) -> [any NamedDeclSyntax & DeclSyntaxProtocol] {
+  ) -> [ValueDeclSyntax] {
     // FIXME: Filter by memberKind
 
     /// Process a member or a member nested inside an if-config declaration.
     ///
     /// This pattern is similar to the SyntaxVisitor pattern, but a SyntaxVisitor
     /// doesn't work because we use protocols like `NamedDeclSyntax`
-    func processMember(member: MemberBlockItemSyntax) -> [NamedDeclSyntax] {
-      // Add named-declaration members
-      if let namedDecl: any NamedDeclSyntax = member.decl.asProtocol((any NamedDeclSyntax).self) {
-        namedDecl.isKind(memberKind) ? [namedDecl] : []
+    func processMember(member: MemberBlockItemSyntax) -> [ValueDeclSyntax] {
+      // Get only value declarations
+      if let valueDecl = member.decl.as(ValueDeclSyntax.self) {
+        valueDecl.isKind(memberKind) ? [valueDecl] : []
       }
       // If configuredRegions is set, visit the members of the active clause (if it exists)
       //
@@ -638,7 +593,7 @@ extension SymbolTable {
       }
       // If configuredRegions is nil, visit all if-config clauses
       else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self) {
-        ifConfigDecl.clauses.flatMap({ clause -> [NamedDeclSyntax] in
+        ifConfigDecl.clauses.flatMap({ clause -> [ValueDeclSyntax] in
           guard case .decls(let members) = clause.elements else { return [] }
           return members.flatMap(processMember(member:))
         })
@@ -650,10 +605,8 @@ extension SymbolTable {
     }
 
     // Add each member in the group declaration
-    return groupDecl.memberBlock.members.lazy
+    return groupDecl.memberBlock.members
       .flatMap(processMember(member:))
-      // We do this because NamedDeclSyntax doesn't inherit from DeclSyntaxProtocol
-      .map(_castAsNamedDecl(decl:))
   }
 
   private func _visitSupertypes(
@@ -693,9 +646,7 @@ extension SymbolTable {
       kind: memberKind,
       configuredRegions: config.configuredRegions
     )
-    // We assume NamedDeclSyntax is a DeclSyntax
-    // TODO: Look for more elegant solution
-    results[type, default: []].append(.members(directMembers.map({ DeclSyntax($0)! }), introducedIn: group))
+    results[type, default: []].append(.members(directMembers, introducedIn: group))
 
     // Visit supertypes
     _visitSupertypes(of: group, lookingFor: identifier, kind: memberKind, results: &results)
@@ -901,7 +852,7 @@ extension SymbolTable {
           identifier: identifier,
           kind: memberKind,
           configuredRegions: config.configuredRegions,
-        ).map({ DeclSyntax($0) })
+        )
 
         // Add to results
         results[canonicalType, default: []].append(
@@ -1089,12 +1040,12 @@ extension SymbolTable {
     inType type: TypeSyntax,
     atLocation location: AbsolutePosition,
     options: LookupOptions
-  ) -> [any NamedDeclSyntax] {
+  ) -> [ValueDeclSyntax] {
     var perTypeResults = [CanonicalType: [QualifiedLookupResult]]()
     _lookUpTypeMember(
       type: type,
       identifier: memberIdentifier,
-      kind: options.contains(.onlyTypes) ? .static(onlyTypes: true) : .all,
+      kind: options.contains(.onlyTypes) ? .static(onlyTypes: true) : .anyMember,
       config: QualifiedTableLookupConfig(
         lookupSuperprotocols: options.contains(.protocolMembers),
         lookupSuperclasses: true,  // TODO: I don't know if this is the compiler's default
@@ -1103,11 +1054,11 @@ extension SymbolTable {
       into: &perTypeResults
     )
 
-    return perTypeResults.flatMap({ (_, results: [QualifiedLookupResult]) -> [any NamedDeclSyntax] in
-      results.flatMap({ (result: QualifiedLookupResult) -> [any NamedDeclSyntax] in
+    return perTypeResults.flatMap({ (_, results: [QualifiedLookupResult]) -> [ValueDeclSyntax] in
+      results.flatMap({ (result: QualifiedLookupResult) -> [ValueDeclSyntax] in
         switch result {
         case .members(let decls, _), .conditionalMembers(let decls, _, _, _):
-          decls.map({ $0.asProtocol((any NamedDeclSyntax).self)! })
+          decls
         case .implicitMembers, .lookForDynamicMembers, .lookForMacros, .lookForSupertypes:
           []
         }

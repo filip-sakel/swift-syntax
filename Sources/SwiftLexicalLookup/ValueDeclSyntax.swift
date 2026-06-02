@@ -40,17 +40,11 @@
 /// Otherwise, queries like ``ValueDeclSyntax/isStatic`` return nil.
 ///
 /// Basically, anything that named lookup can return.
-public struct ValueDeclSyntax: DeclSyntaxProtocol, SyntaxHashable {
+public struct ValueDeclSyntax: SyntaxProtocol, SyntaxHashable {
   public let _syntaxNode: Syntax
 
-  /// Create a ``DeclSyntax`` node from a specialized optional syntax node.
-  public init?(_ syntax: __shared (some DeclSyntaxProtocol)?) {
-    guard let syntax = syntax else {
-      return nil
-    }
-    self.init(syntax)
-  }
-
+  /// Try to cast a specific ``SyntaxProtocol``-conforming type to
+  /// a ``ValueDeclSyntax``.
   public init?(_ node: __shared some SyntaxProtocol) {
     switch node.raw.kind {
     // Types (nominal, protocols, aliases, associated types, generic types)
@@ -185,12 +179,20 @@ extension ValueDeclSyntax {
       // TODO: Handle callAsFunction
       let funcDecl = _syntaxNode.cast(FunctionDeclSyntax.self)
       // TODO Perhaps factor `isStatic` out to avoid another enum
-      guard let identifier = funcDecl.name.identifier else {
-        return DeclName.invalid(nonIdentifier: funcDecl.name, _paramsToArgs(funcDecl.signature.parameterClause))
+      guard let identifier = Identifier(validating: funcDecl.name) else {
+        return DeclName.invalid(
+          nonIdentifier: funcDecl.name.tokenKind,
+          _paramsToArgs(funcDecl.signature.parameterClause)
+        )
       }
       // Check for callAsFunction (instance method named `callAsFunction`).
-      guard _modifiersIncludeStatic(funcDecl.modifiers) || identifier.name != "callAsFunction" else {
-        return DeclName.callAsFunctionFunction(_paramsToArgs(funcDecl.signature.parameterClause))
+      if identifier.name == "callAsFunction",
+        // Check function isn't marked static/class
+        !_modifiersIncludeStatic(funcDecl.modifiers),
+        // Check we're actually in a decl group
+        funcDecl.parentScope?.isProtocol((any DeclGroupSyntax).self) == true
+      {
+        return DeclName.callAsFunction(_paramsToArgs(funcDecl.signature.parameterClause))
       }
       return DeclName.regular(identifier: identifier, _paramsToArgs(funcDecl.signature.parameterClause))
     case .initializerDecl:
@@ -227,18 +229,31 @@ extension ValueDeclSyntax {
 /// TODO: Think about how to handle variadic (parameters + param packs) and trailing closures
 typealias DeclNameArgs = [Identifier?]
 
-indirect enum DeclName {
+extension Identifier {
+  fileprivate init?(validating token: TokenSyntax) {
+    guard let identifier = token.identifier, !token.hasError else {
+      return nil
+    }
+    self = identifier
+  }
+}
+
+indirect enum DeclName: Hashable {
   /// A declaration name formed by an identifier and, possibly, an argument list.
   case regular(identifier: Identifier, DeclNameArgs?)
 
   /// A declaration name formed by token syntax that isn't a valid identifier
   /// and, possibly, an argument list.
-  case invalid(nonIdentifier: TokenSyntax, DeclNameArgs?)
+  ///
+  /// Note that `nonIdentifier` is a ``TokenKind`` instead of `TokenSyntax`
+  /// because the latter tracks things like leading and trailing trivia which
+  /// makes comparisons harder.
+  case invalid(nonIdentifier: TokenKind, DeclNameArgs?)
 
   /// An instance method named `callAsFunction` can be applied called as
   /// `instance.callAsFunction(...)`, or equivalently `instance(...)`.
   /// See [proposal](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0253-callable.md)
-  case callAsFunctionFunction(DeclNameArgs)
+  case callAsFunction(DeclNameArgs)
   case `init`(DeclNameArgs)
 
   // Special names, i.e. names the user can't directly look up.
@@ -265,8 +280,8 @@ indirect enum DeclName {
     _ token: TokenSyntax,
     args: DeclNameArgs?
   ) -> DeclName {
-    guard let identifier = token.identifier else {
-      return DeclName.invalid(nonIdentifier: token, args)
+    guard let identifier = Identifier(validating: token) else {
+      return DeclName.invalid(nonIdentifier: token.tokenKind, args)
     }
     return DeclName.regular(identifier: identifier, args)
   }
@@ -289,7 +304,7 @@ struct DeclNameRef {
     /// An instance method named `callAsFunction` can be applied called as
     /// `instance.callAsFunction(...)`, or equivalently `instance(...)`.
     /// See [proposal](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0253-callable.md)
-    case callAsFunctionFunction(DeclNameArgumentsSyntax?)
+    case callAsFunction(DeclNameArgumentsSyntax?)
     case `init`(DeclNameArgumentListSyntax?)
 
     // Special names, i.e. names the user can't directly look up.
@@ -310,7 +325,7 @@ struct DeclNameRef {
 extension ValueDeclSyntax {
   /// Failure to look up an identifier pattern's or enum element's
   /// scope (see below).
-  enum ScopeLookupFailure: Error {
+  enum ScopeLookupFailure: Equatable, Error {
     /// The underlying ``IdentifierPatternSyntax`` or ``EnumCaseElementSyntax``
     /// has no scope.
     case noScope
@@ -497,7 +512,7 @@ extension ValueDeclSyntax {
     }
   }
 
-  enum StaticLookupFailure: Error {
+  enum StaticLookupFailure: Equatable, Error {
     /// Macros may only appear at file scope; it's not clear what "static" means
     case macrosOnlyAtFileScope
     /// The value declaration has an nonexistent/invalid scope
@@ -513,7 +528,15 @@ extension ValueDeclSyntax {
 
   /// Whether the given declaration is available from a static/type context.
   ///
-  /// Note that macro declarations are currently only supported at file scope, so they return `nil`.
+  /// Notes:
+  /// 1. This query doesn't care about the value declaration's parent context.
+  ///    For instance, if we pass in a global function (without a `static` or
+  ///    `class` modifier), we get `isStatic == true`. Further, a `class func`
+  ///    inside a `struct` will also return true.
+  /// 2. Macro declarations will return a `macrosOnlyAtFileScope` failure.
+  /// 3. Pattern identifiers that aren't inside a ``VariableDeclSyntax``
+  ///    scope, or enum elements that aren't in ``EnumCaseDeclSyntax``
+  ///    return the respective `ScopeLookupFailure`.
   var isStatic: Result<Bool, StaticLookupFailure> {
     switch _syntaxNode.kind {
     // Types are always static
@@ -551,6 +574,39 @@ extension ValueDeclSyntax {
       return true
     default:
       return false
+    }
+  }
+
+  /// Whether this value declaration must always appear at file scope; useful
+  /// for filtering declarations during lookup.
+  ///
+  /// Currently, this includes just macro declarations. Other declarations
+  /// of note:
+  /// 1. Protocols: Can be nested under nominal type declarations (but not
+  ///    other protocols) following SE 404.
+  ///
+  ///    Note that although a protocol nested under another protocol is still
+  ///    illegal, tooling may want to still surface a nested protocol to
+  ///    improve developer experience. Consider:
+  ///      protocol MyProto { protocol Element {} }
+  ///    We can trivially rewrite this illegal program to:
+  ///      protocol MyProtoElement {}
+  ///      protocol MyProto { typealias Element = MyProtoElement }
+  ///
+  /// 2. Enum case elements: Only legal inside cases living in enums.
+  ///
+  ///    Similar to case 1, the user might have accidentally typed `struct { case caseA }`
+  ///    instead of using an `enum`, so lookup should be nice to the user.
+  ///
+  /// 3. Associated types: Only legal inside protocols.
+  ///
+  ///    Following a similar argument, a user using an associated type inside
+  ///    a nominal type might have wanted to use a generic argument. We'll
+  ///    still make a best-effort attempt to look it up.
+  var isAlwaysGlobal: Bool {
+    return switch _syntaxNode.kind {
+    case .macroDecl: true
+    default: false
     }
   }
 
@@ -640,11 +696,12 @@ extension EnumCaseElementSyntax {
 }
 
 // Protocols
-extension DeclGroupSyntax {
+
+extension ValueDeclSyntax {
   init(fromProtocol syntax: __shared any NominalTypeDeclSyntax) {
     // We know this cast is going to succeed. Go through `init(_: SyntaxData)` just to double-check and
     // verify the kind matches in debug builds and get maximum performance in release builds.
-    self = Syntax(syntax).cast(Self.self)
+    self = Syntax(syntax).cast(ValueDeclSyntax.self)
   }
 }
 
@@ -697,6 +754,18 @@ extension ValueDeclSyntax {
   @available(*, deprecated, message: "This cast will always fail")
   public func `as`<S: SyntaxProtocol>(_ syntaxType: S.Type) -> S? {
     return nil
+  }
+}
+
+// MARK: DeclSyntaxProtocol Conversions
+
+extension DeclSyntaxProtocol {
+  public func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax? {
+    Syntax(self).as(ValueDeclSyntax.self)
+  }
+
+  public func `is`(_ syntaxType: ValueDeclSyntax.Type) -> Bool {
+    self.as(syntaxType) != nil
   }
 }
 

@@ -11,10 +11,11 @@
 //===----------------------------------------------------------------------===//
 
 import Foundation
-import SwiftLexicalLookup
 import SwiftParser
 import SwiftSyntax
 import XCTest
+
+@_spi(Experimental) @testable import SwiftLexicalLookup
 
 struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInterpolation {
   enum Expectation: ExpressibleByUnicodeScalarLiteral, ExpressibleByExtendedGraphemeClusterLiteral {
@@ -343,6 +344,153 @@ final class TestQualifiedLookup: XCTestCase {
     }
   }
 
+  func testValueDeclCasting() {
+    func assertValueDecl(
+      of declSyntax: DeclSyntax,
+      name: DeclName,
+      isStatic: Result<Bool, ValueDeclSyntax.StaticLookupFailure>,
+      isTypeDecl: Bool,
+      scopeKind: SyntaxKind?,
+      file: StaticString = #file,
+      line: UInt = #line
+    ) {
+      // Cast to value declaration
+      guard let valueDecl = ValueDeclSyntax(declSyntax) else {
+        XCTFail(
+          "Couldn't initialize a value declaration from decl of kind '\(declSyntax.kind)'",
+          file: file,
+          line: line
+        )
+        return
+      }
+
+      // Check equivalent type casting/checking methods
+      XCTAssert(
+        declSyntax.as(ValueDeclSyntax.self) != nil,
+        "Couldn't cast decl of kind '\(declSyntax.kind)' to a value declaration.",
+        file: file,
+        line: line
+      )
+      XCTAssert(
+        declSyntax.is(ValueDeclSyntax.self),
+        "Type check reports that decl of kind '\(declSyntax.kind)' isn't a value declaration",
+        file: file,
+        line: line
+      )
+
+      // Check properties
+      //
+      // Name
+      XCTAssertEqual(
+        valueDecl.declName,
+        name,
+        "Value declaration returned an invalid name",
+        file: file,
+        line: line
+      )
+      // isStatic
+      XCTAssertEqual(
+        valueDecl.isStatic,
+        isStatic,
+        "Value declaration doesn't match epected `isStatic` property",
+        file: file,
+        line: line
+      )
+      // isTypeDecl
+      XCTAssertEqual(
+        valueDecl.isTypeDecl,
+        isTypeDecl,
+        "Value declaration doesn't match epected `isTypeDecl` property",
+        file: file,
+        line: line
+      )
+      // Scope
+      XCTAssertEqual(
+        valueDecl.scope?.kind,
+        scopeKind,
+        "Value declaration doesn't match epected `scope` kind",
+        file: file,
+        line: line
+      )
+    }
+
+    let structDecl = ("struct Self {}" as DeclSyntax).cast(StructDeclSyntax.self)
+    print("Struct id: ", structDecl.name.debugDescription)
+
+    // === Types ===
+    //
+    // Nominal types + Protocols
+    assertValueDecl(
+      of: "struct MyStruct {}",
+      name: DeclName.regular(identifier: Identifier(canonicalName: "MyStruct"), nil),
+      isStatic: .success(true),
+      isTypeDecl: true,
+      scopeKind: .structDecl
+    )
+
+    assertValueDecl(
+      of: "enum _ {}",
+      name: DeclName.invalid(nonIdentifier: .identifier(""), nil),
+      isStatic: .success(true),
+      isTypeDecl: true,
+      scopeKind: .enumDecl
+    )
+
+    assertValueDecl(
+      of: "class Self {}",
+      name: DeclName.invalid(nonIdentifier: .identifier(""), nil),
+      isStatic: .success(true),
+      isTypeDecl: true,
+      scopeKind: .classDecl
+    )
+
+    assertValueDecl(
+      of: "actor `My Actor` {}",
+      name: DeclName.regular(identifier: Identifier(canonicalName: "My Actor"), nil),
+      isStatic: .success(true),
+      isTypeDecl: true,
+      scopeKind: .actorDecl
+    )
+
+    assertValueDecl(
+      of: "protocol $MyProto {}",
+      name: DeclName.regular(identifier: Identifier(canonicalName: "$MyProto"), nil),
+      isStatic: .success(true),
+      isTypeDecl: true,
+      scopeKind: .protocolDecl
+    )
+    // Type Aliases
+    assertValueDecl(
+      of: "typealias Num = Int",
+      name: DeclName.regular(identifier: Identifier(canonicalName: "Num"), nil),
+      isStatic: .success(true),
+      isTypeDecl: true,
+      // type aliases introduce a scope for potential generic parameters
+      scopeKind: .typeAliasDecl
+    )
+    // Associated Types
+    assertValueDecl(
+      of: "associatedtype Element",
+      name: DeclName.regular(identifier: Identifier(canonicalName: "Element"), nil),
+      isStatic: .success(true),
+      isTypeDecl: true,
+      // associated types don't introduce their own scope
+      scopeKind: nil
+    )
+
+    // === Storage Decls ===
+
+    // === Failing Casts ===
+    XCTAssert(
+      ValueDeclSyntax(DeclSyntax("case myCase")) == nil,
+      "Expected initialization to value declaration to fail: case declarations aren't values; case elements are."
+    )
+    XCTAssert(
+      ValueDeclSyntax(DeclSyntax("var myVar")) == nil,
+      "Expected initialization to value declaration to fail: var declarations aren't values; patter identifiers are."
+    )
+  }
+
   func testCodeBlockSimpleCase() {
     // TODO: Implement type-lookup helper first.
     assertTypeMemberLookup(
@@ -365,4 +513,6 @@ final class TestQualifiedLookup: XCTestCase {
   // TODO: Test multiple variables/patterns and finding those, e.g., var a, b, c: Int {}, etc.
 
   // TODO: Test function-like parameters with firstName="_", variadic arguments, trailing closures, etc.
+
+  // TODO: Test nested and non-nested macro lookup
 }
