@@ -611,9 +611,196 @@ extension ValueDeclSyntax {
     default: false
     }
   }
+}
 
-  var type: TypeSyntax? {
-    fatalError("[SwiftLexicalLookup] Internal Error: `type` query is not yet implemented for ValueDeclSyntax")
+// MARK: Type Queries
+
+/// The context in which a type is defined.
+// enum DeclContext {
+//   /// A type that can be referenced "globally" in the module,
+//   /// versus in an "anonymous" context (see ``DeclContext/anonymous``).
+//   ///
+//   /// Global doesn't refer to access control; it simply contrasts with
+//   /// ``anonymous`` contexts. For instance, consider:
+//   ///   struct A { struct B {} }
+//   ///   func myFunc() { struct C {} }
+//   /// Though `B` is nested, we can still refer to it as `A.B`. However,
+//   /// there's no way to refer to `C` outside the body of `myFunc`.
+//   case global
+//
+//   /// An anonymous context is any context whose child declarations can't
+//   /// be referenced outside said context.
+//   ///
+//   /// Basically any ``CodeBlockItemListSyntax`` that isn't the direct
+//   /// descendant of ``SourceFileSyntax`` introduces an anonymous context.
+//   /// For instance, we have no way of referring to `MyStruct` outside of
+//   /// `myFunc` body:
+//   ///   func myFunc() { struct MyStruct {} }
+//   case anonymous(inside: DeclSyntax)
+// }
+
+extension SyntaxProtocol {
+  /// Try to convert this syntax to a declaration context consisting of the
+  /// underlying codeblock list item list and a flag for whether this is file context.
+  ///
+  /// If this declaration isn't a declaration context, we return `nil`. If it
+  /// is a declaration context (code block item list syntax) without a parent,
+  /// we set `isFileContext` to `nil`. We only get `isFileContext == true`
+  /// when the context is the direct child of ``SourceFileSyntax``.
+  fileprivate var _asDeclContext: (CodeBlockItemListSyntax, isFileContext: Bool?)? {
+    // Check we a code block with a parent.
+    guard let codeBlock = self.as(CodeBlockItemListSyntax.self) else { return nil }
+
+    // There's one ``SourceFileSyntax`` per syntax tree with exactly one
+    // ``CodeBlockItemListSyntax`` child.
+    //
+    // If the code block doesn't have a parent, the syntax tree is likely
+    // invalid so we set `isSourceFile` to nil.
+    let isSourceFile = codeBlock.parent?.is(SourceFileSyntax.self)
+
+    return (codeBlock, isSourceFile)
+  }
+
+  /// Finds the declaration context of the current value declaration by looking
+  /// through its recursive parents.
+  ///
+  /// A declaration context is basically any ``CodeBlockItemListSyntax``, whose
+  /// child declarations can only be referenced within said context's block
+  /// items (with the exception of ``SourceFileSyntax``). The most common
+  /// declaration context is the code block of the source file itself:
+  ///   // File.swift
+  ///   struct MyStruct {}
+  /// Here, `MyStruct` is accessible within the entire file and --because
+  /// source files are special-- within the rest of the module.
+  ///
+  /// Here's a more elaborate example:
+  ///   // File.swift
+  ///   struct A {
+  ///     struct B {}
+  ///     func myFunc() { struct C {} }
+  ///   }
+  /// In this example there are two declarations context: (1) the source file
+  /// itself (like in any valid syntax tree) and (2) the body of `myFunc`.
+  /// Because structs `A` and `B` are in the same context, which happens to be
+  /// a file context, they're accessible in the entire module as `A` and `A.B`.
+  /// However, they're no way to refer to `C` outside of the body of `myFunc`.
+  var declContext: (CodeBlockItemListSyntax, isFileContext: Bool?)? {
+    // No parent means no context.
+    //
+    // In this case, if `self` isn't a `SourceFileSyntax`, the syntax tree
+    // is likely invalid
+    guard let parent else { return nil }
+
+    // See if parent is a declaration context; otherwise, get its context.
+    return parent._asDeclContext ?? parent.declContext
+
+    // // See if our parent forms a declaration context.
+    // guard let codeBlock = parent.as(CodeBlockItemListSyntax.self) else {
+    //   // Otherwise, check parent's context
+    //   return parent.declContext
+    // }
+    //
+    // // Every valid ``CodeBlockItemListSyntax`` has a parent. Basically anything
+    // // with a code block item list syntax conforms to ``WithStatementsSyntax``.
+    // //
+    // // If we can't find a code block's parents, the syntax tree is likely
+    // // invalid so we return `nil`.
+    // guard let codeBlockContainer = codeBlock.parent else { return nil }
+    //
+    // // There's one ``SourceFileSyntax`` per syntax tree with exactly one
+    // // ``CodeBlockItemListSyntax`` child.
+    // let isSourceFile = codeBlockContainer.is(SourceFileSyntax.self)
+    //
+    // return (codeBlock, isSourceFile)
+  }
+}
+
+indirect enum UnresolvedTypeRef: Equatable {
+  case member(UnresolvedTypeRef?, moduleName: Identifier?, typeMember: Identifier)
+  case `function`(args: [UnresolvedTypeRef], returnType: [UnresolvedTypeRef])
+
+  init(syntax: TypeSyntax) {
+    // FIXME: TODO
+  }
+}
+
+extension ValueDeclSyntax {
+
+  // TODO: Figure out how to handle nominal types inside function-likes
+  // (funcs, inits, deinits, var accessors, subscripts), i.e., 'anonymous' contexts
+  private func _getTypeDeclType(_ typeDecl: some NominalTypeDeclSyntax) -> UnresolvedTypeRef? {
+    // Approach 1: If the type of the parent named decl is a metatype, then attach ourselves instead of .Type
+    //
+    // Approach 2: Go up the tree and check for 3 things:
+    //   (1) found decl context => return as global type
+    //   (2) found nominal type || prptocol => return membertype of <decl group type>.name
+    //   (3) found extension => return <extension type>.name
+    //   (4) anything else => keep going up
+
+    // No type with invalid identifier
+    guard let name: String = Identifier(validating: typeDecl.name) else { return nil }
+    func process(node: Syntax) -> UnresolvedTypeRef? {
+      if self._asDeclContext != nil {
+        return TypeRef.member(nil, moduleName: nil, typeMember: name)
+      } else if let nominalParent = node.asProtocol((any NominalTypeDeclSyntax).self) {
+        // FIXME: Remove `DeclGroupSyntax` init (it's wrong; should be protos + nominal type decls)
+        return TypeRef.member(ValueDeclSyntax(nominalParent).contextualType, moduleName: nil, typeMember: name)
+      } else if let extensionParent = node.as(ExtensionDeclSyntax.self) {
+        return TypeRef.member(TypeRef(syntax: extensionParent.extendedType), moduleName: nil, typeMember: name)
+      } else if let grandparent = node.parent {
+        return process(node: grandparent)
+      } else {
+        return nil
+      }
+    }
+
+    return parent.flatMap(process(node:))
+  }
+
+  /// A type that's valid in ``ValueDeclSyntax/declContext``.
+  var contextualType: UnresolvedTypeRef? {
+    // fatalError("[SwiftLexicalLookup] Internal Error: `type` query is not yet implemented for ValueDeclSyntax")
+    switch _syntaxNode.kind {
+    // Types
+    case .structDecl:
+      return _getDeclGroupType(_syntaxNode.cast(StructDeclSyntax.self))
+    case .enumDecl:
+      return _getDeclGroupType(_syntaxNode.cast(EnumDeclSyntax.self))
+    case .classDecl:
+      return _getDeclGroupType(_syntaxNode.cast(ClassDeclSyntax.self))
+    case .actorDecl:
+      return _getDeclGroupType(_syntaxNode.cast(ActorDeclSyntax.self))
+    case .protocolDecl:
+      return _getDeclGroupType(_syntaxNode.cast(ProtocolDeclSyntax.self))
+    case .typeAliasDecl:
+      return TypeRef(syntax: _syntaxNode.cast(TypeAliasDeclSyntax.self).initializer.value)
+    case .associatedTypeDecl:
+      return _syntaxNode.cast(AssociatedTypeDeclSyntax.self).name
+
+    case .initializerDecl:
+      // (Args...) -> Self
+    case .deinitializerDecl:
+      // (Self) -> () -> Void
+      // Function-like, user provided
+    case .identifierPattern:
+      // Either ScopeLookupError, or RetType not provided error for computer, or .inferFromLet, or VarDecl RetType
+    case .functionDecl:
+      // Either (Self) -> (Args...) -> RetType or (Args...) -> RetType
+      // TODO: Handle callAsFunction
+      return _syntaxNode.cast(FunctionDeclSyntax.self).name
+    case .subscriptDecl:
+      // Either (Self) -> (Args...) -> RetType or (Args...) -> RetType
+
+      // Macro
+    case .macroDecl:
+      return _syntaxNode.cast(MacroDeclSyntax.self).name
+    // Enum element
+    case .enumCaseElement:
+      return _syntaxNode.cast(EnumCaseElementSyntax.self).name
+    default:
+      fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
+    }
+
   }
 }
 

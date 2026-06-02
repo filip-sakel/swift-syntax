@@ -368,4 +368,11 @@ final class TestQualifiedLookup: XCTestCase {
   // TODO: Test function-like parameters with firstName="_", variadic arguments, trailing closures, etc.
 
   // TODO: Test nested and non-nested macro lookup
+
+  // TODO: Test cycles, e.g. struct A { typealias Element = B.Element }; struct B { typealias Element = A }
+  // typealias A = B; typealias B = A. Or protocol A: B {}; protocol B: A {}
+
+  // TODO: Handle lookup in struct nested inside function, e.g. func hi() { struct Hello { var a }; Hello().a }
+
+  // TODO: Think about isolation use cases? (That seems more like type checking)
 }
