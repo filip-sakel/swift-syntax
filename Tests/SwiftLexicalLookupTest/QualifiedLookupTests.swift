@@ -363,4 +363,6 @@ final class TestQualifiedLookup: XCTestCase {
   // TODO: Test lookup of an associated type and how it interacts with MyProto.Type, etc.
 
   // TODO: Test multiple variables/patterns and finding those, e.g., var a, b, c: Int {}, etc.
+
+  // TODO: Test function-like parameters with firstName="_", variadic arguments, trailing closures, etc.
 }

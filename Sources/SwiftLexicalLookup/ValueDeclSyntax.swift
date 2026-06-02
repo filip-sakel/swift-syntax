@@ -139,14 +139,107 @@ public struct ValueDeclSyntax: DeclSyntaxProtocol, SyntaxHashable {
   }
 }
 
+// MARK: Decl Name
+
+extension ValueDeclSyntax {
+  enum DeclNameFailure: Error {
+
+  }
+
+  /// Helper that converts a function parameter clause to declaration-name arguments
+  func _paramsToArgs(_ parameterClause: FunctionParameterClauseSyntax) -> DeclNameArgs {
+    // According to the docs, ``FunctionParameterSyntax/firstName`` is either an identifier
+    // or "_". If it's "_", then `firstName.identifier` is `nil`.
+    // TODO: Test this assumption that "_" Token syntax .identifier == nil
+    parameterClause.parameters.map({ $0.firstName.identifier })
+  }
+  /// Helper that converts an enum case element's parameter clause to declaration-name arguments
+  func _enumParamsToArgs(_ parameterClause: EnumCaseParameterClauseSyntax) -> DeclNameArgs {
+    // According to the docs, ``EnumCaseParameterClauseSyntax/firstName`` is either an identifier,
+    // "_" or nil. So if it's not convertible to an identifier, it must be `nil`.
+    // TODO: Test this assumption that "_" Token syntax .identifier == nil
+    parameterClause.parameters.map({ $0.firstName?.identifier })
+  }
+
+  var declName: DeclName {
+    switch _syntaxNode.kind {
+    // Types and variable identifiers have no args
+    case .structDecl:
+      return DeclName.fromToken(_syntaxNode.cast(StructDeclSyntax.self).name, args: nil)
+    case .enumDecl:
+      return DeclName.fromToken(_syntaxNode.cast(EnumDeclSyntax.self).name, args: nil)
+    case .classDecl:
+      return DeclName.fromToken(_syntaxNode.cast(ClassDeclSyntax.self).name, args: nil)
+    case .actorDecl:
+      return DeclName.fromToken(_syntaxNode.cast(ActorDeclSyntax.self).name, args: nil)
+    case .protocolDecl:
+      return DeclName.fromToken(_syntaxNode.cast(ProtocolDeclSyntax.self).name, args: nil)
+    case .typeAliasDecl:
+      return DeclName.fromToken(_syntaxNode.cast(TypeAliasDeclSyntax.self).name, args: nil)
+    case .associatedTypeDecl:
+      return DeclName.fromToken(_syntaxNode.cast(AssociatedTypeDeclSyntax.self).name, args: nil)
+    case .identifierPattern:
+      return DeclName.fromToken(_syntaxNode.cast(AssociatedTypeDeclSyntax.self).name, args: nil)
+    // Functions
+    case .functionDecl:
+      // TODO: Handle callAsFunction
+      let funcDecl = _syntaxNode.cast(FunctionDeclSyntax.self)
+      // TODO Perhaps factor `isStatic` out to avoid another enum
+      guard let identifier = funcDecl.name.identifier else {
+        return DeclName.invalid(nonIdentifier: funcDecl.name, _paramsToArgs(funcDecl.signature.parameterClause))
+      }
+      // Check for callAsFunction (instance method named `callAsFunction`).
+      guard _modifiersIncludeStatic(funcDecl.modifiers) || identifier.name != "callAsFunction" else {
+        return DeclName.callAsFunctionFunction(_paramsToArgs(funcDecl.signature.parameterClause))
+      }
+      return DeclName.regular(identifier: identifier, _paramsToArgs(funcDecl.signature.parameterClause))
+    case .initializerDecl:
+      let initDecl = _syntaxNode.cast(InitializerDeclSyntax.self)
+      return DeclName.`init`(_paramsToArgs(initDecl.signature.parameterClause))
+    case .deinitializerDecl:
+      // deinits don't have a name
+      return DeclName.deinit
+    // Storage
+
+    case .subscriptDecl:
+      let subscriptDecl = _syntaxNode.cast(SubscriptDeclSyntax.self)
+      return DeclName.subscript(_paramsToArgs(subscriptDecl.parameterClause))
+    // Macro
+    case .macroDecl:
+      let macroDecl = _syntaxNode.cast(MacroDeclSyntax.self)
+      return DeclName.subscript(_paramsToArgs(macroDecl.signature.parameterClause))
+    // Enum element
+    case .enumCaseElement:
+      let enumElement = _syntaxNode.cast(EnumCaseElementSyntax.self)
+      return DeclName.fromToken(
+        enumElement.name,
+        args: enumElement.parameterClause.map(_enumParamsToArgs(_:))
+      )
+    default:
+      fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
+    }
+  }
+}
+
+/// The labels of function / subscript / enum element arguments used for lookup.//
+/// A `nil` identifier indicates a `_` or nonexistent label, e.g. `init(_ param: Int)`
+/// or `case myCase(Int)`.
+/// TODO: Think about how to handle variadic (parameters + param packs) and trailing closures
+typealias DeclNameArgs = [Identifier?]
+
 indirect enum DeclName {
-  case identifiable(identifier: Identifier, DeclNameArgumentListSyntax?)
+  /// A declaration name formed by an identifier and, possibly, an argument list.
+  case regular(identifier: Identifier, DeclNameArgs?)
+
+  /// A declaration name formed by token syntax that isn't a valid identifier
+  /// and, possibly, an argument list.
+  case invalid(nonIdentifier: TokenSyntax, DeclNameArgs?)
 
   /// An instance method named `callAsFunction` can be applied called as
   /// `instance.callAsFunction(...)`, or equivalently `instance(...)`.
   /// See [proposal](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0253-callable.md)
-  case callAsFunctionFunction(DeclNameArgumentsSyntax)
-  case `init`(DeclNameArgumentListSyntax)
+  case callAsFunctionFunction(DeclNameArgs)
+  case `init`(DeclNameArgs)
 
   // Special names, i.e. names the user can't directly look up.
 
@@ -155,7 +248,7 @@ indirect enum DeclName {
   case `deinit`
   /// Similar to deinits, subscripts can't be referenced directly. Tooling
   /// may look them up by getting the name of a SubscriptCallExpr.
-  case `subscript`(DeclNameArgumentListSyntax)
+  case `subscript`(DeclNameArgs)
 
   // /// Special names are names involving some type of special handling.
   // /// Inits can be referenced
@@ -166,9 +259,21 @@ indirect enum DeclName {
   //   }
   // }
 
+  /// Tries to construct a regular name by extracting an identifier from the given token
+  /// and attaching the given args. Returns invalid name otherwise.
+  static func fromToken(
+    _ token: TokenSyntax,
+    args: DeclNameArgs?
+  ) -> DeclName {
+    guard let identifier = token.identifier else {
+      return DeclName.invalid(nonIdentifier: token, args)
+    }
+    return DeclName.regular(identifier: identifier, args)
+  }
+
   var isEditorPlaceholder: Bool {
     switch self {
-    case .identifiable(let id, _): id.isEditorPlaceholder
+    case .regular(let id, _): id.isEditorPlaceholder
     default: false
     }
   }
@@ -399,6 +504,13 @@ extension ValueDeclSyntax {
     case scopeFailure(ScopeLookupFailure)
   }
 
+  /// Whether the given list of modifiers include the `static` and/or `class` keywords.
+  func _modifiersIncludeStatic(_ modifiers: DeclModifierListSyntax) -> Bool {
+    modifiers.contains(where: { modifier in
+      modifier.name.tokenKind == .keyword(.static) || modifier.name.tokenKind == .keyword(.class)
+    })
+  }
+
   /// Whether the given declaration is available from a static/type context.
   ///
   /// Note that macro declarations are currently only supported at file scope, so they return `nil`.
@@ -419,11 +531,7 @@ extension ValueDeclSyntax {
       return switch self.modifiers {
       case .success(let modifiers):
         // Check for 'static' or 'class' modifiers
-        .success(
-          modifiers.contains(where: { modifier in
-            modifier.name.tokenKind == .keyword(.static) || modifier.name.tokenKind == .keyword(.class)
-          })
-        )
+        .success(_modifiersIncludeStatic(modifiers))
       case .failure(let scopeFailure):
         .failure(.scopeFailure(scopeFailure))
       }
