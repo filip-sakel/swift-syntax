@@ -25,14 +25,16 @@
 /// 4. Macro declarations
 /// 5. Enum element declarations
 ///
-/// Most value declarations are themselves scopes (``ScopeSyntax``). However,
+/// Most value declarations are actual declarations. However,
 /// there are two exceptions: enum case elements (``EnumCaseElementSyntax``)
 /// and identifier patterns (``IdentifierPatternSyntax``). These are value
 /// declarations because they have names and can evaluate to values, however
-/// they're not scopes as they lack things like modifiers and attributes.
+/// they're not actual declarations conforming to `DeclSyntaxProtocol` and
+/// they lack things like modifiers and attributes.
 /// While simple variable declarations like `let a: Int` contain a single
 /// identifier pattern `a`, it's possible to write `let a, b: Int`. Similarly,
-/// enum cases look like `case myCaseA, myCaseB`.
+/// enum cases look like `case myCaseA, myCaseB`. As a result, ``ValueDeclSyntax``
+/// doesn't conform to ``DeclSyntaxProtocol``.
 ///
 /// Hence, for queries to work correctly, the scope ``SyntaxProtocol/scope``
 /// for ``IdentifierPatternSyntax`` must be ``VariableDeclSyntax`` and the
