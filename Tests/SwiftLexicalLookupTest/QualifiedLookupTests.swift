@@ -375,4 +375,6 @@ final class TestQualifiedLookup: XCTestCase {
   // TODO: Handle lookup in struct nested inside function, e.g. func hi() { struct Hello { var a }; Hello().a }
 
   // TODO: Think about isolation use cases? (That seems more like type checking)
+
+  // TODO: Macro test, e.g. @freestanding macro noargsButCallable() = ...; #closure(args)
 }

@@ -116,7 +116,11 @@ extension SyntaxProtocol {
   /// - Returns: An instance of the specialized type.
   /// - Warning: This function will crash if the cast is not possible. Use `as` to safely attempt a cast.
   public func cast<S: SyntaxProtocol>(_ syntaxType: S.Type) -> S {
-    return self.as(S.self)!
+    // TODO: Check if this is acceptable
+    guard let casted = self.as(S.self) else {
+      fatalError("Cast of syntax of kind '\(kind)' to type '\(S.self) failed.")
+    }
+    return casted
   }
 
   /// Force-cast the current syntax node to ``Syntax`` node..

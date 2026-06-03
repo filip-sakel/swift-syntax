@@ -88,51 +88,49 @@ public struct ValueDeclSyntax: SyntaxProtocol, SyntaxHashable {
     ])
   }
 
-  // TODO: Create something like `DeclName` (and `DeclRefName` likewise)
-  // to properly represent function arguments and subscripts?.
-  var names: TokenSyntax? {
-    switch _syntaxNode.kind {
-    // Types
-    case .structDecl:
-      return _syntaxNode.cast(StructDeclSyntax.self).name
-    case .enumDecl:
-      return _syntaxNode.cast(EnumDeclSyntax.self).name
-    case .classDecl:
-      return _syntaxNode.cast(ClassDeclSyntax.self).name
-    case .actorDecl:
-      return _syntaxNode.cast(ActorDeclSyntax.self).name
-    case .protocolDecl:
-      return _syntaxNode.cast(ProtocolDeclSyntax.self).name
-    case .typeAliasDecl:
-      return _syntaxNode.cast(TypeAliasDeclSyntax.self).name
-    case .associatedTypeDecl:
-      return _syntaxNode.cast(AssociatedTypeDeclSyntax.self).name
-    // Functions
-    case .functionDecl:
-      // TODO: Handle callAsFunction
-      return _syntaxNode.cast(FunctionDeclSyntax.self).name
-    case .initializerDecl:
-      // TODO: Handle inits like Hello() but also the fact that we can't do [1,2].map(String.)
-      return "init"
-    case .deinitializerDecl:
-      // deinits don't have a name
-      return nil
-    // Storage
-    case .identifierPattern:
-      return _syntaxNode.cast(IdentifierPatternSyntax.self).identifier
-    case .subscriptDecl:
-      // TODO: Fix with DeclName
-      return nil
-    // Macro
-    case .macroDecl:
-      return _syntaxNode.cast(MacroDeclSyntax.self).name
-    // Enum element
-    case .enumCaseElement:
-      return _syntaxNode.cast(EnumCaseElementSyntax.self).name
-    default:
-      fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
-    }
-  }
+  // var names: TokenSyntax? {
+  //   switch _syntaxNode.kind {
+  //   // Types
+  //   case .structDecl:
+  //     return _syntaxNode.cast(StructDeclSyntax.self).name
+  //   case .enumDecl:
+  //     return _syntaxNode.cast(EnumDeclSyntax.self).name
+  //   case .classDecl:
+  //     return _syntaxNode.cast(ClassDeclSyntax.self).name
+  //   case .actorDecl:
+  //     return _syntaxNode.cast(ActorDeclSyntax.self).name
+  //   case .protocolDecl:
+  //     return _syntaxNode.cast(ProtocolDeclSyntax.self).name
+  //   case .typeAliasDecl:
+  //     return _syntaxNode.cast(TypeAliasDeclSyntax.self).name
+  //   case .associatedTypeDecl:
+  //     return _syntaxNode.cast(AssociatedTypeDeclSyntax.self).name
+  //   // Functions
+  //   case .functionDecl:
+  //     // TODO: Handle callAsFunction
+  //     return _syntaxNode.cast(FunctionDeclSyntax.self).name
+  //   case .initializerDecl:
+  //     // TODO: Handle inits like Hello() but also the fact that we can't do [1,2].map(String.)
+  //     return "init"
+  //   case .deinitializerDecl:
+  //     // deinits don't have a name
+  //     return nil
+  //   // Storage
+  //   case .identifierPattern:
+  //     return _syntaxNode.cast(IdentifierPatternSyntax.self).identifier
+  //   case .subscriptDecl:
+  //     // TODO: Fix with DeclName
+  //     return nil
+  //   // Macro
+  //   case .macroDecl:
+  //     return _syntaxNode.cast(MacroDeclSyntax.self).name
+  //   // Enum element
+  //   case .enumCaseElement:
+  //     return _syntaxNode.cast(EnumCaseElementSyntax.self).name
+  //   default:
+  //     fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
+  //   }
+  // }
 }
 
 // MARK: Decl Name
@@ -146,15 +144,44 @@ extension ValueDeclSyntax {
   func _paramsToArgs(_ parameterClause: FunctionParameterClauseSyntax) -> DeclNameArgs {
     // According to the docs, ``FunctionParameterSyntax/firstName`` is either an identifier
     // or "_". If it's "_", then `firstName.identifier` is `nil`.
-    // TODO: Test this assumption that "_" Token syntax .identifier == nil
-    parameterClause.parameters.map({ $0.firstName.identifier })
+    parameterClause.parameters.map({ Identifier(validating: $0.firstName) })
+  }
+  /// Helper that converts a subscript parameter clause to declaration-name arguments
+  ///
+  /// This is because subscripts don't have argument labels by default.
+  func _subscriptParamsToArgs(_ parameterClause: FunctionParameterClauseSyntax) -> DeclNameArgs {
+    // According to the docs, ``FunctionParameterSyntax/firstName`` is either an identifier
+    // or "_". If it's "_", then `firstName.identifier` is `nil`.
+    parameterClause.parameters.map({
+      // Subscripts need both names to get an argument label.
+      guard $0.secondName != nil else { return nil }
+      return Identifier(validating: $0.firstName)
+    })
   }
   /// Helper that converts an enum case element's parameter clause to declaration-name arguments
   func _enumParamsToArgs(_ parameterClause: EnumCaseParameterClauseSyntax) -> DeclNameArgs {
     // According to the docs, ``EnumCaseParameterClauseSyntax/firstName`` is either an identifier,
     // "_" or nil. So if it's not convertible to an identifier, it must be `nil`.
-    // TODO: Test this assumption that "_" Token syntax .identifier == nil
-    parameterClause.parameters.map({ $0.firstName?.identifier })
+    parameterClause.parameters.map({ $0.firstName.flatMap(Identifier.init(validating:)) })
+  }
+
+  /// Returns true if the given macro is freestanding; false if attached.
+  func _macroType(_ macroDecl: MacroDeclSyntax) -> DeclName.MacroType {
+    // TODO: Implement in a way that handles if configs
+
+    // return macroDecl.attributes.reduce(
+    //   DeclName.MacroType(isFreestanding: false, isAttached: false),
+    //   { (macroType: DeclName.MacroType, attribute: AttributeListSyntax.Element) -> DeclName.MacroType in
+    //     return DeclName.MacroType(
+    //       isFreestanding: macroType.isFreestanding
+    //         || attribute.attributeName.as(IdentifierTypeSyntax.self)?.name == .identifier("freestanding"),
+    //       isAttached: macroType.isAttached
+    //         || attribute.attributeName.as(IdentifierTypeSyntax.self)?.name == .identifier("attached")
+    //     )
+    //   }
+    // )
+    print("[SwiftLexicalLookup] Warning: Macro type determination hasn't been implemented yet.")
+    return DeclName.MacroType(isFreestanding: false, isAttached: false)
   }
 
   var declName: DeclName {
@@ -175,16 +202,15 @@ extension ValueDeclSyntax {
     case .associatedTypeDecl:
       return DeclName.fromToken(_syntaxNode.cast(AssociatedTypeDeclSyntax.self).name, args: nil)
     case .identifierPattern:
-      return DeclName.fromToken(_syntaxNode.cast(AssociatedTypeDeclSyntax.self).name, args: nil)
+      return DeclName.fromToken(_syntaxNode.cast(IdentifierPatternSyntax.self).identifier, args: nil)
     // Functions
     case .functionDecl:
       // TODO: Handle callAsFunction
       let funcDecl = _syntaxNode.cast(FunctionDeclSyntax.self)
-      // TODO Perhaps factor `isStatic` out to avoid another enum
       guard let identifier = Identifier(validating: funcDecl.name) else {
         return DeclName.invalid(
           nonIdentifier: funcDecl.name.tokenKind,
-          _paramsToArgs(funcDecl.signature.parameterClause)
+          args: _paramsToArgs(funcDecl.signature.parameterClause)
         )
       }
       // Check for callAsFunction (instance method named `callAsFunction`).
@@ -194,12 +220,12 @@ extension ValueDeclSyntax {
         // Check we're actually in a decl group
         funcDecl.parentScope?.isProtocol((any DeclGroupSyntax).self) == true
       {
-        return DeclName.callAsFunction(_paramsToArgs(funcDecl.signature.parameterClause))
+        return DeclName.callAsFunction(args: _paramsToArgs(funcDecl.signature.parameterClause))
       }
-      return DeclName.regular(identifier: identifier, _paramsToArgs(funcDecl.signature.parameterClause))
+      return DeclName.identifier(identifier: identifier, args: _paramsToArgs(funcDecl.signature.parameterClause))
     case .initializerDecl:
       let initDecl = _syntaxNode.cast(InitializerDeclSyntax.self)
-      return DeclName.`init`(_paramsToArgs(initDecl.signature.parameterClause))
+      return DeclName.`init`(args: _paramsToArgs(initDecl.signature.parameterClause))
     case .deinitializerDecl:
       // deinits don't have a name
       return DeclName.deinit
@@ -207,11 +233,15 @@ extension ValueDeclSyntax {
 
     case .subscriptDecl:
       let subscriptDecl = _syntaxNode.cast(SubscriptDeclSyntax.self)
-      return DeclName.subscript(_paramsToArgs(subscriptDecl.parameterClause))
+      return DeclName.subscript(args: _subscriptParamsToArgs(subscriptDecl.parameterClause))
     // Macro
     case .macroDecl:
       let macroDecl = _syntaxNode.cast(MacroDeclSyntax.self)
-      return DeclName.subscript(_paramsToArgs(macroDecl.signature.parameterClause))
+      return DeclName.fromToken(
+        macroDecl.name,
+        macro: _macroType(macroDecl),
+        args: _paramsToArgs(macroDecl.signature.parameterClause)
+      )
     // Enum element
     case .enumCaseElement:
       let enumElement = _syntaxNode.cast(EnumCaseElementSyntax.self)
@@ -241,8 +271,38 @@ extension Identifier {
 }
 
 indirect enum DeclName: Hashable {
+  /// A macro can be freestanding and/or attached.
+  ///
+  /// Both flags are off when the user failed to specify
+  /// their macro's type.
+  struct MacroType: Hashable {
+    let isFreestanding: Bool
+    let isAttached: Bool
+  }
+  enum IdentifierType: Hashable {
+    /// A regular identifier, like a function or pattern identifier.
+    ///
+    /// E.g. We refer to `var a: Int` as `a`.
+    case regular
+    // An identifier for a macro.
+    //
+    // The type is `nil` if the user failed to specify a macro type (freestanding
+    // and/or attached).
+    //
+    // Note that when performing lookup, attached macros are flexible with
+    // parentheses, e.g., we can write both as `@Observable` and
+    // `@Observable()` (with parentheses). However, freestanding macros will
+    // match any arguments with the macro decl (if there are any), and then
+    // substitute. But since `#file` is (usually) inferred as a string, it's
+    // invalid to write `#file()` because `String` isn't callable.
+    case macro(MacroType?)
+  }
+
   /// A declaration name formed by an identifier and, possibly, an argument list.
-  case regular(identifier: Identifier, DeclNameArgs?)
+  ///
+  /// Regular declarations like functions have `macro == nil` and only macros
+  /// set `MacroType`.
+  case identifier(identifier: Identifier, macro: MacroType? = nil, args: DeclNameArgs?)
 
   /// A declaration name formed by token syntax that isn't a valid identifier
   /// and, possibly, an argument list.
@@ -250,13 +310,13 @@ indirect enum DeclName: Hashable {
   /// Note that `nonIdentifier` is a ``TokenKind`` instead of `TokenSyntax`
   /// because the latter tracks things like leading and trailing trivia which
   /// makes comparisons harder.
-  case invalid(nonIdentifier: TokenKind, DeclNameArgs?)
+  case invalid(nonIdentifier: TokenKind, macro: MacroType? = nil, args: DeclNameArgs?)
 
   /// An instance method named `callAsFunction` can be applied called as
   /// `instance.callAsFunction(...)`, or equivalently `instance(...)`.
   /// See [proposal](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0253-callable.md)
-  case callAsFunction(DeclNameArgs)
-  case `init`(DeclNameArgs)
+  case callAsFunction(args: DeclNameArgs)
+  case `init`(args: DeclNameArgs)
 
   // Special names, i.e. names the user can't directly look up.
 
@@ -265,7 +325,7 @@ indirect enum DeclName: Hashable {
   case `deinit`
   /// Similar to deinits, subscripts can't be referenced directly. Tooling
   /// may look them up by getting the name of a SubscriptCallExpr.
-  case `subscript`(DeclNameArgs)
+  case `subscript`(args: DeclNameArgs)
 
   // /// Special names are names involving some type of special handling.
   // /// Inits can be referenced
@@ -280,17 +340,18 @@ indirect enum DeclName: Hashable {
   /// and attaching the given args. Returns invalid name otherwise.
   static func fromToken(
     _ token: TokenSyntax,
+    macro: MacroType? = nil,
     args: DeclNameArgs?
   ) -> DeclName {
     guard let identifier = Identifier(validating: token) else {
-      return DeclName.invalid(nonIdentifier: token.tokenKind, args)
+      return DeclName.invalid(nonIdentifier: token.tokenKind, macro: macro, args: args)
     }
-    return DeclName.regular(identifier: identifier, args)
+    return DeclName.identifier(identifier: identifier, macro: macro, args: args)
   }
 
   var isEditorPlaceholder: Bool {
     switch self {
-    case .regular(let id, _): id.isEditorPlaceholder
+    case .identifier(let id, _, _): id.isEditorPlaceholder
     default: false
     }
   }
@@ -715,95 +776,94 @@ extension SyntaxProtocol {
   }
 }
 
-indirect enum UnresolvedTypeRef: Equatable {
-  case member(UnresolvedTypeRef?, moduleName: Identifier?, typeMember: Identifier)
-  case `function`(args: [UnresolvedTypeRef], returnType: [UnresolvedTypeRef])
-
-  init(syntax: TypeSyntax) {
-    // FIXME: TODO
-  }
-}
-
-extension ValueDeclSyntax {
-
-  // TODO: Figure out how to handle nominal types inside function-likes
-  // (funcs, inits, deinits, var accessors, subscripts), i.e., 'anonymous' contexts
-  private func _getTypeDeclType(_ typeDecl: some NominalTypeDeclSyntax) -> UnresolvedTypeRef? {
-    // Approach 1: If the type of the parent named decl is a metatype, then attach ourselves instead of .Type
-    //
-    // Approach 2: Go up the tree and check for 3 things:
-    //   (1) found decl context => return as global type
-    //   (2) found nominal type || prptocol => return membertype of <decl group type>.name
-    //   (3) found extension => return <extension type>.name
-    //   (4) anything else => keep going up
-
-    // No type with invalid identifier
-    guard let name: String = Identifier(validating: typeDecl.name) else { return nil }
-    func process(node: Syntax) -> UnresolvedTypeRef? {
-      if self._asDeclContext != nil {
-        return TypeRef.member(nil, moduleName: nil, typeMember: name)
-      } else if let nominalParent = node.asProtocol((any NominalTypeDeclSyntax).self) {
-        // FIXME: Remove `DeclGroupSyntax` init (it's wrong; should be protos + nominal type decls)
-        return TypeRef.member(ValueDeclSyntax(nominalParent).contextualType, moduleName: nil, typeMember: name)
-      } else if let extensionParent = node.as(ExtensionDeclSyntax.self) {
-        return TypeRef.member(TypeRef(syntax: extensionParent.extendedType), moduleName: nil, typeMember: name)
-      } else if let grandparent = node.parent {
-        return process(node: grandparent)
-      } else {
-        return nil
-      }
-    }
-
-    return parent.flatMap(process(node:))
-  }
-
-  /// A type that's valid in ``ValueDeclSyntax/declContext``.
-  var contextualType: UnresolvedTypeRef? {
-    // fatalError("[SwiftLexicalLookup] Internal Error: `type` query is not yet implemented for ValueDeclSyntax")
-    switch _syntaxNode.kind {
-    // Types
-    case .structDecl:
-      return _getDeclGroupType(_syntaxNode.cast(StructDeclSyntax.self))
-    case .enumDecl:
-      return _getDeclGroupType(_syntaxNode.cast(EnumDeclSyntax.self))
-    case .classDecl:
-      return _getDeclGroupType(_syntaxNode.cast(ClassDeclSyntax.self))
-    case .actorDecl:
-      return _getDeclGroupType(_syntaxNode.cast(ActorDeclSyntax.self))
-    case .protocolDecl:
-      return _getDeclGroupType(_syntaxNode.cast(ProtocolDeclSyntax.self))
-    case .typeAliasDecl:
-      return TypeRef(syntax: _syntaxNode.cast(TypeAliasDeclSyntax.self).initializer.value)
-    case .associatedTypeDecl:
-      return _syntaxNode.cast(AssociatedTypeDeclSyntax.self).name
-
-    case .initializerDecl:
-      // (Args...) -> Self
-    case .deinitializerDecl:
-      // (Self) -> () -> Void
-      // Function-like, user provided
-    case .identifierPattern:
-      // Either ScopeLookupError, or RetType not provided error for computer, or .inferFromLet, or VarDecl RetType
-    case .functionDecl:
-      // Either (Self) -> (Args...) -> RetType or (Args...) -> RetType
-      // TODO: Handle callAsFunction
-      return _syntaxNode.cast(FunctionDeclSyntax.self).name
-    case .subscriptDecl:
-      // Either (Self) -> (Args...) -> RetType or (Args...) -> RetType
-
-      // Macro
-    case .macroDecl:
-      return _syntaxNode.cast(MacroDeclSyntax.self).name
-    // Enum element
-    case .enumCaseElement:
-      return _syntaxNode.cast(EnumCaseElementSyntax.self).name
-    default:
-      fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
-    }
-
-  }
-}
-
+// indirect enum UnresolvedTypeRef: Equatable {
+//   case member(UnresolvedTypeRef?, moduleName: Identifier?, typeMember: Identifier)
+//   case `function`(args: [UnresolvedTypeRef], returnType: [UnresolvedTypeRef])
+//
+//   init(syntax: TypeSyntax) {
+//     // FIXME: TODO
+//   }
+// }
+//
+// extension ValueDeclSyntax {
+//
+//   // TODO: Figure out how to handle nominal types inside function-likes
+//   // (funcs, inits, deinits, var accessors, subscripts), i.e., 'anonymous' contexts
+//   private func _getTypeDeclType(_ typeDecl: some NominalTypeDeclSyntax) -> UnresolvedTypeRef? {
+//     // Approach 1: If the type of the parent named decl is a metatype, then attach ourselves instead of .Type
+//     //
+//     // Approach 2: Go up the tree and check for 3 things:
+//     //   (1) found decl context => return as global type
+//     //   (2) found nominal type || prptocol => return membertype of <decl group type>.name
+//     //   (3) found extension => return <extension type>.name
+//     //   (4) anything else => keep going up
+//
+//     // No type with invalid identifier
+//     guard let name: String = Identifier(validating: typeDecl.name) else { return nil }
+//     func process(node: Syntax) -> UnresolvedTypeRef? {
+//       if self._asDeclContext != nil {
+//         return TypeRef.member(nil, moduleName: nil, typeMember: name)
+//       } else if let nominalParent = node.asProtocol((any NominalTypeDeclSyntax).self) {
+//         return TypeRef.member(ValueDeclSyntax(nominalParent).contextualType, moduleName: nil, typeMember: name)
+//       } else if let extensionParent = node.as(ExtensionDeclSyntax.self) {
+//         return TypeRef.member(TypeRef(syntax: extensionParent.extendedType), moduleName: nil, typeMember: name)
+//       } else if let grandparent = node.parent {
+//         return process(node: grandparent)
+//       } else {
+//         return nil
+//       }
+//     }
+//
+//     return parent.flatMap(process(node:))
+//   }
+//
+//   /// A type that's valid in ``ValueDeclSyntax/declContext``.
+//   var contextualType: UnresolvedTypeRef? {
+//     // fatalError("[SwiftLexicalLookup] Internal Error: `type` query is not yet implemented for ValueDeclSyntax")
+//     switch _syntaxNode.kind {
+//     // Types
+//     case .structDecl:
+//       return _getDeclGroupType(_syntaxNode.cast(StructDeclSyntax.self))
+//     case .enumDecl:
+//       return _getDeclGroupType(_syntaxNode.cast(EnumDeclSyntax.self))
+//     case .classDecl:
+//       return _getDeclGroupType(_syntaxNode.cast(ClassDeclSyntax.self))
+//     case .actorDecl:
+//       return _getDeclGroupType(_syntaxNode.cast(ActorDeclSyntax.self))
+//     case .protocolDecl:
+//       return _getDeclGroupType(_syntaxNode.cast(ProtocolDeclSyntax.self))
+//     case .typeAliasDecl:
+//       return TypeRef(syntax: _syntaxNode.cast(TypeAliasDeclSyntax.self).initializer.value)
+//     case .associatedTypeDecl:
+//       return _syntaxNode.cast(AssociatedTypeDeclSyntax.self).name
+//
+//     case .initializerDecl:
+//       // (Args...) -> Self
+//     case .deinitializerDecl:
+//       // (Self) -> () -> Void
+//       // Function-like, user provided
+//     case .identifierPattern:
+//       // Either ScopeLookupError, or RetType not provided error for computer, or .inferFromLet, or VarDecl RetType
+//     case .functionDecl:
+//       // Either (Self) -> (Args...) -> RetType or (Args...) -> RetType
+//       // TODO: Handle callAsFunction
+//       return _syntaxNode.cast(FunctionDeclSyntax.self).name
+//     case .subscriptDecl:
+//       // Either (Self) -> (Args...) -> RetType or (Args...) -> RetType
+//
+//       // Macro
+//     case .macroDecl:
+//       return _syntaxNode.cast(MacroDeclSyntax.self).name
+//     // Enum element
+//     case .enumCaseElement:
+//       return _syntaxNode.cast(EnumCaseElementSyntax.self).name
+//     default:
+//       fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
+//     }
+//
+//   }
+// }
+//
 // MARK: Inits
 
 // Other Types
