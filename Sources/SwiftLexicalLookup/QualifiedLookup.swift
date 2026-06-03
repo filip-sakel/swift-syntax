@@ -578,8 +578,6 @@ extension SymbolTable {
     kind memberKind: MemberKind,
     configuredRegions: ConfiguredRegions?
   ) -> [ValueDeclSyntax] {
-    // FIXME: Filter by memberKind
-
     /// Process a member or a member nested inside an if-config declaration.
     ///
     /// This pattern is similar to the SyntaxVisitor pattern, but a SyntaxVisitor
@@ -592,6 +590,7 @@ extension SymbolTable {
           // TODO: Handle module selectors
           case .failure = valueDecl.declName.tryMatch(reference: expectedName.coreName)
         {
+          print("Failed match between \(valueDecl.declName) and \(name) because:", valueDecl.declName.tryMatch(reference: expectedName.coreName))
           return []
         }
         // Filter for the type

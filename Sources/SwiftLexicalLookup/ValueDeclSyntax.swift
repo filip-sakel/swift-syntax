@@ -270,7 +270,7 @@ extension Identifier {
   }
 }
 
-indirect enum DeclName: Hashable {
+indirect enum DeclName: Hashable, CustomDebugStringConvertible {
   /// A macro can be freestanding and/or attached.
   ///
   /// Both flags are off when the user failed to specify
@@ -336,6 +336,45 @@ indirect enum DeclName: Hashable {
     case .identifier(let id, _, _): id.isEditorPlaceholder
     default: false
     }
+  }
+  var debugDescription: String {
+    /// Create a debug string for the given arguments. The argument list is
+    /// empty when `args == nil`. Enclose in parentheses if `withParens == true`.
+    func describeArgs(_ args: DeclNameArgs?, withParens: Bool = true) -> String {
+      guard let args else { return "" }
+      // Args have the form `(arg1:arg2:...)`. Args without labels
+      // use an underscore.
+      let argList = args.map({ ($0?.name ?? "_") + ":" }).joined(separator: "")
+      return if withParens { "(\(argList))" } else { argList }
+    }
+
+    func describeMacro(_ macroType: MacroType?) -> String {
+      guard let macroType else { return "" }
+      // Match freestanding/attached
+      return switch (macroType.isFreestanding, macroType.isAttached) {
+      case (true, true): "(#/@)"
+      case (true, false): "#"
+      case (false, true): "@"
+      case (false, false): "(??)"
+      }
+    }
+
+    let baseName: String =
+      switch self {
+      case .identifier(let identifier, let macro, let args):
+        "\(describeMacro(macro))\(identifier.name)\(describeArgs(args))"
+
+      case .invalid(let nonIdentifier, let macro, let args):
+        "\(describeMacro(macro))<?\(nonIdentifier)?>\(describeArgs(args))"
+      case .callAsFunction(let args): "callAsFunction\(describeArgs(args))"
+
+      case .subscript(let args): "[\(describeArgs(args, withParens: false))]"
+      case .`init`(let args): "*init*\(describeArgs(args))"
+      // Trivial cases
+      case .deinit: "*deinit*"
+      }
+
+    return "''\(baseName)''"
   }
 
   enum MatchFailure: Error {
@@ -414,7 +453,7 @@ struct DeclNameRef {
   /// Similar to `DeclNameRef` but allows referring to a declaration by writing
   /// non-compound name, e.g. we can refer to the init in `struct A { init(a: Int) {} }`
   /// both as `A.init(a:)` and `A.init`.
-  indirect enum CoreName: Hashable {
+  indirect enum CoreName: Hashable, CustomDebugStringConvertible {
     /// Like `DeclName/identifier` but with a specific macro reference.
     ///
     /// Unlike `DeclName`, this could include `callAsFunction`.
@@ -453,6 +492,41 @@ struct DeclNameRef {
     //   // TODO: Handle module selector
     //   return DeclNameRef(coreName: .identifier: identifier, macro: macro, args: args))
     // }
+
+    var debugDescription: String {
+      /// Create a debug string for the given arguments. The argument list is
+      /// empty when `args == nil`. Enclose in parentheses if `withParens == true`.
+      func describeArgs(_ args: DeclNameArgs?, withParens: Bool = true) -> String {
+        guard let args else { return "" }
+        // Args have the form `(arg1:arg2:...)`. Args without labels
+        // use an underscore.
+        let argList = args.map({ ($0?.name ?? "_") + ":" }).joined(separator: "")
+        return if withParens { "(\(argList))" } else { argList }
+      }
+
+      let baseName: String
+      switch self {
+      case .identifier(let identifier, let macroRef, let args):
+        let prefix =
+          switch macroRef {
+          case nil: ""  // e.g. `Int`
+          case .attached: "@"  // e.g. `@Observable`
+          case .freestanding: "#"  // e.g. `#file`
+          }
+        baseName = "\(prefix)\(identifier.name)\(describeArgs(args))"
+
+      case .subscript(let args): baseName = "[\(describeArgs(args, withParens: false))]"
+      case .unnamedCall(let args): baseName = describeArgs(args)
+      case .`init`(let args): baseName = "*init*\(describeArgs(args))"
+      // Trivial cases
+      case .deinit: baseName = "*deinit*"
+      case .self: baseName = "*self*"
+      case .Type: baseName = "*Type*"
+      case .Protocol: baseName = "*Protocol*"
+      }
+
+      return "``\(baseName)``"
+    }
   }
 
   let moduleSelector: ModuleSelectorSyntax? = nil
