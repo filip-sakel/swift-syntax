@@ -262,7 +262,7 @@ extension ValueDeclSyntax {
 typealias DeclNameArgs = [Identifier?]
 
 extension Identifier {
-  fileprivate init?(validating token: TokenSyntax) {
+  init?(validating token: TokenSyntax) {
     guard let identifier = token.identifier, !token.hasError else {
       return nil
     }
@@ -278,24 +278,6 @@ indirect enum DeclName: Hashable {
   struct MacroType: Hashable {
     let isFreestanding: Bool
     let isAttached: Bool
-  }
-  enum IdentifierType: Hashable {
-    /// A regular identifier, like a function or pattern identifier.
-    ///
-    /// E.g. We refer to `var a: Int` as `a`.
-    case regular
-    // An identifier for a macro.
-    //
-    // The type is `nil` if the user failed to specify a macro type (freestanding
-    // and/or attached).
-    //
-    // Note that when performing lookup, attached macros are flexible with
-    // parentheses, e.g., we can write both as `@Observable` and
-    // `@Observable()` (with parentheses). However, freestanding macros will
-    // match any arguments with the macro decl (if there are any), and then
-    // substitute. But since `#file` is (usually) inferred as a string, it's
-    // invalid to write `#file()` because `String` isn't callable.
-    case macro(MacroType?)
   }
 
   /// A declaration name formed by an identifier and, possibly, an argument list.
@@ -355,33 +337,126 @@ indirect enum DeclName: Hashable {
     default: false
     }
   }
+
+  enum MatchFailure: Error {
+    case idMismatch
+    case noMatch
+    case wrongMacroType
+    case argumentMismatch
+    case macroMismatch
+  }
+  /// Try to match this declaration's name with the given
+  func tryMatch(reference: DeclNameRef.CoreName) -> Result<Void, MatchFailure> {
+    switch (self, reference) {
+    // Deinits always match
+    case (.deinit, .deinit):
+      return .success(())
+
+    // Match init if reference doesn't provide arguments.
+    case (.`init`(_), .`init`(args: nil)):
+      return .success(())
+    // For inits and subscripts, check that arguments match
+    case (.`init`(let argsA), .`init`(let argsB?)),
+      (.subscript(let argsA), .subscript(let argsB)):
+      guard argsA == argsB else { return .failure(MatchFailure.argumentMismatch) }
+      return .success(())
+
+    // Identifiers need to check macro type, identifiers and arguments
+    case let (.identifier(idA, macroType, optionalArgsA), .identifier(idB, macroRef, optionalArgsB)):
+      // Check if macro types match
+      //
+      // E.g. If we're expecting `@Observable` we can match with neither
+      // `#Observable` nor `Observable`
+      let macroMatches =
+        switch (macroType, macroRef) {
+        case (nil, nil): true
+        case (let macroType?, .freestanding): macroType.isFreestanding
+        case (let macroType?, .attached): macroType.isAttached
+        default: false
+        }
+      guard macroMatches else { return .failure(MatchFailure.wrongMacroType) }
+
+      // Check ids match
+      guard idA == idB else { return .failure(MatchFailure.idMismatch) }
+
+      // Check args only if both the declaration and reference specify them.
+      //
+      // Here are some valid examples:
+      // 1. Neither declaration nor reference have args:
+      //      let a = 5
+      //      a // Reference "a" has type "Int"
+      // 2. Declaration has args, but reference doesn't:
+      //      func f(x: Int) {}
+      //      let ref = f // Reference "f" has type "(Int) -> Void"
+      // 3. Declaration has no args, but reference does:
+      //      let f = { 5 }
+      //      f(5) // Reference "f" has type Int
+      //    Note that in this example there's one, unlabeled argument.
+      // func f(x: Int) {}
+      if let argsA = optionalArgsA, let argsB = optionalArgsB, argsA != argsB {
+        return .failure(MatchFailure.argumentMismatch)
+      }
+
+      return .success(())
+    default:
+      return .failure(MatchFailure.noMatch)
+    }
+  }
 }
 
 struct DeclNameRef {
+  /// A macro reference is either freestanding or attached
+  enum MacroReference: Hashable {
+    case freestanding
+    case attached
+  }
+
   /// Similar to `DeclNameRef` but allows referring to a declaration by writing
   /// non-compound name, e.g. we can refer to the init in `struct A { init(a: Int) {} }`
   /// both as `A.init(a:)` and `A.init`.
-  indirect enum DeclRef {
-    case normal(DeclNameArgumentListSyntax?)
+  indirect enum CoreName: Hashable {
+    /// Like `DeclName/identifier` but with a specific macro reference.
+    ///
+    /// Unlike `DeclName`, this could include `callAsFunction`.
+    case identifier(identifier: Identifier, macro: MacroReference? = nil, args: DeclNameArgs? = nil)
 
-    /// An instance method named `callAsFunction` can be applied called as
-    /// `instance.callAsFunction(...)`, or equivalently `instance(...)`.
-    /// See [proposal](https://github.com/swiftlang/swift-evolution/blob/main/proposals/0253-callable.md)
-    case callAsFunction(DeclNameArgumentsSyntax?)
-    case `init`(DeclNameArgumentListSyntax?)
+    /// An explicit reference to init. E.g. `MyType.init`. Note that the user
+    /// may not specify arguments when just referencing init.
+    case `init`(args: DeclNameArgs?)
+
+    /// An unnamed call could refer to an init in a static context
+    /// or a `callAsFunction` if it's an instance. It could also
+    /// refer to `@dynamicallyCallable` or `@dynamicMemberLookup`.
+    case unnamedCall(args: DeclNameArgs)
 
     // Special names, i.e. names the user can't directly look up.
 
-    /// Deinit can't be looked up via a user query, e.g. `MyClass.deinit` ❌.
-    /// However, tooling may look for deinits in a class.
+    /// Only tooling can reference deinits.
     case `deinit`
+
+    case `self`
+    case `Type`
+    case `Protocol`
+
     /// Similar to deinits, subscripts can't be referenced directly. Tooling
     /// may look them up by getting the name of a SubscriptCallExpr.
-    case `subscript`(DeclNameArgumentListSyntax)
+    case `subscript`(args: DeclNameArgs)
+
+    // /// Tries to construct a regular name by extracting an identifier from the given token
+    // /// and attaching the given args. Returns invalid name otherwise.
+    // static func fromToken(
+    //   _ token: TokenSyntax,
+    //   macro: MacroReference? = nil,
+    //   args: DeclNameArgs?
+    // ) -> DeclNameRef? {
+    //   guard let identifier = Identifier(validating: token) else { return nil }
+    //   // TODO: Handle module selector
+    //   return DeclNameRef(coreName: .identifier: identifier, macro: macro, args: args))
+    // }
   }
 
-  let moduleSelector: ModuleSelectorSyntax?
-  let coreName: DeclName
+  let moduleSelector: ModuleSelectorSyntax? = nil
+  let coreName: CoreName
 }
 
 // MARK: Basic Queries
@@ -701,14 +776,14 @@ extension ValueDeclSyntax {
 // }
 
 extension SyntaxProtocol {
-  /// Try to convert this syntax to a declaration context consisting of the
-  /// underlying codeblock list item list and a flag for whether this is file context.
+  /// Try to convert this syntax to a declaration scope consisting of the
+  /// underlying codeblock list item list and a flag for whether this is file scope.
   ///
-  /// If this declaration isn't a declaration context, we return `nil`. If it
-  /// is a declaration context (code block item list syntax) without a parent,
-  /// we set `isFileContext` to `nil`. We only get `isFileContext == true`
-  /// when the context is the direct child of ``SourceFileSyntax``.
-  fileprivate var _asDeclContext: (CodeBlockItemListSyntax, isFileContext: Bool?)? {
+  /// If this declaration isn't a declaration scope, we return `nil`. If it
+  /// is a declaration scope (code block item list syntax) without a parent,
+  /// we set `isFileScope` to `nil`. We only get `isFileScope == true`
+  /// when the scope is the direct child of ``SourceFileSyntax``.
+  fileprivate var _asDeclScope: (CodeBlockItemListSyntax, isFileScope: Bool?)? {
     // Check we a code block with a parent.
     guard let codeBlock = self.as(CodeBlockItemListSyntax.self) else { return nil }
 
@@ -722,13 +797,13 @@ extension SyntaxProtocol {
     return (codeBlock, isSourceFile)
   }
 
-  /// Finds the declaration context of the current value declaration by looking
+  /// Finds the declaration scope of the current value declaration by looking
   /// through its recursive parents.
   ///
-  /// A declaration context is basically any ``CodeBlockItemListSyntax``, whose
-  /// child declarations can only be referenced within said context's block
+  /// A declaration scope is basically any ``CodeBlockItemListSyntax``, whose
+  /// child declarations can only be referenced within said scope's block
   /// items (with the exception of ``SourceFileSyntax``). The most common
-  /// declaration context is the code block of the source file itself:
+  /// declaration scope is the code block of the source file itself:
   ///   // File.swift
   ///   struct MyStruct {}
   /// Here, `MyStruct` is accessible within the entire file and --because
@@ -740,20 +815,20 @@ extension SyntaxProtocol {
   ///     struct B {}
   ///     func myFunc() { struct C {} }
   ///   }
-  /// In this example there are two declarations context: (1) the source file
+  /// In this example there are two declarations scope: (1) the source file
   /// itself (like in any valid syntax tree) and (2) the body of `myFunc`.
-  /// Because structs `A` and `B` are in the same context, which happens to be
-  /// a file context, they're accessible in the entire module as `A` and `A.B`.
+  /// Because structs `A` and `B` are in the same scope, which happens to be
+  /// a file scope, they're accessible in the entire module as `A` and `A.B`.
   /// However, they're no way to refer to `C` outside of the body of `myFunc`.
-  var declContext: (CodeBlockItemListSyntax, isFileContext: Bool?)? {
-    // No parent means no context.
+  var declScope: (CodeBlockItemListSyntax, isFileScope: Bool?)? {
+    // No parent means no scope.
     //
     // In this case, if `self` isn't a `SourceFileSyntax`, the syntax tree
     // is likely invalid
     guard let parent else { return nil }
 
     // See if parent is a declaration context; otherwise, get its context.
-    return parent._asDeclContext ?? parent.declContext
+    return parent._asDeclScope ?? parent.declScope
 
     // // See if our parent forms a declaration context.
     // guard let codeBlock = parent.as(CodeBlockItemListSyntax.self) else {

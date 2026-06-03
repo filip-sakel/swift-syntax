@@ -339,17 +339,20 @@ struct CanonicalType: Hashable {
 }
 
 public class SymbolTable {
-  let fileSyntax: SourceFileSyntax
+  let declScope: CodeBlockItemListSyntax
   lazy var globalGroups:
     (
       types: [Identifier: [DeclGroupSyntaxType]],
       extensions: [CanonicalType: [ExtensionDeclSyntax]],
       aliases: [Identifier: [TypeAliasDeclSyntax]]
-    ) = SymbolTable._getTypes(of: fileSyntax)
+    ) = SymbolTable._getTypes(of: declScope)
   /// Construct a table for caching symbol lookup
-  /// for the given file syntax.
-  public init(fileSyntax: SourceFileSyntax) {
-    self.fileSyntax = fileSyntax
+  /// for the given declaration scope.
+  public init(declScope: CodeBlockItemListSyntax) {
+    self.declScope = declScope
+  }
+  public convenience init(sourceFile: SourceFileSyntax) {
+    self.init(declScope: sourceFile.statements)
   }
 
   static func _addCodeBlock(
@@ -367,13 +370,16 @@ public class SymbolTable {
       let typeName = nominalType.name.identifier
     {
       types[typeName, default: []].append(DeclGroupSyntaxType(exactly: nominalType))
-      //   2. protocols (same as nominal types)
-    } else if let protocolDecl = decl.as(ProtocolDeclSyntax.self),
+    }
+    //   2. protocols (same as nominal types)
+    else if let protocolDecl = decl.as(ProtocolDeclSyntax.self),
       let typeName = protocolDecl.name.identifier
     {
       types[typeName, default: []].append(DeclGroupSyntaxType(exactly: protocolDecl))
-      //   3. extensions (different because extensions can have a member type, e.g. `extension A.B {}`)
-    } else if let extensionDecl = decl.as(ExtensionDeclSyntax.self) {
+    }
+    //   3. extensions (different because extensions can have a member type, e.g. `extension A.B {}`)
+    //    TODO: Only do at file scope
+    else if let extensionDecl = decl.as(ExtensionDeclSyntax.self) {
       // Check the extended type isn't `Any` or `Self`; these are caught in Semantic Analysis
       // but we don't want name lookup to get confused
       // TODO: Check if this actually happens
@@ -388,8 +394,9 @@ public class SymbolTable {
       for resolvedType in possibleResolutions {
         extensions[resolvedType, default: []].append(extensionDecl)
       }
-      // Look for type aliases
-    } else if let typeAlias = decl.as(TypeAliasDeclSyntax.self),
+    }
+    // Look for type aliases
+    else if let typeAlias = decl.as(TypeAliasDeclSyntax.self),
       let typeName = typeAlias.name.identifier
     {
       aliases[typeName, default: []].append(typeAlias)
@@ -418,10 +425,10 @@ public class SymbolTable {
     return (nestedTypes, aliases)
   }
 
-  /// Retrieve all declaration groups in the top level of the given file syntax
+  /// Retrieve all declaration groups in the top level of the given declaration scope
   /// (no recursion).
   static func _getTypes(
-    of fileSyntax: SourceFileSyntax
+    of declScope: CodeBlockItemListSyntax
   ) -> (
     types: [Identifier: [DeclGroupSyntaxType]],
     extensions: [CanonicalType: [ExtensionDeclSyntax]],
@@ -431,7 +438,7 @@ public class SymbolTable {
     var extensions = [CanonicalType: [ExtensionDeclSyntax]]()
     var aliases = [Identifier: [TypeAliasDeclSyntax]]()
 
-    for stmt in fileSyntax.statements {
+    for stmt in declScope {
       // Only declarations can introduce types
       guard case .decl(let decl) = stmt.item else { continue }
       // Process
@@ -528,7 +535,7 @@ extension SymbolTable {
   /// if provided. The `config` resolves if-configs, if provided.
   private func _lookUpTypeMember(
     type: TypeSyntax,
-    identifier: Identifier?,
+    name: DeclNameRef?,
     kind memberKind: MemberKind,
     config: QualifiedTableLookupConfig,
     into results: inout [CanonicalType: [QualifiedLookupResult]]
@@ -536,7 +543,7 @@ extension SymbolTable {
     if let identifierType = type.as(IdentifierTypeSyntax.self) {
       _lookUpGlobalTypeMember(
         type: identifierType,
-        identifier: identifier,
+        name: name,
         kind: memberKind,
         config: config,
         into: &results
@@ -544,7 +551,7 @@ extension SymbolTable {
     } else if let memberType = type.as(MemberTypeSyntax.self) {
       _lookUpNestedTypeMember(
         type: memberType,
-        identifier: identifier,
+        name: name,
         kind: memberKind,
         config: config,
         into: &results
@@ -567,7 +574,7 @@ extension SymbolTable {
   /// at Decl.h:16
   private func _getDirectMembers(
     of groupDecl: DeclGroupSyntax,
-    identifier: Identifier?,
+    name: DeclNameRef?,
     kind memberKind: MemberKind,
     configuredRegions: ConfiguredRegions?
   ) -> [ValueDeclSyntax] {
@@ -580,7 +587,16 @@ extension SymbolTable {
     func processMember(member: MemberBlockItemSyntax) -> [ValueDeclSyntax] {
       // Get only value declarations
       if let valueDecl = member.decl.as(ValueDeclSyntax.self) {
-        valueDecl.isKind(memberKind) ? [valueDecl] : []
+        // Check name matches
+        if let expectedName = name,
+          // TODO: Handle module selectors
+          case .failure = valueDecl.declName.tryMatch(reference: expectedName.coreName)
+        {
+          return []
+        }
+        // Filter for the type
+        guard valueDecl.isKind(memberKind) else { return [] }
+        return [valueDecl]
       }
       // If configuredRegions is set, visit the members of the active clause (if it exists)
       //
@@ -589,18 +605,18 @@ extension SymbolTable {
         let configuredRegions,
         case .decls(let members) = configuredRegions.activeClause(for: ifConfigDecl)?.elements
       {
-        members.flatMap(processMember(member:))
+        return members.flatMap(processMember(member:))
       }
       // If configuredRegions is nil, visit all if-config clauses
       else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self) {
-        ifConfigDecl.clauses.flatMap({ clause -> [ValueDeclSyntax] in
+        return ifConfigDecl.clauses.flatMap({ clause -> [ValueDeclSyntax] in
           guard case .decls(let members) = clause.elements else { return [] }
           return members.flatMap(processMember(member:))
         })
       }
       // No name, no gain
       else {
-        []
+        return []
       }
     }
 
@@ -611,7 +627,7 @@ extension SymbolTable {
 
   private func _visitSupertypes(
     of groupDecl: DeclGroupSyntax,
-    lookingFor identifier: Identifier?,
+    lookingFor name: DeclNameRef?,
     kind memberKind: MemberKind,
     results: inout [CanonicalType: [QualifiedLookupResult]]
   ) {
@@ -634,7 +650,7 @@ extension SymbolTable {
   private func _lookUpGroupMembers(
     group: DeclGroupSyntaxType,
     type: CanonicalType,
-    identifier: Identifier?,
+    name: DeclNameRef?,
     kind memberKind: MemberKind,
     config: QualifiedTableLookupConfig,
     into results: inout [CanonicalType: [QualifiedLookupResult]]
@@ -642,20 +658,20 @@ extension SymbolTable {
     // Add direct members
     let directMembers = _getDirectMembers(
       of: group,
-      identifier: identifier,
+      name: name,
       kind: memberKind,
       configuredRegions: config.configuredRegions
     )
     results[type, default: []].append(.members(directMembers, introducedIn: group))
 
     // Visit supertypes
-    _visitSupertypes(of: group, lookingFor: identifier, kind: memberKind, results: &results)
+    _visitSupertypes(of: group, lookingFor: name, kind: memberKind, results: &results)
   }
 
   // Finds decl groups nested in identifier types
   private func _lookUpGlobalTypeMember(
     type: IdentifierTypeSyntax,
-    identifier: Identifier?,
+    name: DeclNameRef?,
     kind memberKind: MemberKind,
     config: QualifiedTableLookupConfig,
     into results: inout [CanonicalType: [QualifiedLookupResult]]
@@ -688,7 +704,7 @@ extension SymbolTable {
       let aliasedType = matchingTypeAlias.initializer.value
       _lookUpTypeMember(
         type: aliasedType,
-        identifier: identifier,
+        name: name,
         kind: memberKind,
         config: config,
         into: &results
@@ -702,7 +718,7 @@ extension SymbolTable {
     _lookUpGroupMembers(
       group: matchingTypeDecl,
       type: canonicalType,
-      identifier: identifier,
+      name: name,
       kind: memberKind,
       config: config,
       into: &results
@@ -712,7 +728,7 @@ extension SymbolTable {
       _lookUpGroupMembers(
         group: DeclGroupSyntaxType(exactly: extensionDecl),
         type: canonicalType,
-        identifier: identifier,
+        name: name,
         kind: memberKind,
         config: config,
         into: &results
@@ -722,7 +738,7 @@ extension SymbolTable {
 
   func _lookUpNestedTypeMember(
     type: MemberTypeSyntax,
-    identifier: Identifier?,
+    name: DeclNameRef?,
     kind memberKind: MemberKind,
     config: QualifiedTableLookupConfig,
     into results: inout [CanonicalType: [QualifiedLookupResult]]
@@ -732,15 +748,13 @@ extension SymbolTable {
       type.moduleSelector == nil,
       "[SwiftLexicalLookup] Internal error: Module selector not implemented yet."
     )
-    // Ensure identifier is valid (can't do lookup with invalid identifier)
-    guard let typeIdentifier = type.name.identifier else { return }
-
-    // Process "implicit" types that aren't really types
-    guard typeIdentifier.name != "self" else {
+    // Process "implicit" self
+    guard type.name.tokenKind != .keyword(.self) else {
       // Forward lookup to the base type
-      _lookUpTypeMember(type: type.baseType, identifier: identifier, kind: memberKind, config: config, into: &results)
+      _lookUpTypeMember(type: type.baseType, name: name, kind: memberKind, config: config, into: &results)
       return
     }
+
     // TODO: Figure out how to handle this (currently we include nothing)
     // I guess we could include `.Type` itself.
     // Note: The metatype of a metatype is a distinct canonical type from the
@@ -753,7 +767,15 @@ extension SymbolTable {
     //     metaInt /*: Int.Type */ = metaMetaInt
     //   }
     // Both fail, showing that Int.Type.Type != Int.Type
-    guard typeIdentifier.name != "Type" else { return }
+    guard type.name.tokenKind != .keyword(.Type) else { return }
+
+    // TODO: Handle
+    guard type.name.tokenKind != .keyword(.Protocol) else { return }
+
+    // Ensure identifier is valid (can't do lookup with invalid identifier)
+    guard let typeIdentifier = Identifier(validating: type.name) else { return }
+
+    let typeName = DeclNameRef(coreName: .identifier(identifier: typeIdentifier))
 
     // Two scopes can introduce members in nested types. The main declaration
     // and any top-level extensions (nested extensions are currently illegal).
@@ -787,7 +809,7 @@ extension SymbolTable {
     var nestedTypeMainDecls = [CanonicalType: [QualifiedLookupResult]]()
     _lookUpTypeMember(
       type: type.baseType,
-      identifier: typeIdentifier,
+      name: typeName,
       kind: .static(onlyTypes: true),
       config: config,
       into: &nestedTypeMainDecls
@@ -849,7 +871,7 @@ extension SymbolTable {
         // Find members
         let directMembers = _getDirectMembers(
           of: mainDecl,
-          identifier: identifier,
+          name: name,
           kind: memberKind,
           configuredRegions: config.configuredRegions,
         )
@@ -868,7 +890,7 @@ extension SymbolTable {
         _lookUpGroupMembers(
           group: DeclGroupSyntaxType(exactly: extensionDecl),
           type: nestedCanonicalType,
-          identifier: identifier,
+          name: name,
           kind: memberKind,
           config: config,
           into: &results
@@ -1035,8 +1057,8 @@ extension SymbolTable {
   // bool lookupQualified(Type type, DeclNameRef member,
   //                      SourceLoc loc, NLOptions options,
   //                      SmallVectorImpl<ValueDecl *> &decls) const;
-  public func lookupMember(
-    withIdentifier memberIdentifier: Identifier,
+  func lookupMember(
+    withName name: DeclNameRef,
     inType type: TypeSyntax,
     atLocation location: AbsolutePosition,
     options: LookupOptions
@@ -1044,7 +1066,7 @@ extension SymbolTable {
     var perTypeResults = [CanonicalType: [QualifiedLookupResult]]()
     _lookUpTypeMember(
       type: type,
-      identifier: memberIdentifier,
+      name: name,
       kind: options.contains(.onlyTypes) ? .static(onlyTypes: true) : .anyMember,
       config: QualifiedTableLookupConfig(
         lookupSuperprotocols: options.contains(.protocolMembers),

@@ -206,7 +206,8 @@ final class TestQualifiedLookup: XCTestCase {
     }
 
     // Validate each expectation
-    let symbolTable = SymbolTable(fileSyntax: sourceFile)
+    let symbolTable = SymbolTable(sourceFile: sourceFile)
+    print("Found symbol table globals:", symbolTable.globalGroups)
     for (sourceIndex, expectations, file, line) in lookupSource.positionsAndExpectations {
       // === Validate Test === \\
 
@@ -301,7 +302,7 @@ final class TestQualifiedLookup: XCTestCase {
 
       // Perform lookup
       let foundDecls = symbolTable.lookupMember(
-        withIdentifier: memberIdentifier,
+        withName: DeclNameRef(coreName: .identifier(identifier: memberIdentifier)),
         inType: typeSyntax,
         atLocation: memberToken.position,
         options: SymbolTable.LookupOptions.qualifiedDefault
@@ -322,7 +323,7 @@ final class TestQualifiedLookup: XCTestCase {
           // Ensure lookup surfaced expected declaration
           XCTAssert(
             idsToFoundDecl[expectedDecl.id] != nil,
-            "Lookup of `\(typeSyntax.trimmed)/\(memberIdentifier.name)` didn't return declaration '\(marker)'.",
+            "Lookup of `\(typeSyntax.trimmed)/\(memberIdentifier.name)` [id: \(expectedDecl.id)] didn't return declaration '\(marker)' [id: \(idsToFoundDecl[expectedDecl.id])].",
             file: file,
             line: line
           )
@@ -335,7 +336,7 @@ final class TestQualifiedLookup: XCTestCase {
       if !idsToFoundDecl.isEmpty {
         for (_, decl) in idsToFoundDecl {
           XCTFail(
-            "Lookup of `\(typeSyntax.trimmed)/\(memberIdentifier.name)` found non-expected declaration of type '\(decl.kind)': \n`\(decl.description)`",
+            "Lookup of `\(typeSyntax.trimmed)/\(memberIdentifier.name)` found non-expected declaration [id: \(decl.id)] of type '\(decl.kind)': \n`\(decl.description)`",
             file: file,
             line: line
           )
