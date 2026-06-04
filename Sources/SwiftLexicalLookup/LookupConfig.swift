@@ -47,7 +47,6 @@ public struct LookupConfig {
   ) {
     self.finishInSequentialScope = finishInSequentialScope
     self.configuredRegions = configuredRegions
-    self._lookupTopScope = false
   }
 
   /// Creates a new lookup configuration, setting `_lookupTopScope`.
@@ -56,7 +55,7 @@ public struct LookupConfig {
   ///   in the closest sequential scope. `false` by default.
   /// - `_lookupTopScope` - Whether the top-level scope (SourceFileSyntax) introduces name
   ///    to the lookup (other than what's introduced from guard statements).
-  internal init(
+  @_spi(Experimental) public init(
     finishInSequentialScope: Bool = false,
     configuredRegions: ConfiguredRegions? = nil,
     _lookupTopScope: Bool

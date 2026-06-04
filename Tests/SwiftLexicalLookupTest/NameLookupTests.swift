@@ -11,7 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 import Foundation
-import SwiftLexicalLookup
+@_spi(Experimental) import SwiftLexicalLookup
 import SwiftSyntax
 import XCTest
 
@@ -332,7 +332,7 @@ final class TestNameLookup: XCTestCase {
 
           func foo() {
             let 3️⃣a = 4️⃣a
-          
+
             if let 5️⃣a = 6️⃣a {
               let (a, b) = 8️⃣a
             }
@@ -402,10 +402,10 @@ final class TestNameLookup: XCTestCase {
           3️⃣func foo() {
             let 4️⃣a = 0
             let 5️⃣c = 0
-          
+
             if let 6️⃣a = 7️⃣x {
               let (8️⃣a, 9️⃣b) = (0, 0)
-              
+
               0️⃣x
             }
           }
@@ -447,7 +447,7 @@ final class TestNameLookup: XCTestCase {
       source: """
         func foo() {
           let 1️⃣a = 0
-          
+
           guard let 2️⃣a, let 3️⃣b = c else {
             print(4️⃣a, 5️⃣b)
             return
@@ -530,6 +530,23 @@ final class TestNameLookup: XCTestCase {
       references: [
         "4️⃣": [
           .fromScope(GuardStmtSyntax.self, expectedNames: ["2️⃣"])
+        ]
+      ],
+      expectedResultTypes: .all(IdentifierPatternSyntax.self)
+    )
+  }
+
+  func testStatic() {
+    assertLexicalNameLookup(
+      source: """
+        struct A {
+          🟩static func a() {}
+          func b() { 🟥a() }
+        }
+        """,
+      references: [
+        "🟥": [
+          .fromScope(StructDeclSyntax.self, expectedNames: ["🟩"])
         ]
       ],
       expectedResultTypes: .all(IdentifierPatternSyntax.self)
@@ -758,7 +775,7 @@ final class TestNameLookup: XCTestCase {
   func testTypeDeclAvailabilityInTopLevel() {
     let declExpectation: [ResultExpectation] = [
       .fromScope(
-        CodeBlockSyntax.self,
+        SourceFileSyntax.self,
         expectedNames: [
           NameExpectation.declaration("2️⃣"),
           NameExpectation.declaration("5️⃣"),
@@ -772,11 +789,11 @@ final class TestNameLookup: XCTestCase {
         1️⃣a
         2️⃣class a {}
         3️⃣a
-        guard let x = Optional(0) else { fatalError() }
+        guard let x else { return }
         4️⃣a
         5️⃣actor a {}
         6️⃣a
-        guard let x = Optional(1) else { fatalError() }
+        guard let x else { return }
         7️⃣a
         8️⃣struct a {}
         9️⃣a
@@ -788,7 +805,8 @@ final class TestNameLookup: XCTestCase {
         "6️⃣": declExpectation,
         "7️⃣": declExpectation,
         "9️⃣": declExpectation,
-      ]
+      ],
+      config: LookupConfig(_lookupTopScope: true)
     )
   }
 
@@ -889,7 +907,7 @@ final class TestNameLookup: XCTestCase {
 
           class B<5️⃣T1> {
             let z: 6️⃣T1 = v
-            
+
             func test() {
               print(8️⃣x)
             }
@@ -1098,7 +1116,7 @@ final class TestNameLookup: XCTestCase {
 
           let 3️⃣c = 4️⃣x
           5️⃣class B {}
-          
+
           #if DEBUG
 
           let d = 6️⃣x
@@ -1110,9 +1128,9 @@ final class TestNameLookup: XCTestCase {
           9️⃣class D {}
 
           #endif
-          
+
           #endif
-          
+
           🔟class E {}
         }
         """,

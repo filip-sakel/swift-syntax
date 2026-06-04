@@ -309,6 +309,7 @@ final class TestQualifiedLookup: XCTestCase {
       )
 
       // Check expectations match
+      print("Found decls:", foundDecls)
       var idsToFoundDecl = Dictionary(grouping: foundDecls, by: \.id).mapValues({ decls in
         guard let decl = decls.first, decls.count == 1 else {
           fatalError(
@@ -350,7 +351,7 @@ final class TestQualifiedLookup: XCTestCase {
     assertTypeMemberLookup(
       """
       🅰️struct MyStruct {
-        static 🅱️func hello() {}
+        🅱️func hello() {}
 
         struct TypeB {}
 

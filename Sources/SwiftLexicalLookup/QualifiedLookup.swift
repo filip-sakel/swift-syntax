@@ -586,11 +586,11 @@ extension SymbolTable {
       // Get only value declarations
       if let valueDecl = member.decl.as(ValueDeclSyntax.self) {
         // Check name matches
+        print("Match between \(valueDecl.declName) and \(name) is:", name.map { valueDecl.declName.tryMatch(reference: $0.coreName) } ?? "✅")
         if let expectedName = name,
           // TODO: Handle module selectors
           case .failure = valueDecl.declName.tryMatch(reference: expectedName.coreName)
         {
-          print("Failed match between \(valueDecl.declName) and \(name) because:", valueDecl.declName.tryMatch(reference: expectedName.coreName))
           return []
         }
         // Filter for the type
