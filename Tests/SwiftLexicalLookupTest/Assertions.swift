@@ -113,6 +113,7 @@ func assertLexicalNameLookup(
 
       let result = tokenAtMarker.lookup(useNilAsTheParameter ? nil : lookupIdentifier, with: config)
 
+      // print("Lexical scope result: \(result)")
       guard let expectedValues = references[marker] else {
         XCTFail("For marker \(marker), couldn't find result expectation")
         return []
@@ -123,18 +124,18 @@ func assertLexicalNameLookup(
       return result.flatMap { lookUpResult in
         lookUpResult.names.flatMap { (lookupName: LookupName) -> [any SyntaxProtocol] in
           if case .equivalentNames(let names) = lookupName {
-            print(
-              "Lookup results looking for '\(lookupIdentifier?.name ?? ""))' [marker: \(marker)] are: \(lookupName.syntax.trimmedDescription)"
-            )
+            // print(
+            //   "Lookup results looking for '\(lookupIdentifier?.name ?? ""))' [marker: \(marker)] are: \(lookupName.syntax.trimmedDescription)"
+            // )
             return names.map({ $0.syntax })
           } else {
             let niceIdentifier: String = lookupIdentifier?.name ?? ""
             let niceMarker: String = marker._keycapToNumber()
             let nameSyntax: String = lookupName.syntax.trimmedDescription
-            print(
-              "Lookup results looking for '\(niceIdentifier)' [marker: \(niceMarker)] are: \(nameSyntax)"
-                .precomposedStringWithCompatibilityMapping
-            )
+            // print(
+            //   "Lookup results looking for '\(niceIdentifier)' [marker: \(niceMarker)] are: \(nameSyntax)"
+            //     .precomposedStringWithCompatibilityMapping
+            // )
             return [lookupName.syntax]
           }
         }

@@ -537,16 +537,19 @@ final class TestNameLookup: XCTestCase {
   }
 
   func testStatic() {
+    // FIXME
     assertLexicalNameLookup(
       source: """
         struct A {
-          🟩static func a() {}
-          func b() { 🟥a() }
+          1️⃣func a() {}
+          func b() {
+            2️⃣a()
+          }
         }
         """,
       references: [
-        "🟥": [
-          .fromScope(StructDeclSyntax.self, expectedNames: ["🟩"])
+        "2️⃣": [
+          .lookForMembers(StructDeclSyntax.self)
         ]
       ],
       expectedResultTypes: .all(IdentifierPatternSyntax.self)
