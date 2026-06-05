@@ -15,18 +15,108 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
+// TODO: Switch to @_spi(Experimental) eventually
 @_spi(Experimental) @testable import SwiftLexicalLookup
 
-struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInterpolation {
-  enum Expectation: ExpressibleByUnicodeScalarLiteral, ExpressibleByExtendedGraphemeClusterLiteral {
-    case referenceMarker(Character)
-    // case `Self`
+// This is a prsed DeclRefExpr *epxression*
+// assertLookup(inNominalType: "struct MyStruct { \(foundBy: "myFunc(a:)", static: true)static func myFunc(a: Int) {} ")
+// assertLookup(usingSource: "struct MyStruct: MyProto {}", "protocol MyProto { (1)func a() }",
+//              Query("MyStruct", of: "a()", withSuper: true): ["(1)"]
+//              Query("MyStruct.Type", of "()"): [.implicit(.memberwise)]
 
-    init(unicodeScalarLiteral value: Character) {
-      self = .referenceMarker(value)
+extension DeclNameRef {
+
+}
+
+assertLookup(usingSource: """
+struct MyStruct: MyProto {
+  \(typeRef: "MyStruct/funcA()")
+  func funcA() {}
+
+  \(typeRef: "MyStruct.Type/init(hi:)", "MyStruct.Type/_(hi:)", "MyStruct.Type/init")
+  init(hi: Int) {}
+
+  \("MyStruct.Type/init(hey:)", "MyStruct.Type/init")
+  init(hey: Int) {}
+
+  \("MyStruct/[a:b:]")
+  subscript(a: Int, b: Int) -> Int { 5 }
+}
+protocol MyProto {
+  \("MyProto/myFunc(a:)".config(kind: .static()),
+    "MyStruct/myFunc(a:)".config(kind: .static(), supertypes: true))
+  static func myFunc(a: Int) {}
+}
+""")
+
+struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInterpolation {
+  // enum Expectation: ExpressibleByUnicodeScalarLiteral, ExpressibleByExtendedGraphemeClusterLiteral {
+  //   case referenceMarker(Character)
+  //   // case `Self`
+  //
+  //   init(unicodeScalarLiteral value: Character) {
+  //     self = .referenceMarker(value)
+  //   }
+  //   init(extendedGraphemeClusterLiteral value: Character) {
+  //     self = .referenceMarker(value)
+  //   }
+  // }
+
+  // Returns string of error messages; empty if valid.
+  static func parseType(_ type: TypeSyntax, file: StaticString, line: UInt) {
+    // // Parse as a type
+    // let typeSyntax = TypeSyntax(stringLiteral: typeName)
+    // We only allow identifier, member and (potentially) metatype syntax.
+    switch type.as(TypeSyntaxEnum.self) {
+    case .identifierType: break
+    case .memberType(let memberType):
+      // Check base
+      validateType(memberType.baseType, file: file, line: line)
+      // No generics for now
+      if memberType.genericArgumentClause != nil {
+        XCTFail("Invalid type '\(type.trimmedDescription)': Generic arguments not supported (yet).")
+      }
+    case .metatypeType(let metatypeType):
+      // Check base
+      validateType(metatypeType.baseType, file: file, line: line)
+    default:
+      XCTFail("Invalid type '\(type.trimmedDescription)': Type kind '\(type.kind)' isn't supported; only identifier, member and metatype types are supported.")
     }
-    init(extendedGraphemeClusterLiteral value: Character) {
-      self = .referenceMarker(value)
+  }
+  static func parseDeclRefName(_ exprSyntax: ExprSyntax, file: StaticString, line: UInt) -> DeclRefName {
+    switch exprSyntax.as(ExprSyntaxEnum.self) {
+    case .functionCallExpr(let funcCallExpr):
+      funcCallExpr
+    default:
+    }
+  }
+
+  // Expectation of the form `<TypeSyntax>/<DeclRefName>`
+  struct TypeLookupExpectation: ExpressibleByStringLiteral {
+    // enum Failure: Error, CustomStringConvertible {
+    //   case invalidComponentCount, invalidTypeBase, invalidDeclRef
+    //
+    //   var description: String {
+    //     "Expected"
+    //   }
+    // }
+
+    let contents: (typeBase: TypeSyntax, declName: DeclNameRef)?
+
+    init(stringLiteral qualifiedName: String, file: StaticString = #file, line: UInt = #line) {
+      // Extract components
+      let components = qualifiedName.split(separator: "/")
+      guard components.count == 2 else {
+        XCTFail("Invalid qualified name: Expected name of the form '<type>/<decl ref name>' but either '/' is missing or the type/decl name is empty.", file: file, line: line)
+        contents = nil
+      }
+      // Parse syntax
+      let typeSyntax = TypeSyntax(stringLiteral: components[0].description)
+      let declSyntax = DeclSyntax(stringLiteral: components[1].description)
+
+      // Validate syntax
+      validateType(typeSyntax, file: file, line: line)
+      parseDeclRefName(declSyntax, file: file, line: line)
     }
   }
   enum Component {
@@ -44,11 +134,18 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       components.append(.str(literal))
     }
     mutating func appendInterpolation(
-      references expectations: Expectation...,
+      typeRef expectations: Expectation...,
       file: StaticString = #file,
       line: UInt = #line
     ) {
       components.append(.expectations(expectations, file: file, line: line))
+    }
+    mutating func appendInterpolation(
+      declGroupRef: expectations: Expectation...,
+      file: StaticString = #file,
+      line: UInt = #line
+    ) {
+
     }
   }
 
