@@ -925,14 +925,82 @@ extension SyntaxProtocol {
   }
 }
 
-// indirect enum UnresolvedTypeRef: Equatable {
-//   case member(UnresolvedTypeRef?, moduleName: Identifier?, typeMember: Identifier)
-//   case `function`(args: [UnresolvedTypeRef], returnType: [UnresolvedTypeRef])
-//
-//   init(syntax: TypeSyntax) {
-//     // FIXME: TODO
-//   }
-// }
+indirect enum UnresolvedTypeRef: Equatable {
+  // E.g. Int, Swift::Int, String::Swift::UTF8View
+  // TODO: Implement generics
+  case member(base: UnresolvedTypeRef?, moduleName: Identifier?, typeName: Identifier)
+  // `any <ProtocolOrObject>`. Note that we don't check if `base` is actually a protocol or object.
+  // E.g. `any CustomStringConvertible`
+  case existential(base: UnresolvedTypeRef)
+  // <Type>.Type. Note that `<MyProto>.Protocol` is translated as `(any <MyProto>).Type`
+  // E.g. `Int.Type`
+  case metatype(base: UnresolvedTypeRef)
+  // case `function`(args: [UnresolvedTypeRef], returnType: [UnresolvedTypeRef])
+
+  // init(syntax: TypeSyntax) {
+  //   // FIXME: TODO
+  // }
+
+  enum Failure: Error {
+    case invalidKind(SyntaxKind)
+    case invalidIdentifier(TokenSyntax)
+    /// The ``MetatypeTypeSyntax/metatypeSpecifier`` field
+    /// was neither `Type` nor `Protocol`
+    /// Shouldn't occur with a valid syntax tree.
+    case invalidMetatypeSpecifier(TokenSyntax)
+  }
+
+  static let _stdlibModuleIdentifier = Identifier(canonicalName: "Swift")
+
+  // TODO: Implement the rest
+  static func fromTypeSyntax(_ typeSyntax: TypeSyntax) -> Result<UnresolvedTypeRef, Failure> {
+    func parseIdentifier(token: TokenSyntax) throws(Failure) -> Identifier {
+      guard let identifier = Identifier(validating: token) else {
+        throw Failure.invalidIdentifier(token)
+      }
+      return identifier
+    }
+
+    return Result(catching: { () throws(Failure) -> UnresolvedTypeRef in
+      switch typeSyntax.as(TypeSyntaxEnum.self) {
+      case .identifierType(let identifierType):
+        return UnresolvedTypeRef.member(
+          base: nil,
+          moduleName: try (identifierType.moduleSelector?.moduleName).map(parseIdentifier(token:)),
+          typeName: try parseIdentifier(token: identifierType.name),
+        )
+      case .memberType(let memberType):
+        return UnresolvedTypeRef.member(
+          base: try fromTypeSyntax(typeSyntax).get(),
+          moduleName: try (memberType.moduleSelector?.moduleName).map(parseIdentifier(token:)),
+          typeName: try parseIdentifier(token: memberType.name)
+        )
+      case .metatypeType(let metatypeType):
+        // According to the docs, metatypeSpecifier := `Type` | `Protocol`
+        switch metatypeType.metatypeSpecifier.tokenKind {
+        case .keyword(.Type):
+          return UnresolvedTypeRef.metatype(base: try fromTypeSyntax(metatypeType.baseType).get())
+        case .keyword(.Protocol):
+          return UnresolvedTypeRef.metatype(
+            base: UnresolvedTypeRef.existential(base: try fromTypeSyntax(metatypeType.baseType).get())
+          )
+        default:
+          throw Failure.invalidMetatypeSpecifier(metatypeType.metatypeSpecifier)
+        }
+      // Example of handling built-in types
+      // case .optionalType(let optionalType):
+      //   return UnresolvedTypeRef.member(
+      //     base: nil,
+      //     moduleName: Self._stdlibModuleIdentifier,
+      //     typeName: Identifier(canonicalName: "Optional")
+      //   )
+      default:
+        throw .invalidKind(typeSyntax.kind)
+      }
+    })
+  }
+}
+
 //
 // extension ValueDeclSyntax {
 //
