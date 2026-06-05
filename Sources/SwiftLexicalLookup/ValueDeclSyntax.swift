@@ -387,25 +387,34 @@ indirect enum DeclName: Hashable, CustomDebugStringConvertible {
   }
   /// Try to match this declaration's name with the given
   func tryMatch(reference: DeclNameRef.CoreName) -> Result<Void, MatchFailure> {
+    let callAsFunctionId = Identifier(canonicalName: "callAsFunction")
+
     switch (self, reference) {
     // Deinits always match
     case (.deinit, .deinit):
       return .success(())
 
     // Match init if reference doesn't provide arguments.
-    case (.`init`(_), .`init`(args: nil)):
+    case (.`init`(_), .`init`(args: nil)),
+      (.callAsFunction(args: _), .identifier(identifier: callAsFunctionId, macro: nil, args: nil)):
       return .success(())
-    // For inits, subscripts and `callAsFunction`, check that arguments match.
+    // For inits (named and unnamed), subscripts and `callAsFunction` (named and unnamed),
+    // check that arguments match.
     //
-    // Recall that init can be referenced both as `<Type>.init(...)` and `<Type>(...)`.
-    // ``unnamedCall`` represents the latter.
+    // Recall that init can be referenced both as `<Type>.init(...)` and
+    // as `<Type>(...)` (represented by ``unnamedCall``).
+    //
+    // Similarly, we can do both `<myValue>.callAsFunction(...)` and `<myValue>(...)`
     case (.`init`(let argsA), .unnamedCall(let argsB)),
       (.`init`(let argsA), .`init`(let argsB?)),
       (.subscript(let argsA), .subscript(let argsB)),
-      (.callAsFunction(let argsA), .unnamedCall(let argsB)):
+      (.callAsFunction(let argsA), .unnamedCall(let argsB)),
+      (
+        .callAsFunction(let argsA),
+        .identifier(identifier: callAsFunctionId, nil, let argsB?)
+      ):
       guard argsA == argsB else { return .failure(MatchFailure.argumentMismatch) }
       return .success(())
-
     // Identifiers need to check macro type, identifiers and arguments
     case let (.identifier(idA, macroType, optionalArgsA), .identifier(idB, macroRef, optionalArgsB)):
       // Check if macro types match

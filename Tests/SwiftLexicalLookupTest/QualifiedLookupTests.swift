@@ -814,7 +814,7 @@ final class TestQualifiedLookup: XCTestCase {
       for (expectedDecl, file, line) in expectations {
         guard unmatchedDecls.contains(expectedDecl) else {
           XCTFail(
-            "[Lookup Failure] Lookup `\(sharedDeclGroup.type?.trimmedDescription ?? "_")`/\(name.debugDescription) \(memberKind) didn't find expected declaration (name: \(expectedDecl.declName.debugDescription), id: \(expectedDecl.id.hashValue)).",
+            "[Lookup Failure] Lookup `\(sharedDeclGroup.type?.trimmedDescription ?? "_")`/\(name.debugDescription) \(memberKind) didn't find expected declaration (name: \(expectedDecl.declName.debugDescription), kind: \(expectedDecl.kind), id: \(expectedDecl.id.hashValue)).",
             file: file,
             line: line
           )
@@ -853,16 +853,23 @@ final class TestQualifiedLookup: XCTestCase {
     assertTypeMemberLookup(
       """
       struct MyStruct {
+        var \(.named("a"))a,
+            \(.named("b"))b: Int
+
         \(.named("hello", args: []),
           .named("hello"))
         func hello() {}
 
+        // Init can be referenced as <Type>.init, <Type>.init(), <Type>()
         \(.`init`([]),
+          .`init`(nil),
           .unnamed([]).static())
         init() {}
 
-        // TODO: This should fail
-        \(.named("callAsFunction"), .unnamed([]))
+        // References: <myValue>.callAsFunction, <myValue>.callAsFunction(), <myValue>()
+        \(.named("callAsFunction", args: []),
+          .named("callAsFunction"),
+          .unnamed([]))
         func callAsFunction() {}
 
         // When `callAsFunction` is static, it exhibits no special behavior
