@@ -586,7 +586,12 @@ extension SymbolTable {
       // Get only value declarations
       if let valueDecl = member.decl.as(ValueDeclSyntax.self) {
         // Check name matches
-        print("Match between \(valueDecl.declName) and \(name) is:", name.map { valueDecl.declName.tryMatch(reference: $0.coreName) } ?? "✅")
+        if let name {
+          print(
+            "Match between \(valueDecl.declName) and \(name) is:",
+            valueDecl.declName.tryMatch(reference: name.coreName)
+          )
+        }
         if let expectedName = name,
           // TODO: Handle module selectors
           case .failure = valueDecl.declName.tryMatch(reference: expectedName.coreName)
@@ -1059,7 +1064,7 @@ extension SymbolTable {
   func lookupMember(
     withName name: DeclNameRef,
     inType type: TypeSyntax,
-    atLocation location: AbsolutePosition,
+    fromLocation location: AbsolutePosition,
     options: LookupOptions
   ) -> [ValueDeclSyntax] {
     var perTypeResults = [CanonicalType: [QualifiedLookupResult]]()
@@ -1104,5 +1109,37 @@ extension SymbolTable {
   // bool lookupQualified(ArrayRef<NominalTypeDecl *> types, DeclNameRef member,
   //                      SourceLoc loc, NLOptions options,
   //                      SmallVectorImpl<ValueDecl *> &decls) const;
+  func lookupMember(
+    withName name: DeclNameRef?,
+    inDeclGroup declGroup: DeclGroupSyntaxType,
+    fromLocation location: AbsolutePosition,
+    options: LookupOptions
+  ) -> [ValueDeclSyntax] {
+    var perTypeResults = [CanonicalType: [QualifiedLookupResult]]()
+
+    _lookUpGroupMembers(
+      group: declGroup,
+      type: CanonicalType(baseType: nil, mainDeclID: Identifier(canonicalName: "")),
+      name: name,
+      kind: options.contains(.onlyTypes) ? .static(onlyTypes: true) : .anyMember,
+      config: QualifiedTableLookupConfig(
+        lookupSuperprotocols: options.contains(.protocolMembers),
+        lookupSuperclasses: true,  // TODO: I don't know if this is the compiler's default
+        configuredRegions: nil
+      ),
+      into: &perTypeResults
+    )
+
+    return perTypeResults.flatMap({ (_, results: [QualifiedLookupResult]) -> [ValueDeclSyntax] in
+      results.flatMap({ (result: QualifiedLookupResult) -> [ValueDeclSyntax] in
+        switch result {
+        case .members(let decls, _), .conditionalMembers(let decls, _, _, _):
+          decls
+        case .implicitMembers, .lookForDynamicMembers, .lookForMacros, .lookForSupertypes:
+          []
+        }
+      })
+    })
+  }
 
 }

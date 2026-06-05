@@ -443,7 +443,7 @@ indirect enum DeclName: Hashable, CustomDebugStringConvertible {
   }
 }
 
-struct DeclNameRef {
+struct DeclNameRef: Hashable, CustomDebugStringConvertible {
   /// A macro reference is either freestanding or attached
   enum MacroReference: Hashable {
     case freestanding
@@ -529,8 +529,18 @@ struct DeclNameRef {
     }
   }
 
-  let moduleSelector: ModuleSelectorSyntax? = nil
+  let moduleIdentifier: Identifier?
   let coreName: CoreName
+
+  init(moduleIdentifier: Identifier? = nil, coreName: CoreName) {
+    self.moduleIdentifier = moduleIdentifier
+    self.coreName = coreName
+  }
+
+  var debugDescription: String {
+    let modulePrefix = if let moduleIdentifier { "\(moduleIdentifier.name)::" } else { "" }
+    return "\(modulePrefix)\(coreName.debugDescription)"
+  }
 }
 
 // MARK: Basic Queries
@@ -944,6 +954,7 @@ indirect enum UnresolvedTypeRef: Equatable {
   enum Failure: Error {
     case invalidKind(SyntaxKind)
     case invalidIdentifier(TokenSyntax)
+    case genericsNotYetSupported
     /// The ``MetatypeTypeSyntax/metatypeSpecifier`` field
     /// was neither `Type` nor `Protocol`
     /// Shouldn't occur with a valid syntax tree.
@@ -960,16 +971,21 @@ indirect enum UnresolvedTypeRef: Equatable {
       }
       return identifier
     }
+    func parseGenerics(_ genericArgumentClause: GenericArgumentClauseSyntax?) throws(Failure) {
+      if genericArgumentClause != nil { throw Failure.genericsNotYetSupported }
+    }
 
     return Result(catching: { () throws(Failure) -> UnresolvedTypeRef in
       switch typeSyntax.as(TypeSyntaxEnum.self) {
       case .identifierType(let identifierType):
+        try parseGenerics(identifierType.genericArgumentClause)
         return UnresolvedTypeRef.member(
           base: nil,
           moduleName: try (identifierType.moduleSelector?.moduleName).map(parseIdentifier(token:)),
           typeName: try parseIdentifier(token: identifierType.name),
         )
       case .memberType(let memberType):
+        try parseGenerics(memberType.genericArgumentClause)
         return UnresolvedTypeRef.member(
           base: try fromTypeSyntax(typeSyntax).get(),
           moduleName: try (memberType.moduleSelector?.moduleName).map(parseIdentifier(token:)),
