@@ -650,6 +650,7 @@ final class TestQualifiedLookup: XCTestCase {
         )
         continue
       }
+      print(">>Found value decl '\(valueDecl.trimmedDescription)'")
 
       // Find the implicit decl-group parent
       func declGroupParent(of syntax: Syntax) -> DeclGroupSyntaxType? {
@@ -691,10 +692,13 @@ final class TestQualifiedLookup: XCTestCase {
       XCTFail("No valid expectations found", file: file, line: line)
       return
     }
+    print(">>Found decl group: '\(sharedDeclGroup.trimmedDescription)'")
 
     // Perform lookup
     let symbolTable = SymbolTable(sourceFile: sourceFile)
     for (name, expectations) in namesToExpectations {
+      print(">>Looking for name \(name.debugDescription)")
+
       let foundDecls = symbolTable.lookupMember(
         withName: name,
         inDeclGroup: sharedDeclGroup,
@@ -746,7 +750,8 @@ final class TestQualifiedLookup: XCTestCase {
     assertTypeMemberLookup(
       """
       struct MyStruct {
-        \(.decl("hello()"))func hello() {}
+        \(.decl(exact: DeclNameRef(coreName: .identifier(identifier: Identifier(canonicalName: "hello"), args: []))))
+        func hello() {}
       }
       """
     )

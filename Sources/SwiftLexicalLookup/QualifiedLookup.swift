@@ -578,6 +578,10 @@ extension SymbolTable {
     kind memberKind: MemberKind,
     configuredRegions: ConfiguredRegions?
   ) -> [ValueDeclSyntax] {
+    print(
+      ">>Looking for direct members for ref '\(name?.debugDescription ?? "_")' in group decl: '\(groupDecl.trimmedDescription)'"
+    )
+
     /// Process a member or a member nested inside an if-config declaration.
     ///
     /// This pattern is similar to the SyntaxVisitor pattern, but a SyntaxVisitor
@@ -659,6 +663,9 @@ extension SymbolTable {
     config: QualifiedTableLookupConfig,
     into results: inout [CanonicalType: [QualifiedLookupResult]]
   ) {
+    print(
+      ">>Looking for group members for ref '\(name?.debugDescription ?? "_")' in group decl: '\(group.trimmedDescription)'"
+    )
     // Add direct members
     let directMembers = _getDirectMembers(
       of: group,
