@@ -101,15 +101,15 @@ public struct DeclGroupSyntaxType: DeclGroupSyntax {
   // TODO: Implement canonical type
   public var type: TypeSyntax? {
     if let castNode = box.as(StructDeclSyntax.self) {
-      TypeSyntax(castNode.name)
+      TypeSyntax(IdentifierTypeSyntax(name: castNode.name))
     } else if let castNode = box.as(EnumDeclSyntax.self) {
-      TypeSyntax(castNode.name)
+      TypeSyntax(IdentifierTypeSyntax(castNode.name))
     } else if let castNode = box.as(ClassDeclSyntax.self) {
-      TypeSyntax(castNode.name)
+      TypeSyntax(IdentifierTypeSyntax(castNode.name))
     } else if let castNode = box.as(ActorDeclSyntax.self) {
-      TypeSyntax(castNode.name)
+      TypeSyntax(IdentifierTypeSyntax(castNode.name))
     } else if let castNode = box.as(ProtocolDeclSyntax.self) {
-      TypeSyntax(castNode.name)
+      TypeSyntax(IdentifierTypeSyntax(castNode.name))
     } else if let castNode = box.as(ExtensionDeclSyntax.self) {
       castNode.extendedType
     } else {
@@ -578,9 +578,9 @@ extension SymbolTable {
     kind memberKind: MemberKind,
     configuredRegions: ConfiguredRegions?
   ) -> [ValueDeclSyntax] {
-    print(
-      ">>Looking for direct members for ref '\(name?.debugDescription ?? "_")' in group decl: '\(groupDecl.trimmedDescription)'"
-    )
+    // print(
+    //   ">>Looking for direct members for ref '\(name?.debugDescription ?? "_")' in group decl: '\(groupDecl.trimmedDescription)'"
+    // )
 
     /// Process a member or a member nested inside an if-config declaration.
     ///
@@ -591,10 +591,10 @@ extension SymbolTable {
       if let valueDecl = member.decl.as(ValueDeclSyntax.self) {
         // Check name matches
         if let name {
-          print(
-            "Match between \(valueDecl.declName) and \(name) is:",
-            valueDecl.declName.tryMatch(reference: name.coreName)
-          )
+          // print(
+          //   "Match between \(valueDecl.declName) and \(name) is:",
+          //   valueDecl.declName.tryMatch(reference: name.coreName)
+          // )
         }
         if let expectedName = name,
           // TODO: Handle module selectors
@@ -663,9 +663,9 @@ extension SymbolTable {
     config: QualifiedTableLookupConfig,
     into results: inout [CanonicalType: [QualifiedLookupResult]]
   ) {
-    print(
-      ">>Looking for group members for ref '\(name?.debugDescription ?? "_")' in group decl: '\(group.trimmedDescription)'"
-    )
+    // print(
+    //   ">>Looking for group members for ref '\(name?.debugDescription ?? "_")' in group decl: '\(group.trimmedDescription)'"
+    // )
     // Add direct members
     let directMembers = _getDirectMembers(
       of: group,
