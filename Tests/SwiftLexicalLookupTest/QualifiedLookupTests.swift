@@ -261,7 +261,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
   // }
   struct DeclLookupExpectation {
     let declRef: DeclNameRef?
-    var memberKind: MemberKind = .anyMember
+    var memberKind: MemberKind = .default
     let file: StaticString
     let line: UInt
 
@@ -286,7 +286,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
     }
     static func named(
       _ name: StaticString,
-      args: [StaticString?]? = nil,
+      args optionalArgs: [StaticString?]? = nil,
       file: StaticString = #file,
       line: UInt = #line
     ) -> DeclLookupExpectation {
@@ -295,7 +295,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
           coreName: .identifier(
             identifier: Identifier(canonicalName: name),
             macro: nil,
-            args: args?.map({ (argName: StaticString?) -> Identifier? in
+            args: optionalArgs?.map({ (argName: StaticString?) -> Identifier? in
               argName.map({ Identifier(canonicalName: $0) })
             })
           )
@@ -320,14 +320,19 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
     /// Creates an `init` declaration reference. Automatically configures lookup to
     /// look for static declarations.
     static func `init`(
-      _ args: [StaticString?]?,
+      _ optionalArgs: [StaticString?]?,
       file: StaticString = #file,
       line: UInt = #line
     ) -> DeclLookupExpectation {
       DeclLookupExpectation(
         declRef: DeclNameRef(
-          coreName: .`init`(args: args.map({ $0.map(Optional(Identifier(canonicalName: $0)) }))
+          coreName: .`init`(
+            args: optionalArgs?.map({ (argName: StaticString?) -> Identifier? in
+              argName.map({ Identifier(canonicalName: $0) })
+            })
+          )
         ),
+        memberKind: .includeAllMembers,
         file: file,
         line: line
       )
@@ -341,7 +346,6 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
         declRef: DeclNameRef(
           coreName: .unnamedCall(args: args.map({ Optional(Identifier(canonicalName: $0)) }))
         ),
-        kind: .static(),
         file: file,
         line: line
       )
@@ -361,9 +365,10 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       )
     }
 
+    /// Looks only for static declarations.
     func `static`() -> DeclLookupExpectation {
       var copy = self
-      copy.memberKind = copy.memberKind.addingStatic()
+      copy.memberKind = .includeStatic
       return copy
     }
   }
@@ -481,6 +486,17 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       case .expectations(let declExpectations, let file, let line):
         // Get the endIndex so we refer to the token after the expectation. E.g. with '\(.decl(exact: .deinit)) deinit {}'
         // we'll refer directly to the `deinit`.
+        //
+        // Diagnose existing expectation (we allow only one per source index)
+        if let existingExpectation = positionsToExpectations[source.endIndex] {
+          XCTFail(
+            "[Lookup Failure] Second expectation for same source index is prohibited (original expectation at \(existingExpectation.file):\(existingExpectation.line))",
+            file: file,
+            line: line
+          )
+          continue
+        }
+        // Save expectation
         positionsToExpectations[source.endIndex] = (declExpectations, file: file, line: line)
       }
     }
@@ -711,7 +727,8 @@ final class TestQualifiedLookup: XCTestCase {
     // }
 
     var sharedDeclGroup: DeclGroupSyntaxType? = nil
-    var namesToExpectations = [DeclNameRef: [(decl: ValueDeclSyntax, file: StaticString, line: UInt)]]()
+    struct Pair<A: Hashable, B: Hashable>: Hashable { let a: A, b: B }
+    var namesToExpectations = [Pair<DeclNameRef, MemberKind>: [(ValueDeclSyntax, file: StaticString, line: UInt)]]()
 
     for (sourceIndex, (expectations, file, line)) in lookupSource.positionsToExpectations {
       // The assertion expects this to be an introducer token
@@ -766,7 +783,9 @@ final class TestQualifiedLookup: XCTestCase {
         guard let name = expectation.declRef else { continue }
 
         // Register expectation for this name
-        namesToExpectations[name, default: []].append((decl: valueDecl, file: expectation.file, line: expectation.line))
+        namesToExpectations[Pair(a: name, b: expectation.memberKind), default: []].append(
+          (decl: valueDecl, file: expectation.file, line: expectation.line)
+        )
       }
     }
 
@@ -779,14 +798,15 @@ final class TestQualifiedLookup: XCTestCase {
 
     // Perform lookup
     let symbolTable = SymbolTable(sourceFile: sourceFile)
-    for (name, expectations) in namesToExpectations {
+    for (nameAndMemberKind, expectations) in namesToExpectations {
+      let (name, memberKind) = (nameAndMemberKind.a, nameAndMemberKind.b)
       // print(">>Looking for name \(name.debugDescription)")
 
       let foundDecls = symbolTable.lookupMember(
         withName: name,
         inDeclGroup: sharedDeclGroup,
         fromLocation: AbsolutePosition(utf8Offset: 0),
-        options: [.unqualifiedDefault]
+        memberKind: memberKind
       )
 
       // Cross out matched decls and diagnose unmatched
@@ -794,7 +814,7 @@ final class TestQualifiedLookup: XCTestCase {
       for (expectedDecl, file, line) in expectations {
         guard unmatchedDecls.contains(expectedDecl) else {
           XCTFail(
-            "[Lookup Failure] Lookup `\(sharedDeclGroup.type?.trimmedDescription ?? "_")`/\(name.debugDescription) didn't find expected declaration.",
+            "[Lookup Failure] Lookup `\(sharedDeclGroup.type?.trimmedDescription ?? "_")`/\(name.debugDescription) \(memberKind) didn't find expected declaration (name: \(expectedDecl.declName.debugDescription), id: \(expectedDecl.id.hashValue)).",
             file: file,
             line: line
           )
@@ -805,9 +825,9 @@ final class TestQualifiedLookup: XCTestCase {
       }
 
       // Diagnose unmatched
-      if !unmatchedDecls.isEmpty {
+      for unmatchedDecl in unmatchedDecls {
         XCTFail(
-          "[Lookup Failure] Lookup `\(sharedDeclGroup.type?.trimmedDescription ?? "_")`/\(name.debugDescription) found more declarations than expected: ```\(unmatchedDecls.map(\.trimmedDescription).joined(separator: "\n"))```",
+          "[Lookup Failure] Lookup `\(sharedDeclGroup.type?.trimmedDescription ?? "_")`/\(name.debugDescription) \(memberKind) found unexpcted declarations (id: \(unmatchedDecl.id.hashValue)): ```\(unmatchedDecl.trimmedDescription)```",
           file: file,
           line: line
         )
@@ -842,7 +862,13 @@ final class TestQualifiedLookup: XCTestCase {
         init() {}
 
         // TODO: This should fail
+        \(.named("callAsFunction"), .unnamed([]))
         func callAsFunction() {}
+
+        // When `callAsFunction` is static, it exhibits no special behavior
+        static
+        \(.named("callAsFunction", args: []).static())
+        func callAsFunction () {}
 
         \(.deinit())
         deinit {}

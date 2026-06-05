@@ -161,6 +161,12 @@ public struct DeclGroupSyntaxType: DeclGroupSyntax {
     Syntax(self).asProtocol((any SyntaxProtocol).self) as? any LookInMembersScopeSyntax
   }
 }
+// extension SyntaxProtocol {
+//   func `as`(_: DeclGroupSyntaxType.Type) -> DeclGroupSyntaxType? {
+//     DeclGroupSyntaxType(self)
+//   }
+//   func `is`(_: DeclGroupSyntaxType.Type)
+// }
 
 // public enum QualifiedLookupResult2 {
 //   case members([DeclSyntax], constraints: [GenericWhereClauseSyntax])
@@ -481,14 +487,52 @@ public class SymbolTable {
 //   }
 // }
 
-enum MemberKind {
-  case anyMember
-  case `static`(onlyTypes: Bool = false)
+struct MemberKind: OptionSet, Hashable, CustomDebugStringConvertible {
+  let rawValue: Int
+  // enum Staticness {
+  //
+  // }
+  // case anyMember
+  // case `static`(onlyTypes: Bool = false)
 
-  func addingStatic() -> MemberKind {
-    switch self {
-    case .anyMember: .static()
-    case .static(let onlyTypes): .static(onlyTypes: onlyTypes)
+  /// Include instance methods
+  static let includeInstance = MemberKind(rawValue: 1 << 0)
+  /// Include static decls that aren't types
+  static let includeNonTypeStatic = MemberKind(rawValue: 1 << 1)
+  /// Include types (statically available)
+  static let includeTypes = MemberKind(rawValue: 1 << 2)
+
+  static let includeStatic: MemberKind = [.includeNonTypeStatic, .includeTypes]
+  static let includeAllMembers: MemberKind = [.includeInstance, .includeStatic]
+
+  static let `default` = MemberKind.includeInstance
+
+  func onlyStatic() -> MemberKind {
+    self.subtracting([.includeInstance])
+    // switch self {
+    // case .anyMember: .static()
+    // case .static(let onlyTypes): .static(onlyTypes: onlyTypes)
+    // }
+  }
+
+  var debugDescription: String {
+    return switch (contains(.includeInstance), contains(.includeNonTypeStatic), contains(.includeTypes)) {
+    case (true, true, true):
+      "[.includeAllMembers]"
+    case (true, true, false):
+      "[.includeInstance, .includeNonTypeStatic]"
+    case (true, false, true):
+      "[.includeInstance, .includeTypes]"
+    case (true, false, false):
+      "[.includeInstance]"
+    case (false, true, true):
+      "[.includeStatic]"
+    case (false, true, false):
+      "[.includeNonTypeStatic]"
+    case (false, false, true):
+      "[.includeStatic]"
+    case (false, false, false):
+      "[]"
     }
   }
 }
@@ -500,12 +544,25 @@ extension ValueDeclSyntax {
     // currently just macros.
     guard !self.isAlwaysGlobal else { return false }
 
-    switch memberKind {
-    case .anyMember:
+    // Check whether it's a type
+    let isTypeDecl = self.isTypeDecl
+    if isTypeDecl && memberKind.contains(.includeTypes) {
       return true
-    case .static(let onlyTypes):
-      return onlyTypes ? self.isTypeDecl : ((try? self.isStatic.get()) ?? false)
     }
+
+    // Check whether it's non-type static
+    let isStatic = (try? self.isStatic.get()) ?? false
+    if !isTypeDecl && isStatic && memberKind.contains(.includeNonTypeStatic) {
+      return true
+    }
+
+    // Checker whether it's an instance member
+    if !isStatic && memberKind.contains(.includeInstance) {
+      return true
+    }
+
+    // No matches
+    return false
   }
 }
 
@@ -590,12 +647,12 @@ extension SymbolTable {
       // Get only value declarations
       if let valueDecl = member.decl.as(ValueDeclSyntax.self) {
         // Check name matches
-        if let name {
-          // print(
-          //   "Match between \(valueDecl.declName) and \(name) is:",
-          //   valueDecl.declName.tryMatch(reference: name.coreName)
-          // )
-        }
+        // if let name {
+        //   print(
+        //     "Match between \(valueDecl.declName) and \(name) is:",
+        //     valueDecl.declName.tryMatch(reference: name.coreName)
+        //   )
+        // }
         if let expectedName = name,
           // TODO: Handle module selectors
           case .failure = valueDecl.declName.tryMatch(reference: expectedName.coreName)
@@ -821,7 +878,7 @@ extension SymbolTable {
     _lookUpTypeMember(
       type: type.baseType,
       name: typeName,
-      kind: .static(onlyTypes: true),
+      kind: memberKind.onlyStatic(),
       config: config,
       into: &nestedTypeMainDecls
     )
@@ -1078,7 +1135,7 @@ extension SymbolTable {
     _lookUpTypeMember(
       type: type,
       name: name,
-      kind: options.contains(.onlyTypes) ? .static(onlyTypes: true) : .anyMember,
+      kind: options.contains(.onlyTypes) ? .includeTypes : .includeAllMembers,
       config: QualifiedTableLookupConfig(
         lookupSuperprotocols: options.contains(.protocolMembers),
         lookupSuperclasses: true,  // TODO: I don't know if this is the compiler's default
@@ -1120,7 +1177,8 @@ extension SymbolTable {
     withName name: DeclNameRef?,
     inDeclGroup declGroup: DeclGroupSyntaxType,
     fromLocation location: AbsolutePosition,
-    options: LookupOptions
+    memberKind: MemberKind = .default,
+    lookupSupertypes: Bool = false
   ) -> [ValueDeclSyntax] {
     var perTypeResults = [CanonicalType: [QualifiedLookupResult]]()
 
@@ -1128,10 +1186,10 @@ extension SymbolTable {
       group: declGroup,
       type: CanonicalType(baseType: nil, mainDeclID: Identifier(canonicalName: "")),
       name: name,
-      kind: options.contains(.onlyTypes) ? .static(onlyTypes: true) : .anyMember,
+      kind: memberKind,
       config: QualifiedTableLookupConfig(
-        lookupSuperprotocols: options.contains(.protocolMembers),
-        lookupSuperclasses: true,  // TODO: I don't know if this is the compiler's default
+        lookupSuperprotocols: lookupSupertypes,
+        lookupSuperclasses: lookupSupertypes,
         configuredRegions: nil
       ),
       into: &perTypeResults

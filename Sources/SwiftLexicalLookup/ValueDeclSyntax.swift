@@ -205,7 +205,6 @@ extension ValueDeclSyntax {
       return DeclName.fromToken(_syntaxNode.cast(IdentifierPatternSyntax.self).identifier, args: nil)
     // Functions
     case .functionDecl:
-      // TODO: Handle callAsFunction
       let funcDecl = _syntaxNode.cast(FunctionDeclSyntax.self)
       guard let identifier = Identifier(validating: funcDecl.name) else {
         return DeclName.invalid(
@@ -214,11 +213,13 @@ extension ValueDeclSyntax {
         )
       }
       // Check for callAsFunction (instance method named `callAsFunction`).
+      // TODO:This feels fragile for extensions (but --currently-- we can only extend nominal types)
       if identifier.name == "callAsFunction",
         // Check function isn't marked static/class
         !_modifiersIncludeStatic(funcDecl.modifiers),
         // Check we're actually in a decl group
-        funcDecl.parentScope?.isProtocol((any DeclGroupSyntax).self) == true
+        let memberBlock = funcDecl.parentScope?.as(MemberBlockSyntax.self),
+        memberBlock.parent?.is(DeclGroupSyntaxType.self) == true
       {
         return DeclName.callAsFunction(args: _paramsToArgs(funcDecl.signature.parameterClause))
       }
@@ -366,7 +367,7 @@ indirect enum DeclName: Hashable, CustomDebugStringConvertible {
 
       case .invalid(let nonIdentifier, let macro, let args):
         "\(describeMacro(macro))<?\(nonIdentifier)?>\(describeArgs(args))"
-      case .callAsFunction(let args): "callAsFunction\(describeArgs(args))"
+      case .callAsFunction(let args): "*callAsFunction*\(describeArgs(args))"
 
       case .subscript(let args): "[\(describeArgs(args, withParens: false))]"
       case .`init`(let args): "*init*\(describeArgs(args))"
@@ -394,9 +395,14 @@ indirect enum DeclName: Hashable, CustomDebugStringConvertible {
     // Match init if reference doesn't provide arguments.
     case (.`init`(_), .`init`(args: nil)):
       return .success(())
-    // For inits and subscripts, check that arguments match
-    case (.`init`(let argsA), .`init`(let argsB?)),
-      (.subscript(let argsA), .subscript(let argsB)):
+    // For inits, subscripts and `callAsFunction`, check that arguments match.
+    //
+    // Recall that init can be referenced both as `<Type>.init(...)` and `<Type>(...)`.
+    // ``unnamedCall`` represents the latter.
+    case (.`init`(let argsA), .unnamedCall(let argsB)),
+      (.`init`(let argsA), .`init`(let argsB?)),
+      (.subscript(let argsA), .subscript(let argsB)),
+      (.callAsFunction(let argsA), .unnamedCall(let argsB)):
       guard argsA == argsB else { return .failure(MatchFailure.argumentMismatch) }
       return .success(())
 
@@ -525,7 +531,7 @@ struct DeclNameRef: Hashable, CustomDebugStringConvertible {
       case .Protocol: baseName = "*Protocol*"
       }
 
-      return "``\(baseName)``"
+      return "`\(baseName)`"
     }
   }
 
