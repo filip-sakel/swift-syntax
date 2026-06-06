@@ -159,10 +159,15 @@ extension ValueDeclSyntax {
     })
   }
   /// Helper that converts an enum case element's parameter clause to declaration-name arguments
-  func _enumParamsToArgs(_ parameterClause: EnumCaseParameterClauseSyntax) -> DeclNameArgs {
+  ///
+  /// Note that since enum elements with parentheses but no associated values aren't allowed,
+  /// e.g., `myCase()`, we treat them identifiers without arguments, i.e., `myCase`.
+  func _enumParamsToArgs(_ parameterClause: EnumCaseParameterClauseSyntax) -> DeclNameArgs? {
     // According to the docs, ``EnumCaseParameterClauseSyntax/firstName`` is either an identifier,
     // "_" or nil. So if it's not convertible to an identifier, it must be `nil`.
-    parameterClause.parameters.map({ $0.firstName.flatMap(Identifier.init(validating:)) })
+    let args = parameterClause.parameters.map({ $0.firstName.flatMap(Identifier.init(validating:)) })
+    // No associated values => no arguments (because `myCase()` is illegal)
+    return args.isEmpty ? nil : args
   }
 
   /// Returns true if the given macro is freestanding; false if attached.
@@ -213,14 +218,7 @@ extension ValueDeclSyntax {
         )
       }
       // Check for callAsFunction (instance method named `callAsFunction`).
-      // TODO:This feels fragile for extensions (but --currently-- we can only extend nominal types)
-      if identifier.name == "callAsFunction",
-        // Check function isn't marked static/class
-        !_modifiersIncludeStatic(funcDecl.modifiers),
-        // Check we're actually in a decl group
-        let memberBlock = funcDecl.parentScope?.as(MemberBlockSyntax.self),
-        memberBlock.parent?.is(DeclGroupSyntaxType.self) == true
-      {
+      if identifier.name == "callAsFunction", self.isStatic == .success(false) {
         return DeclName.callAsFunction(args: _paramsToArgs(funcDecl.signature.parameterClause))
       }
       return DeclName.identifier(identifier: identifier, args: _paramsToArgs(funcDecl.signature.parameterClause))
@@ -248,7 +246,7 @@ extension ValueDeclSyntax {
       let enumElement = _syntaxNode.cast(EnumCaseElementSyntax.self)
       return DeclName.fromToken(
         enumElement.name,
-        args: enumElement.parameterClause.map(_enumParamsToArgs(_:))
+        args: enumElement.parameterClause.flatMap(_enumParamsToArgs(_:))
       )
     default:
       fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
@@ -624,28 +622,36 @@ extension ValueDeclSyntax {
   // }
   //
 
-  /// Get the
+  /// Get the variable declaration parent of this identifier pattern
+  /// value-declaration. Returns `nil` if the scope is invalid.
   private func _findVariableDeclSyntax(
     _ identifierPattern: IdentifierPatternSyntax
-  ) -> Result<VariableDeclSyntax, ScopeLookupFailure> {
-    guard let scope = self.scope else {
-      return Result.failure(.noScope)
+  ) -> VariableDeclSyntax? {
+    // The hierarchy goes as follows
+    //   VariableDecl -> PatternBindingList -> PatternBinding -> Pattern
+    guard
+      let binding = identifierPattern.parent?.as(PatternBindingSyntax.self),
+      let bindingList = binding.parent?.as(PatternBindingListSyntax.self),
+      let varDecl = bindingList.parent?.as(VariableDeclSyntax.self)
+    else {
+      return nil
     }
-    guard let varDecl = scope.as(VariableDeclSyntax.self) else {
-      return Result.failure(.invalidScope)
-    }
-    return .success(varDecl)
+    return varDecl
   }
+  /// Get the enum case declaration parent of this enum element
+  /// value-declaration. Returns `nil` if the scope is invalid.
   private func _findEnumCaseDeclSyntax(
     _ enumElement: EnumCaseElementSyntax
-  ) -> Result<EnumCaseDeclSyntax, ScopeLookupFailure> {
-    guard let scope = self.scope else {
-      return Result.failure(.noScope)
+  ) -> EnumCaseDeclSyntax? {
+    // The hierarchy goes as follows
+    //   EnumCaseDecl -> EnumCaseElementList -> EnumCaseElement
+    guard
+      let elementList = enumElement.parent?.as(EnumCaseElementListSyntax.self),
+      let caseDecl = elementList.parent?.as(EnumCaseDeclSyntax.self)
+    else {
+      return nil
     }
-    guard let enumCaseDecl = scope.as(EnumCaseDeclSyntax.self) else {
-      return Result.failure(.invalidScope)
-    }
-    return .success(enumCaseDecl)
+    return caseDecl
   }
 
   // enum ModifierLookupFailure: Error {
@@ -662,98 +668,102 @@ extension ValueDeclSyntax {
   //   }
   // }
 
-  // TODO: Query parents of identifier type
-  var modifiers: Result<DeclModifierListSyntax, ScopeLookupFailure> {
-    switch _syntaxNode.kind {
+  /// The modifiers attached to this value declaration (or the respective parent).
+  ///
+  /// Since identifier patterns and enum elements aren't themselves declarations
+  /// and don't have modifiers, we return `nil` if we can't find their parents.
+  var modifiers: DeclModifierListSyntax? {
+    switch _syntaxNode.as(SyntaxEnum.self) {
     // Types
-    case .structDecl:
-      return .success(_syntaxNode.cast(StructDeclSyntax.self).modifiers)
-    case .enumDecl:
-      return .success(_syntaxNode.cast(EnumDeclSyntax.self).modifiers)
-    case .classDecl:
-      return .success(_syntaxNode.cast(ClassDeclSyntax.self).modifiers)
-    case .actorDecl:
-      return .success(_syntaxNode.cast(ActorDeclSyntax.self).modifiers)
-    case .protocolDecl:
-      return .success(_syntaxNode.cast(ProtocolDeclSyntax.self).modifiers)
-    case .typeAliasDecl:
-      return .success(_syntaxNode.cast(TypeAliasDeclSyntax.self).modifiers)
-    case .associatedTypeDecl:
-      return .success(_syntaxNode.cast(AssociatedTypeDeclSyntax.self).modifiers)
+    case .structDecl(let structDecl):
+      return structDecl.modifiers
+    case .enumDecl(let enumDecl):
+      return enumDecl.modifiers
+    case .classDecl(let classDecl):
+      return classDecl.modifiers
+    case .actorDecl(let actorDecl):
+      return actorDecl.modifiers
+    case .protocolDecl(let protocolDecl):
+      return protocolDecl.modifiers
+    case .typeAliasDecl(let typeAliasDecl):
+      return typeAliasDecl.modifiers
+    case .associatedTypeDecl(let typeAliasDecl):
+      return typeAliasDecl.modifiers
     // Functions
-    case .functionDecl:
-      return .success(_syntaxNode.cast(FunctionDeclSyntax.self).modifiers)
-    case .initializerDecl:
-      return .success(_syntaxNode.cast(InitializerDeclSyntax.self).modifiers)
-    case .deinitializerDecl:
-      return .success(_syntaxNode.cast(DeinitializerDeclSyntax.self).modifiers)
+    case .functionDecl(let funcDecl):
+      return funcDecl.modifiers
+    case .initializerDecl(let initDecl):
+      return initDecl.modifiers
+    case .deinitializerDecl(let deinitDecl):
+      return deinitDecl.modifiers
     // Storage
-    case .identifierPattern:
-      return _findVariableDeclSyntax(_syntaxNode.cast(IdentifierPatternSyntax.self))
-        .map(\.modifiers)
-    case .subscriptDecl:
-      return .success(_syntaxNode.cast(SubscriptDeclSyntax.self).modifiers)
+    case .identifierPattern(let identifierPattern):
+      return _findVariableDeclSyntax(identifierPattern)?.modifiers
+    case .subscriptDecl(let subscriptDecl):
+      return subscriptDecl.modifiers
     // Macro
-    case .macroDecl:
-      return .success(_syntaxNode.cast(MacroDeclSyntax.self).modifiers)
+    case .macroDecl(let macroDecl):
+      return macroDecl.modifiers
     // Enum element
-    case .enumCaseElement:
-      return _findEnumCaseDeclSyntax(_syntaxNode.cast(EnumCaseElementSyntax.self))
-        .map(\.modifiers)
+    case .enumCaseElement(let enumElement):
+      return _findEnumCaseDeclSyntax(enumElement)?.modifiers
     default:
       fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
     }
   }
 
-  var attributes: Result<AttributeListSyntax, ScopeLookupFailure> {
-    switch _syntaxNode.kind {
+  var attributes: AttributeListSyntax? {
+    switch _syntaxNode.as(SyntaxEnum.self) {
     // Types
-    case .structDecl:
-      return .success(_syntaxNode.cast(StructDeclSyntax.self).attributes)
-    case .enumDecl:
-      return .success(_syntaxNode.cast(EnumDeclSyntax.self).attributes)
-    case .classDecl:
-      return .success(_syntaxNode.cast(ClassDeclSyntax.self).attributes)
-    case .actorDecl:
-      return .success(_syntaxNode.cast(ActorDeclSyntax.self).attributes)
-    case .protocolDecl:
-      return .success(_syntaxNode.cast(ProtocolDeclSyntax.self).attributes)
-    case .typeAliasDecl:
-      return .success(_syntaxNode.cast(TypeAliasDeclSyntax.self).attributes)
-    case .associatedTypeDecl:
-      return .success(_syntaxNode.cast(AssociatedTypeDeclSyntax.self).attributes)
+    case .structDecl(let structDecl):
+      return structDecl.attributes
+    case .enumDecl(let enumDecl):
+      return enumDecl.attributes
+    case .classDecl(let classDecl):
+      return classDecl.attributes
+    case .actorDecl(let actorDecl):
+      return actorDecl.attributes
+    case .protocolDecl(let protocolDecl):
+      return protocolDecl.attributes
+    case .typeAliasDecl(let typeAliasDecl):
+      return typeAliasDecl.attributes
+    case .associatedTypeDecl(let typeAliasDecl):
+      return typeAliasDecl.attributes
     // Functions
-    case .functionDecl:
-      return .success(_syntaxNode.cast(FunctionDeclSyntax.self).attributes)
-    case .initializerDecl:
-      return .success(_syntaxNode.cast(InitializerDeclSyntax.self).attributes)
-    case .deinitializerDecl:
-      return .success(_syntaxNode.cast(DeinitializerDeclSyntax.self).attributes)
+    case .functionDecl(let funcDecl):
+      return funcDecl.attributes
+    case .initializerDecl(let initDecl):
+      return initDecl.attributes
+    case .deinitializerDecl(let deinitDecl):
+      return deinitDecl.attributes
     // Storage
-    case .identifierPattern:
-      // Grab the attributes from the variable decl, if we can get it.
-      return _findVariableDeclSyntax(_syntaxNode.cast(IdentifierPatternSyntax.self))
-        .map(\.attributes)
-    case .subscriptDecl:
-      return .success(_syntaxNode.cast(SubscriptDeclSyntax.self).attributes)
+    case .identifierPattern(let identifierPattern):
+      return _findVariableDeclSyntax(identifierPattern)?.attributes
+    case .subscriptDecl(let subscriptDecl):
+      return subscriptDecl.attributes
     // Macro
-    case .macroDecl:
-      return .success(_syntaxNode.cast(MacroDeclSyntax.self).attributes)
+    case .macroDecl(let macroDecl):
+      return macroDecl.attributes
     // Enum element
-    case .enumCaseElement:
-      // Grab the attributes from the enum case decl, if we can get it.
-      return _findEnumCaseDeclSyntax(_syntaxNode.cast(EnumCaseElementSyntax.self))
-        .map(\.attributes)
+    case .enumCaseElement(let enumElement):
+      return _findEnumCaseDeclSyntax(enumElement)?.attributes
     default:
       fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
     }
   }
 
   enum StaticLookupFailure: Equatable, Error {
+    /// Static only makes sense in a nominal type.
+    ///
+    /// That is, we check that the value declaration appears inside a decl
+    /// group (nominal type including protocols, or extension thereof).
+    case unsupportedAtTopLevel
     /// Macros may only appear at file scope; it's not clear what "static" means
     case macrosOnlyAtFileScope
-    /// The value declaration has an nonexistent/invalid scope
-    case scopeFailure(ScopeLookupFailure)
+    /// The value declaration has an invalid scope: this is either
+    /// an enum element without an enum case parent, or an identifier
+    /// pattern without a variable declaration parent.
+    case scopeFailure
   }
 
   /// Whether the given list of modifiers include the `static` and/or `class` keywords.
@@ -766,41 +776,83 @@ extension ValueDeclSyntax {
   /// Whether the given declaration is available from a static/type context.
   ///
   /// Notes:
-  /// 1. This query doesn't care about the value declaration's parent context.
-  ///    For instance, if we pass in a global function (without a `static` or
-  ///    `class` modifier), we get `isStatic == true`. Further, a `class func`
-  ///    inside a `struct` will also return true.
+  /// 1. This query considers parent context, e.g., querying ``isStatic`` on a
+  ///    top-level declaration fails with ``ScopeLookupFailure.unsupportedAtTopLevel``.
+  ///    However, it's flexible and will accept `class func` as static even in
+  ///    a struct (assuming the user meant `static`).
   /// 2. Macro declarations will return a `macrosOnlyAtFileScope` failure.
   /// 3. Pattern identifiers that aren't inside a ``VariableDeclSyntax``
   ///    scope, or enum elements that aren't in ``EnumCaseDeclSyntax``
   ///    return the respective `ScopeLookupFailure`.
   var isStatic: Result<Bool, StaticLookupFailure> {
-    switch _syntaxNode.kind {
-    // Types are always static
-    case .structDecl, .enumDecl, .classDecl, .actorDecl, .protocolDecl, .typeAliasDecl, .associatedTypeDecl,
-      // Inits are static, e.g., MyStruct.init(...)
-      .initializerDecl,
-      // Enum cases elements are static, e.g., MyEnum.myCase.
-      .enumCaseElement:
-      return .success(true)
-    // Deinits operate on instances, so not static.
-    case .deinitializerDecl:
-      return .success(false)
-    // Functions, variables and subscripts can be static or non-static
-    case .functionDecl, .identifierPattern, .subscriptDecl:
-      return switch self.modifiers {
-      case .success(let modifiers):
-        // Check for 'static' or 'class' modifiers
-        .success(_modifiersIncludeStatic(modifiers))
-      case .failure(let scopeFailure):
-        .failure(.scopeFailure(scopeFailure))
+    /// Check that this value declaration is in a declaration group.
+    func checkParentIsDeclGroup(_ parent: Syntax?) throws(StaticLookupFailure) {
+      // The hierarchy is as follows:
+      //    DeclGroup->MemberBlock->MemberBlockItemList->MemberBlockItem-><value decl>
+      // So traverse bottom-up
+      guard
+        let item = parent?.as(MemberBlockItemSyntax.self),
+        let list = item.parent?.as(MemberBlockItemListSyntax.self),
+        let block = list.parent?.as(MemberBlockSyntax.self),
+        // Check we get a decl group
+        block.parent?.is(DeclGroupSyntaxType.self) == true
+      else {
+        throw StaticLookupFailure.unsupportedAtTopLevel
       }
-    // Macro
-    case .macroDecl:
-      return .failure(.macrosOnlyAtFileScope)
-    default:
-      fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
     }
+
+    return Result(catching: { () throws(StaticLookupFailure) -> Bool in
+      switch _syntaxNode.as(SyntaxEnum.self) {
+      // Types are always static
+      case .structDecl, .enumDecl, .classDecl, .actorDecl, .protocolDecl, .typeAliasDecl, .associatedTypeDecl,
+        // Inits are static, e.g., MyStruct.init(...)
+        .initializerDecl:
+        try checkParentIsDeclGroup(self.parent)
+        return true
+      // Enum cases elements are static, e.g., MyEnum.myCase
+      case .enumCaseElement(let enumElement):
+        // Find the enum case declaration parent.
+        guard let enumCaseDecl = _findEnumCaseDeclSyntax(enumElement) else {
+          throw StaticLookupFailure.scopeFailure
+        }
+        // Check the var declaration's parent is a group declaration
+        //
+        // We don't care if the parent is specifically an enum to tolerate user
+        // error. For instance, the user might have converted an enum to a
+        // struct and have a leftover case declaration; we just interpret that
+        // as a static method and diagnose elsewhere.
+        try checkParentIsDeclGroup(enumCaseDecl.parent)
+        return true
+
+      // Deinits operate on instances, so not static.
+      case .deinitializerDecl:
+        try checkParentIsDeclGroup(self.parent)
+        return false
+
+      // Functions, variables and subscripts can be static or non-static
+      //
+      // This depends on whether they have the 'static'/'class' modifiers
+      case .functionDecl(let funcDecl):
+        try checkParentIsDeclGroup(self.parent)
+        return _modifiersIncludeStatic(funcDecl.modifiers)
+      case .subscriptDecl(let subscriptDecl):
+        try checkParentIsDeclGroup(self.parent)
+        return _modifiersIncludeStatic(subscriptDecl.modifiers)
+      case .identifierPattern(let identifierPattern):
+        // We need to find the parent variable declaration
+        guard let varDecl = _findVariableDeclSyntax(identifierPattern) else {
+          throw StaticLookupFailure.scopeFailure
+        }
+        // Check the var declaration's parent is a group declaration
+        try checkParentIsDeclGroup(varDecl.parent)
+        return _modifiersIncludeStatic(varDecl.modifiers)
+      // Macro
+      case .macroDecl:
+        throw StaticLookupFailure.macrosOnlyAtFileScope
+      default:
+        fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
+      }
+    })
   }
 
   /// Whether the declaration is a type declaration, meaning it introduces a
@@ -1111,89 +1163,65 @@ indirect enum UnresolvedTypeRef: Equatable {
 //
 //   }
 // }
-//
-// MARK: Inits
 
-// Other Types
+// MARK: Upcasting
 
-// Type decls
-extension StructDeclSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+// Conrete types
+extension ValueDeclSyntax {
+  // Types
+  public init(_ syntax: StructDeclSyntax) {
+    self.init(syntax)!
   }
-}
-extension EnumDeclSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+  public init(_ syntax: EnumDeclSyntax) {
+    self.init(syntax)!
   }
-}
-extension ClassDeclSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+  public init(_ syntax: ClassDeclSyntax) {
+    self.init(syntax)!
   }
-}
-extension ActorDeclSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+  public init(_ syntax: ActorDeclSyntax) {
+    self.init(syntax)!
   }
-}
-extension ProtocolDeclSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+  public init(_ syntax: ProtocolDeclSyntax) {
+    self.init(syntax)!
   }
-}
-extension TypeAliasDeclSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+  public init(_ syntax: TypeAliasDeclSyntax) {
+    self.init(syntax)!
   }
-}
-extension AssociatedTypeDeclSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+  public init(_ syntax: AssociatedTypeDeclSyntax) {
+    self.init(syntax)!
   }
-}
-// Function decls
-extension FunctionDeclSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+
+  // Function decls
+  public init(_ syntax: FunctionDeclSyntax) {
+    self.init(syntax)!
   }
-}
-extension InitializerDeclSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+  public init(_ syntax: InitializerDeclSyntax) {
+    self.init(syntax)!
   }
-}
-extension DeinitializerDeclSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+  public init(_ syntax: DeinitializerDeclSyntax) {
+    self.init(syntax)!
   }
-}
-// Storage decls
-extension IdentifierPatternSyntax {
-  func `as`(_ syntaxType: IdentifierPatternSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+
+  // Storage decls
+  public init(_ syntax: IdentifierPatternSyntax) {
+    self.init(syntax)!
   }
-}
-extension SubscriptDeclSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+  public init(_ syntax: SubscriptDeclSyntax) {
+    self.init(syntax)!
   }
-}
-// Macro decl
-extension MacroDeclSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+
+  // Macro decl
+  public init(_ syntax: MacroDeclSyntax) {
+    self.init(syntax)!
   }
-}
-// Enum element decl
-extension EnumCaseElementSyntax {
-  func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax {
-    return ValueDeclSyntax(_syntaxNode)!
+
+  // Enum case elements
+  public init(_ syntax: EnumCaseElementSyntax) {
+    self.init(syntax)!
   }
 }
 
 // Protocols
-
 extension ValueDeclSyntax {
   init(fromProtocol syntax: __shared any NominalTypeDeclSyntax) {
     // We know this cast is going to succeed. Go through `init(_: SyntaxData)` just to double-check and

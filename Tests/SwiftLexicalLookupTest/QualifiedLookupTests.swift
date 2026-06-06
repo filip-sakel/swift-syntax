@@ -850,6 +850,7 @@ final class TestQualifiedLookup: XCTestCase {
     //   }
     //   """
     // )
+    //
     assertTypeMemberLookup(
       """
       struct MyStruct {
@@ -871,6 +872,9 @@ final class TestQualifiedLookup: XCTestCase {
           .named("callAsFunction"),
           .unnamed([]))
         func callAsFunction() {}
+
+        // We assume the user meant static functions (diagnosed elsewhere)
+        case \(.named("case1").static())case1, \(.named("case2").static())case2
 
         // When `callAsFunction` is static, it exhibits no special behavior
         static

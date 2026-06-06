@@ -501,39 +501,42 @@ struct MemberKind: OptionSet, Hashable, CustomDebugStringConvertible {
   static let includeNonTypeStatic = MemberKind(rawValue: 1 << 1)
   /// Include types (statically available)
   static let includeTypes = MemberKind(rawValue: 1 << 2)
+  /// Include globals
+  static let includeGlobals = MemberKind(rawValue: 1 << 3)
 
   static let includeStatic: MemberKind = [.includeNonTypeStatic, .includeTypes]
   static let includeAllMembers: MemberKind = [.includeInstance, .includeStatic]
+  static let includeAll: MemberKind = [.includeAllMembers, .includeGlobals]
 
   static let `default` = MemberKind.includeInstance
 
   func onlyStatic() -> MemberKind {
     self.subtracting([.includeInstance])
-    // switch self {
-    // case .anyMember: .static()
-    // case .static(let onlyTypes): .static(onlyTypes: onlyTypes)
-    // }
   }
 
   var debugDescription: String {
-    return switch (contains(.includeInstance), contains(.includeNonTypeStatic), contains(.includeTypes)) {
-    case (true, true, true):
-      "[.includeAllMembers]"
-    case (true, true, false):
-      "[.includeInstance, .includeNonTypeStatic]"
-    case (true, false, true):
-      "[.includeInstance, .includeTypes]"
-    case (true, false, false):
-      "[.includeInstance]"
-    case (false, true, true):
-      "[.includeStatic]"
-    case (false, true, false):
-      "[.includeNonTypeStatic]"
-    case (false, false, true):
-      "[.includeStatic]"
-    case (false, false, false):
-      "[]"
-    }
+    // Special cases
+    if self == .includeStatic { return "[.includeStatic]" }
+    if self == .includeAllMembers { return "[.includeAllMembers]" }
+    if self == .includeAll { return "[.includeAll]" }
+
+    // Map the core properties
+    let corePropDescriptions = [
+      MemberKind.includeInstance: ".includeInstance",
+      MemberKind.includeNonTypeStatic: ".includeNonTypeStatic",
+      MemberKind.includeTypes: ".includeTypes",
+      MemberKind.includeGlobals: ".includeGlobals",
+    ]
+    // Collect all the core properties we have
+    let commaSeparatedProps =
+      corePropDescriptions
+      .compactMap({ (key, description) in
+        guard self.contains(key) else { return nil }
+        return description
+      })
+      .joined(separator: ", ")
+
+    return "[\(commaSeparatedProps)]"
   }
 }
 
@@ -551,13 +554,13 @@ extension ValueDeclSyntax {
     }
 
     // Check whether it's non-type static
-    let isStatic = (try? self.isStatic.get()) ?? false
-    if !isTypeDecl && isStatic && memberKind.contains(.includeNonTypeStatic) {
+    let isStatic = self.isStatic
+    if !isTypeDecl && isStatic == .success(true) && memberKind.contains(.includeNonTypeStatic) {
       return true
     }
 
     // Checker whether it's an instance member
-    if !isStatic && memberKind.contains(.includeInstance) {
+    if isStatic == .success(false) && memberKind.contains(.includeInstance) {
       return true
     }
 
@@ -639,6 +642,28 @@ extension SymbolTable {
     //   ">>Looking for direct members for ref '\(name?.debugDescription ?? "_")' in group decl: '\(groupDecl.trimmedDescription)'"
     // )
 
+    /// Filter the given declaration based on the given ``name`` and ``memberKind``
+    func filterDecl(_ valueDecl: ValueDeclSyntax) -> ValueDeclSyntax? {
+      // Check name matches
+      // if let name {
+      //   print(
+      //     "Match between \(valueDecl.declName) and \(name) is:",
+      //     valueDecl.declName.tryMatch(reference: name.coreName)
+      //   )
+      // }
+
+      // If given a name, check for a match
+      if let expectedName = name,
+        case .failure = valueDecl.declName.tryMatch(reference: expectedName.coreName)
+      {
+        return nil
+      }
+      // Filter for the kind
+      guard valueDecl.isKind(memberKind) else { return nil }
+
+      return valueDecl
+    }
+
     /// Process a member or a member nested inside an if-config declaration.
     ///
     /// This pattern is similar to the SyntaxVisitor pattern, but a SyntaxVisitor
@@ -646,22 +671,19 @@ extension SymbolTable {
     func processMember(member: MemberBlockItemSyntax) -> [ValueDeclSyntax] {
       // Get only value declarations
       if let valueDecl = member.decl.as(ValueDeclSyntax.self) {
-        // Check name matches
-        // if let name {
-        //   print(
-        //     "Match between \(valueDecl.declName) and \(name) is:",
-        //     valueDecl.declName.tryMatch(reference: name.coreName)
-        //   )
-        // }
-        if let expectedName = name,
-          // TODO: Handle module selectors
-          case .failure = valueDecl.declName.tryMatch(reference: expectedName.coreName)
-        {
-          return []
-        }
-        // Filter for the type
-        guard valueDecl.isKind(memberKind) else { return [] }
-        return [valueDecl]
+        return if let valueDecl = filterDecl(valueDecl) { [valueDecl] } else { [] }
+      }
+      // Visit variable declarations to get identifier patterns
+      else if let varDecl = member.decl.as(VariableDeclSyntax.self) {
+        return varDecl.bindings.compactMap({ binding in
+          ValueDeclSyntax(binding.pattern.as(IdentifierPatternSyntax.self)).flatMap(filterDecl(_:))
+        })
+      }
+      // Visit enum cases to get enum elements
+      else if let enumCase = member.decl.as(EnumCaseDeclSyntax.self) {
+        return enumCase.elements.compactMap({ enumElement in
+          filterDecl(ValueDeclSyntax(enumElement))
+        })
       }
       // If configuredRegions is set, visit the members of the active clause (if it exists)
       //
