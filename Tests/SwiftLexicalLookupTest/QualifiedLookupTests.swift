@@ -18,6 +18,9 @@ import XCTest
 // TODO: Switch to @_spi(Experimental) eventually
 @_spi(Experimental) @testable import SwiftLexicalLookup
 
+/// Source code annotated with qualified-lookup expectations.
+///
+/// Examples at `assertTypeMemberLookup` documentation.
 struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInterpolation {
   // Returns string of error messages; empty if valid.
   static func parseType(_ type: TypeSyntax, file: StaticString, line: UInt) -> UnresolvedTypeRef? {
@@ -47,9 +50,35 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
     }
   }
 
+  /// An expectation describes the lookup parameters that should surfaces the attached
+  /// declaration at qualified lookup. It also includes source location for better
+  /// diagnostics during testing.
+  ///
+  /// For example:
+  ///   """
+  ///   class A {
+  ///     \(.deinit()) //   searching for the name `*deinit*` should surface
+  ///     deinit {}    //<- this declaration
+  ///   }
+  ///   """
+  ///
+  /// Most ways to create a lookup expectation are wrappers around ``DeclNameRef``.
+  /// The default ``memberKind`` looks only for instance members. So --for now--
+  /// the only way to modify ``memberKind`` is to adding `.static()`, e.g.:
+  ///   """
+  ///   struct A {
+  ///     static \(.named("f", args: []).static()) func f() {}
+  ///   }
+  ///   """
   struct DeclLookupExpectation {
+    /// The name of the declaration for which to look, or `nil` if invalid.
+    ///
+    /// It's set to `nil` if  the test uses an invalid declaration name (which
+    /// we diagnose when initializing `DeclLookupExpectation`)
     let declRef: DeclNameRef?
+    /// The kind of members we request during lookup
     var memberKind: MemberKind = .default
+    // Source location where this expectation was created
     let file: StaticString
     let line: UInt
 
@@ -79,7 +108,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       }
       // TODO: Handle `identifier`-style "non-canonical" identifiers, e.g., "`myID`" or "`init`"
       let identifier = Identifier(canonicalName: tokenString)
-      print("[Lookup debuggin] final id name '\(identifier.name)'")
+
       // Construct identifier through static string because we can't use a string
       // that's not in the syntax tree
       return identifier
@@ -273,18 +302,55 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
 }
 
 final class TestQualifiedLookup: XCTestCase {
-  /// Check each of the `\(toType: ...)`-suffixed `<Type>.<member>`
-  /// names map to the correct member declarations.
+  /// Check each expectation annotation in the given `QualifiedLookupSource`
+  /// source code gives the correct result.
   ///
-  /// Each declaration-reference name suffixed with a '\(toDecl: ...)' so-called
-  /// expectation must be valid type syntax identifier type syntax or member type
-  /// syntax consisting solely of other member type syntax or identifier type nodes.
-  ///
-  /// Further, each marker should be attached right in front of the introducer keyword
-  /// of the named declaration it identifies. For instance:
-  ///   public 🟥MyStruct {
-  ///     @MainActor static private 🟩func myFunc() {}
+  /// You can create a ``QualifiedLookupSource`` with a string literal, using
+  /// string interpolation to add expectations for qualified-lookup. E.g.,
+  ///   let source: QualifiedLookupSource = """
+  ///   struct MyType {
+  ///     var \(.named("a")) // <- looking up "a" in `MyType` should find this identifier pattern
+  ///         a: Int
   ///   }
+  ///   """
+  ///
+  /// You can usually copy and modify the existing examples. If you do something
+  /// the assertion function doesn't like, you'll get a fairly specific
+  /// test failure.
+  ///
+  /// However, here are some rules of thumb. Each expectation should be placed
+  /// before a key token of the target syntax:
+  /// a. For normal declarations, place the expectation before the main keyword:
+  ///    """
+  ///    \(.named("myfunc")
+  ///      .named("myfunc", args: ["a"]))
+  ///    func myfunc(a: Int)
+  ///    """
+  ///    Same for subscripts, types, etc.
+  /// b. For identifier patterns (in variable decls) and enum elements (in case
+  ///    declarations), this doesn't work, so prefer placing the expectation
+  ///    before the actual name:
+  ///    """
+  ///    enum A {
+  ///      case \(.named("a"))
+  ///           a,
+  ///           \(.named("b"))
+  ///           b
+  ///
+  ///      var \(.names("myVar"))
+  ///          myVar: Int { 1 }
+  ///    }
+  ///    """
+  /// (These rules follow from the fact that we find the target value
+  ///  declaration by getting the parent of the token after the expectation
+  ///  and casting it to a `ValueDeclSyntax`.)
+  ///
+  /// Further, if you have multiple names for the same declarations, list them
+  /// in the same interpolation (see
+  /// ``QualifiedLookupSource/Interpolation/appendInterpolation``).
+  ///
+  /// To see exactly what expectations you can create, check out the static
+  /// functions in ``DeclLookupExpectation``.
   func assertTypeMemberLookup(
     _ lookupSource: QualifiedLookupSource,
     file: StaticString = #file,
@@ -327,7 +393,6 @@ final class TestQualifiedLookup: XCTestCase {
         )
         continue
       }
-      // print(">>Found value decl '\(valueDecl.trimmedDescription)'")
 
       // Find the implicit decl-group parent
       func declGroupParent(of syntax: Syntax) -> DeclGroupSyntaxType? {
@@ -371,13 +436,11 @@ final class TestQualifiedLookup: XCTestCase {
       XCTFail("No valid expectations found", file: file, line: line)
       return
     }
-    // print(">>Found decl group: '\(sharedDeclGroup.trimmedDescription)'")
 
     // Perform lookup
     let symbolTable = SymbolTable(sourceFile: sourceFile)
     for (nameAndMemberKind, expectations) in namesToExpectations {
       let (name, memberKind) = (nameAndMemberKind.a, nameAndMemberKind.b)
-      // print(">>Looking for name \(name.debugDescription)")
 
       let foundDecls = symbolTable.lookupMember(
         withName: name,
@@ -397,7 +460,7 @@ final class TestQualifiedLookup: XCTestCase {
           )
           continue
         }
-        // Cross out matched
+        // Cross out matched declarations
         unmatchedDecls.remove(expectedDecl)
       }
 
