@@ -16,12 +16,14 @@ import SwiftSyntax
 ///
 /// Each base kind is additive (e.g. include instance members, include global
 /// declarations, etc.). To remove a kind, use OptionSet's subtraction operator.
-@_spi(_QualifiedLookup) public struct MemberKind: OptionSet, Hashable, Sendable, CustomDebugStringConvertible {
+@_spi(_QualifiedLookup) public struct MemberKind: OptionSet, Hashable, Sendable {
   public let rawValue: Int
 
   public init(rawValue: Int) {
     self.rawValue = rawValue
   }
+
+  // Base kinds
 
   /// Include instance methods
   public static let includeInstance = MemberKind(rawValue: 1 << 0)
@@ -31,7 +33,13 @@ import SwiftSyntax
   public static let includeTypes = MemberKind(rawValue: 1 << 2)
   /// Include globals
   public static let includeGlobals = MemberKind(rawValue: 1 << 3)
+  /// TODO: Add flags like (@abi, @_implements, macro expansions) like in the compiler's version
+  /// at Decl.h:16
+}
 
+// Convenience Kinds
+
+extension MemberKind {
   public static let includeStatic: MemberKind = [.includeNonTypeStatic, .includeTypes]
   public static let includeAllMembers: MemberKind = [.includeInstance, .includeStatic]
   public static let includeAll: MemberKind = [.includeAllMembers, .includeGlobals]
@@ -42,15 +50,17 @@ import SwiftSyntax
   public func onlyStatic() -> MemberKind {
     self.subtracting([.includeInstance])
   }
+}
 
+extension MemberKind: CustomDebugStringConvertible {
   public var debugDescription: String {
     // Special cases
     if self == .includeStatic { return "[.includeStatic]" }
     if self == .includeAllMembers { return "[.includeAllMembers]" }
     if self == .includeAll { return "[.includeAll]" }
 
-    // Map the core properties
-    let corePropDescriptions = [
+    // Map the base kinds
+    let baseKindDescriptions = [
       MemberKind.includeInstance: ".includeInstance",
       MemberKind.includeNonTypeStatic: ".includeNonTypeStatic",
       MemberKind.includeTypes: ".includeTypes",
@@ -58,7 +68,7 @@ import SwiftSyntax
     ]
     // Collect all the core properties we have
     let commaSeparatedProps =
-      corePropDescriptions
+      baseKindDescriptions
       .compactMap({ (key, description) in
         guard self.contains(key) else { return nil }
         return description
@@ -68,6 +78,8 @@ import SwiftSyntax
     return "[\(commaSeparatedProps)]"
   }
 }
+
+// MARK: Matching
 
 extension ValueDeclSyntax {
   /// Check if this value declaration fits the given kind.

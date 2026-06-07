@@ -422,8 +422,6 @@ extension SymbolTable {
   /// If a configuredRegion is provided, consider only the active clause's
   /// members.
   ///
-  /// TODO: Add flags like (@abi, @_implements, macro expansions) like in the compiler's version
-  /// at Decl.h:16
   private func _getDirectMembers(
     of groupDecl: DeclGroupSyntax,
     name: DeclNameRef?,
