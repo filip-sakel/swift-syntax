@@ -89,7 +89,16 @@ public struct ValueDeclSyntax: SyntaxProtocol, SyntaxHashable {
   }
 }
 
-// MARK: Decl Name
+// MARK: Declalaration Name
+
+extension Identifier {
+  init?(validating token: TokenSyntax) {
+    guard let identifier = token.identifier, !token.hasError else {
+      return nil
+    }
+    self = identifier
+  }
+}
 
 extension ValueDeclSyntax {
   /// Helper that converts a function parameter clause to declaration-name arguments
@@ -204,81 +213,9 @@ extension ValueDeclSyntax {
   }
 }
 
-extension Identifier {
-  init?(validating token: TokenSyntax) {
-    guard let identifier = token.identifier, !token.hasError else {
-      return nil
-    }
-    self = identifier
-  }
-}
-
 // MARK: Basic Queries
+
 extension ValueDeclSyntax {
-  /// Failure to look up an identifier pattern's or enum element's
-  /// scope (see below).
-  enum ScopeLookupFailure: Equatable, Error {
-    /// The underlying ``IdentifierPatternSyntax`` or ``EnumCaseElementSyntax``
-    /// has no scope.
-    case noScope
-    /// The underlying syntax has an invalid scope type. If this declaration is an
-    /// ``IdentifierPatternSyntax``, its scope should be `VariableDeclSyntax`. If
-    /// this declaration is an ``EnumCaseElementSyntax``, its scope should be
-    /// ``EnumCaseDeclSyntax``.
-    case invalidScope
-  }
-
-  // /// Like ``SyntaxProtocol/scope`` but verifies` that we get the right type of scope.
-  // TODO: Is this useful? And, if so, should associated type decls be scopes?
-  // var checkedScope: Result<any ScopeSyntax, ScopeFailure> {
-  //   Result(catching: {
-  //   switch _syntaxNode.kind {
-  //   // Types
-  //   case .structDecl:
-  //     return _syntaxNode.cast(StructDeclSyntax.self) as any ScopeSyntax
-  //   case .enumDecl:
-  //     return _syntaxNode.cast(EnumDeclSyntax.self) as any ScopeSyntax
-  //   case .classDecl:
-  //     return _syntaxNode.cast(ClassDeclSyntax.self) as any ScopeSyntax
-  //   case .actorDecl:
-  //     return _syntaxNode.cast(ActorDeclSyntax.self) as any ScopeSyntax
-  //   case .protocolDecl:
-  //     return _syntaxNode.cast(ProtocolDeclSyntax.self) as any ScopeSyntax
-  //   case .typeAliasDecl:
-  //     return _syntaxNode.cast(TypeAliasDeclSyntax.self) as any ScopeSyntax
-  //   case .associatedTypeDecl:
-  //     return _syntaxNode.cast(AssociatedTypeDeclSyntax.self)
-  //   // Functions
-  //   case .functionDecl:
-  //     return _syntaxNode.cast(FunctionDeclSyntax.self) as any ScopeSyntax
-  //   case .initializerDecl:
-  //     return _syntaxNode.cast(InitializerDeclSyntax.self) as any ScopeSyntax
-  //   case .deinitializerDecl:
-  //     return _syntaxNode.cast(DeinitializerDeclSyntax.self) as any ScopeSyntax
-  //   // Storage
-  //   case .identifierPattern:
-  //     guard let scope = _syntaxNode.cast(IdentifierPatternSyntax.self).scope else {
-  //       throw ScopeFailure.noScope
-  //     }
-  //     guard scope.is(VariableDeclSyntax.self) else {
-  //       throw ScopeFailure.invalidScope
-  //     }
-  //     return scope
-  //   case .subscriptDecl:
-  //     return _syntaxNode.cast(SubscriptDeclSyntax.self) as any ScopeSyntax
-  //   // Macro
-  //   case .macroDecl:
-  //     return _syntaxNode.cast(MacroDeclSyntax.self) as any ScopeSyntax
-  //   // Enum element
-  //   case .enumCaseElement:
-  //     return _syntaxNode.cast(EnumCaseElementSyntax.self) as any ScopeSyntax
-  //   default:
-  //     fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
-  //   }
-  //
-  // }
-  //
-
   /// Get the variable declaration parent of this identifier pattern
   /// value-declaration. Returns `nil` if the scope is invalid.
   private func _findVariableDeclSyntax(
@@ -310,20 +247,6 @@ extension ValueDeclSyntax {
     }
     return caseDecl
   }
-
-  // enum ModifierLookupFailure: Error {
-  //   case noneInEnumCases
-  //   case noScope
-  //   case invalidScope
-  //
-  //   init(scopeFailure: ScopeLookupFailure) {
-  //     self =
-  //       switch scopeFailure {
-  //       case .noScope: .noScope
-  //       case .invalidScope: .invalidScope
-  //       }
-  //   }
-  // }
 
   /// The modifiers attached to this value declaration (or the respective parent).
   ///
@@ -434,13 +357,13 @@ extension ValueDeclSyntax {
   ///
   /// Notes:
   /// 1. This query considers parent context, e.g., querying ``isStatic`` on a
-  ///    top-level declaration fails with ``ScopeLookupFailure.unsupportedAtTopLevel``.
+  ///    top-level declaration fails with ``StaticLookupFailure.unsupportedAtTopLevel``.
   ///    However, it's flexible and will accept `class func` as static even in
   ///    a struct (assuming the user meant `static`).
   /// 2. Macro declarations will return a `macrosOnlyAtFileScope` failure.
   /// 3. Pattern identifiers that aren't inside a ``VariableDeclSyntax``
   ///    scope, or enum elements that aren't in ``EnumCaseDeclSyntax``
-  ///    return the respective `ScopeLookupFailure`.
+  ///    return a ``.scopeFailure``.
   var isStatic: Result<Bool, StaticLookupFailure> {
     /// Check that this value declaration is in a declaration group.
     func checkParentIsDeclGroup(_ parent: Syntax?) throws(StaticLookupFailure) {

@@ -549,7 +549,7 @@ final class TestQualifiedLookup: XCTestCase {
 
   // TODO: Test multiple variables/patterns and finding those, e.g., var a, b, c: Int {}, etc.
 
-  // TODO: Test function-like parameters with firstName="_", variadic arguments, trailing closures, etc.
+  // TODO: Test weird parameters: variadics (+packs) & trailing closures.
 
   // TODO: Test nested and non-nested macro lookup
 
