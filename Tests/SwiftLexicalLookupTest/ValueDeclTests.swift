@@ -15,7 +15,7 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
-@_spi(Experimental) @testable import SwiftLexicalLookup
+@_spi(Experimental) @_spi(_QualifiedLookup) @testable import SwiftLexicalLookup
 
 /// Visitor class helper used in ``SyntaxProtocol/children``
 private class SyntaxAsTypeVisitor<T: SyntaxProtocol>: SyntaxAnyVisitor {
@@ -234,8 +234,8 @@ final class TestValueDeclSyntax: XCTestCase {
     assertValueDecl(
       of: DeclSyntax("public macro fileID<T: ExpressibleByStringLiteral>() -> T = Builtin.FileIDMacro"),
       name: DeclName.identifier(
-        identifier: Identifier(canonicalName: "fileID"),
         macro: DeclName.MacroType(isFreestanding: false, isAttached: false),
+        identifier: Identifier(canonicalName: "fileID"),
         args: []
       ),
       isStatic: .failure(.macrosOnlyAtFileScope),
@@ -341,8 +341,8 @@ final class TestValueDeclSyntax: XCTestCase {
       of: DeclSyntax("macro myMacro"),
       // Macros never have `nil` args. E.g. We can always write `@Observable`
       name: DeclName.identifier(
-        identifier: Identifier(canonicalName: "myMacro"),
         macro: DeclName.MacroType(isFreestanding: false, isAttached: false),
+        identifier: Identifier(canonicalName: "myMacro"),
         args: []
       ),
       isStatic: .failure(.macrosOnlyAtFileScope),
@@ -424,8 +424,8 @@ final class TestValueDeclSyntax: XCTestCase {
     assertValueDecl(
       of: DeclSyntax("macro myMacro(_: Int, _ a: Int, x y: Int)"),
       name: DeclName.identifier(
-        identifier: Identifier(canonicalName: "myMacro"),
         macro: DeclName.MacroType(isFreestanding: false, isAttached: false),
+        identifier: Identifier(canonicalName: "myMacro"),
         args: [nil, nil, Identifier(canonicalName: "x")]
       ),
       isStatic: .failure(.macrosOnlyAtFileScope),
@@ -522,7 +522,6 @@ final class TestValueDeclSyntax: XCTestCase {
       of: DeclSyntax("func callAsFunction"),
       name: DeclName.identifier(
         identifier: Identifier(canonicalName: "callAsFunction"),
-        macro: nil,
         args: []
       ),
       isStatic: .failure(.unsupportedAtTopLevel),
@@ -536,7 +535,6 @@ final class TestValueDeclSyntax: XCTestCase {
         .children(ofType: FunctionDeclSyntax.self)[0],
       name: DeclName.identifier(
         identifier: Identifier(canonicalName: "callAsFunction"),
-        macro: nil,
         args: []
       ),
       isStatic: .success(true),
@@ -548,7 +546,6 @@ final class TestValueDeclSyntax: XCTestCase {
         .children(ofType: IdentifierPatternSyntax.self)[0],
       name: DeclName.identifier(
         identifier: Identifier(canonicalName: "callAsFunction"),
-        macro: nil,
         args: nil
       ),
       isStatic: .success(false),
@@ -560,7 +557,6 @@ final class TestValueDeclSyntax: XCTestCase {
         .children(ofType: EnumCaseElementSyntax.self)[0],
       name: DeclName.identifier(
         identifier: Identifier(canonicalName: "callAsFunction"),
-        macro: nil,
         args: nil
       ),
       isStatic: .success(true),
@@ -573,8 +569,8 @@ final class TestValueDeclSyntax: XCTestCase {
     assertValueDecl(
       of: DeclSyntax("macro myMacro(_: Int, _ n: Int, x: Int, x y: Int)"),
       name: DeclName.identifier(
-        identifier: Identifier(canonicalName: "myMacro"),
         macro: DeclName.MacroType(isFreestanding: false, isAttached: false),
+        identifier: Identifier(canonicalName: "myMacro"),
         args: [nil, nil, Identifier(canonicalName: "x"), Identifier(canonicalName: "x")]
       ),
       isStatic: .failure(.macrosOnlyAtFileScope),

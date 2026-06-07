@@ -15,8 +15,8 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
-// TODO: Switch to @_spi(Experimental) eventually
-@_spi(Experimental) @testable import SwiftLexicalLookup
+// TODO: Fully switch over to `@_spi(_QualifiedLookup)`
+@_spi(_QualifiedLookup) @_spi(Experimental) @testable import SwiftLexicalLookup
 
 /// Source code annotated with qualified-lookup expectations.
 ///
@@ -141,7 +141,6 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
           exact: DeclNameRef(
             coreName: .identifier(
               identifier: _parseIdentifier(name, file: file, line: line),
-              macro: nil,
               args: optionalArgs?.map({ (argName: StaticString?) -> Identifier? in
                 try argName.map({ try _parseIdentifier($0, file: file, line: line) })
               })
