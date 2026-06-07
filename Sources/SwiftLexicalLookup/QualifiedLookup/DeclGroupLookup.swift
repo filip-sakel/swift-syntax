@@ -32,31 +32,8 @@ public struct DeclGroupSyntaxType: SyntaxProtocol {
   ])
 }
 
-// private protocol _DeclGroupPropVisitor<T> {
-//   associatedtype T
-//
-//   func visit(declGroup: some DeclGroupSyntax) -> T
-//   func visit(declGroup: inout some DeclGroupSyntax, newValue: T)
-// }
-
 @_spi(_QualifiedLookup) extension DeclGroupSyntaxType: DeclGroupSyntax {
   private func _getGroupProp<T>(_ prop: KeyPath<(any DeclGroupSyntax), T>) -> T {
-    // switch _syntaxNode.as(SyntaxEnum.self) {
-    // case .structDecl(let declGroup):
-    //   return visitor.visit(declGroup: declGroup)
-    // case .enumDecl(let declGroup):
-    //   return visitor.visit(declGroup: declGroup)
-    // case .classDecl(let declGroup):
-    //   return visitor.visit(declGroup: declGroup)
-    // case .actorDecl(let declGroup):
-    //   return visitor.visit(declGroup: declGroup)
-    // case .protocolDecl(let declGroup):
-    //   return visitor.visit(declGroup: declGroup)
-    // case .extensionDecl(let declGroup):
-    //   return visitor.visit(declGroup: declGroup)
-    // default:
-    //   fatalError("Invalid syntax node for DeclGroupSyntaxType")
-    // }
     switch _syntaxNode.as(SyntaxEnum.self) {
     case .structDecl(let declGroup):
       return declGroup[keyPath: prop]
@@ -71,7 +48,7 @@ public struct DeclGroupSyntaxType: SyntaxProtocol {
     case .extensionDecl(let declGroup):
       return declGroup[keyPath: prop]
     default:
-      fatalError("Invalid syntax node for DeclGroupSyntaxType")
+      fatalError("[Internal Error] Invalid syntax kind for DeclGroupSyntaxType: \(_syntaxNode.kind)")
     }
   }
   private mutating func _setGroupProp<T>(
@@ -79,28 +56,6 @@ public struct DeclGroupSyntaxType: SyntaxProtocol {
     _ keyPath: WritableKeyPath<(any DeclGroupSyntax), T>,
     newValue: T
   ) {
-    // switch _syntaxNode.as(SyntaxEnum.self) {
-    // case .structDecl(var declGroup):
-    //   defer { _syntaxNode = Syntax(declGroup) }
-    //   return visitor.visit(declGroup: &declGroup, newValue: newValue)
-    // case .enumDecl(var declGroup):
-    //   defer { _syntaxNode = Syntax(declGroup) }
-    //   return visitor.visit(declGroup: &declGroup, newValue: newValue)
-    // case .classDecl(var declGroup):
-    //   defer { _syntaxNode = Syntax(declGroup) }
-    //   return visitor.visit(declGroup: &declGroup, newValue: newValue)
-    // case .actorDecl(var declGroup):
-    //   defer { _syntaxNode = Syntax(declGroup) }
-    //   return visitor.visit(declGroup: &declGroup, newValue: newValue)
-    // case .protocolDecl(var declGroup):
-    //   defer { _syntaxNode = Syntax(declGroup) }
-    //   return visitor.visit(declGroup: &declGroup, newValue: newValue)
-    // case .extensionDecl(var declGroup):
-    //   defer { _syntaxNode = Syntax(declGroup) }
-    //   return visitor.visit(declGroup: &declGroup, newValue: newValue)
-    // default:
-    //   fatalError("Invalid syntax node for DeclGroupSyntaxType")
-    // }
     switch _syntaxNode.as(SyntaxEnum.self) {
     case .structDecl(let declGroup):
       var box: any DeclGroupSyntax = declGroup
@@ -127,26 +82,7 @@ public struct DeclGroupSyntaxType: SyntaxProtocol {
       box[keyPath: keyPath] = newValue
       _syntaxNode = box._syntaxNode
     default:
-      fatalError("Invalid syntax node for DeclGroupSyntaxType")
-    }
-  }
-
-  var box: any DeclGroupSyntax {
-    switch _syntaxNode.as(SyntaxEnum.self) {
-    case .structDecl(let structDecl):
-      return structDecl
-    case .enumDecl(let enumDecl):
-      return enumDecl
-    case .classDecl(let classDecl):
-      return classDecl
-    case .actorDecl(let actorDecl):
-      return actorDecl
-    case .protocolDecl(let protocolDecl):
-      return protocolDecl
-    case .extensionDecl(let extensionDecl):
-      return extensionDecl
-    default:
-      fatalError("Invalid syntax node for DeclGroupSyntaxType")
+      fatalError("[Internal Error] Invalid syntax kind for DeclGroupSyntaxType: \(_syntaxNode.kind)")
     }
   }
 

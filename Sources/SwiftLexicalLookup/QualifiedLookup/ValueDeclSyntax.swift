@@ -10,7 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-@_spi(RawSyntax) import SwiftSyntax
+import SwiftSyntax
 
 /// A value declaration is a declaration that evaluates to a value and
 /// which typically has a type and a name.
@@ -48,7 +48,7 @@
   /// Try to cast a specific ``SyntaxProtocol``-conforming type to
   /// a ``ValueDeclSyntax``.
   public init?(_ node: __shared some SyntaxProtocol) {
-    switch node.raw.kind {
+    switch node.kind {
     // Types (nominal, protocols, aliases, associated types, generic types)
     case .structDecl, .enumDecl, .classDecl, .actorDecl, .protocolDecl,
       .typeAliasDecl, .associatedTypeDecl,
@@ -208,7 +208,7 @@ extension ValueDeclSyntax {
         args: enumElement.parameterClause.flatMap(_enumParamsToArgs(_:))
       )
     default:
-      fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
+      fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.kind)")
     }
   }
 }
@@ -288,7 +288,7 @@ extension ValueDeclSyntax {
     case .enumCaseElement(let enumElement):
       return _findEnumCaseDeclSyntax(enumElement)?.modifiers
     default:
-      fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
+      fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.kind)")
     }
   }
 
@@ -328,7 +328,7 @@ extension ValueDeclSyntax {
     case .enumCaseElement(let enumElement):
       return _findEnumCaseDeclSyntax(enumElement)?.attributes
     default:
-      fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
+      fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.kind)")
     }
   }
 
@@ -431,7 +431,7 @@ extension ValueDeclSyntax {
       case .macroDecl:
         throw StaticLookupFailure.macrosOnlyAtFileScope
       default:
-        fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
+        fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.kind)")
       }
     })
   }
@@ -638,31 +638,32 @@ indirect enum UnresolvedTypeRef: Equatable {
 //     case .enumCaseElement:
 //       return _syntaxNode.cast(EnumCaseElementSyntax.self).name
 //     default:
-//       fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
+//       fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.kind)")
 //     }
 //
 //   }
 // }
-// extension DeclGroupSyntaxType {
-//   // TODO: Implement canonical type
-//   public var type: TypeSyntax? {
-//     if let castNode = box.as(StructDeclSyntax.self) {
-//       TypeSyntax(IdentifierTypeSyntax(name: castNode.name))
-//     } else if let castNode = box.as(EnumDeclSyntax.self) {
-//       TypeSyntax(IdentifierTypeSyntax(castNode.name))
-//     } else if let castNode = box.as(ClassDeclSyntax.self) {
-//       TypeSyntax(IdentifierTypeSyntax(castNode.name))
-//     } else if let castNode = box.as(ActorDeclSyntax.self) {
-//       TypeSyntax(IdentifierTypeSyntax(castNode.name))
-//     } else if let castNode = box.as(ProtocolDeclSyntax.self) {
-//       TypeSyntax(IdentifierTypeSyntax(castNode.name))
-//     } else if let castNode = box.as(ExtensionDeclSyntax.self) {
-//       castNode.extendedType
-//     } else {
-//       nil
-//     }
-//   }
-// }
+extension DeclGroupSyntaxType {
+  // TODO: Implement canonical type
+  public var type: TypeSyntax? {
+    switch _syntaxNode.as(SyntaxEnum.self) {
+    case .structDecl(let structDecl):
+      return TypeSyntax(IdentifierTypeSyntax(name: structDecl.name))
+    case .enumDecl(let enumDecl):
+      return TypeSyntax(IdentifierTypeSyntax(enumDecl.name))
+    case .classDecl(let classDecl):
+      return TypeSyntax(IdentifierTypeSyntax(classDecl.name))
+    case .actorDecl(let actorDecl):
+      return TypeSyntax(IdentifierTypeSyntax(actorDecl.name))
+    case .protocolDecl(let protocolDecl):
+      return TypeSyntax(IdentifierTypeSyntax(protocolDecl.name))
+    case .extensionDecl(let extensionDecl):
+      return extensionDecl.extendedType
+    default:
+      fatalError("[Internal Error] Invalid syntax kind for DeclGroupSyntaxType: \(_syntaxNode.kind)")
+    }
+  }
+}
 
 // MARK: Upcasting
 
