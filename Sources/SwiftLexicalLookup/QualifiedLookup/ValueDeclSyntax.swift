@@ -42,7 +42,7 @@
 /// Otherwise, queries like ``ValueDeclSyntax/isStatic`` return nil.
 ///
 /// Basically, anything that named lookup can return.
-public struct ValueDeclSyntax: SyntaxProtocol, SyntaxHashable {
+@_spi(_QualifiedLookup) public struct ValueDeclSyntax: SyntaxProtocol, SyntaxHashable {
   public let _syntaxNode: Syntax
 
   /// Try to cast a specific ``SyntaxProtocol``-conforming type to

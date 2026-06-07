@@ -551,7 +551,10 @@ final class TestQualifiedLookup: XCTestCase {
 
   // TODO: Test weird parameters: variadics (+packs) & trailing closures.
 
-  // TODO: Test nested and non-nested macro lookup
+  // TODO: Test nested and non-nested (invalid) macro lookup
+  // TODO: Test macro and non-`macro` attributes, e.g., actors, result builders, property wrappers
+
+  // TODO: Test property wrapper lookup? (idk if it's in scope)
 
   // TODO: Test cycles, e.g. struct A { typealias Element = B.Element }; struct B { typealias Element = A }
   // typealias A = B; typealias B = A. Or protocol A: B {}; protocol B: A {}
