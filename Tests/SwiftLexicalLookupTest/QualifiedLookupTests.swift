@@ -77,7 +77,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
     /// we diagnose when initializing `DeclLookupExpectation`)
     let declRef: DeclNameRef?
     /// The kind of members we request during lookup
-    var memberKind: MemberKind = .default
+    var memberKind: MemberKind
     // Source location where this expectation was created
     let file: StaticString
     let line: UInt
@@ -114,13 +114,22 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       return identifier
     }
 
+    /// Creates a raw ``DeclNameRef`` using ``memberKind`` for lookup.
+    /// You can use other static functions in ``DeclLookupExpectation`` for convenience.
     static func decl(
       exact ref: DeclNameRef,
+      memberKind: MemberKind = .default,
       file: StaticString = #file,
       line: UInt = #line
     ) -> DeclLookupExpectation {
-      DeclLookupExpectation(declRef: ref, file: file, line: line)
+      DeclLookupExpectation(declRef: ref, memberKind: memberKind, file: file, line: line)
     }
+
+    private static func _failedInit(file: StaticString, line: UInt) -> DeclLookupExpectation {
+      DeclLookupExpectation(declRef: nil, memberKind: .default, file: file, line: line)
+    }
+
+    /// Corresponds to a non-macro ``DeclNameRef/identifier``
     static func named(
       _ name: StaticString,
       args optionalArgs: [StaticString?]? = nil,
@@ -128,8 +137,8 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       line: UInt = #line
     ) -> DeclLookupExpectation {
       do {
-        return try DeclLookupExpectation(
-          declRef: DeclNameRef(
+        return try .decl(
+          exact: DeclNameRef(
             coreName: .identifier(
               identifier: _parseIdentifier(name, file: file, line: line),
               macro: nil,
@@ -142,15 +151,18 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
           line: line
         )
       } catch {
-        return DeclLookupExpectation(declRef: nil, file: file, line: line)
+        return ._failedInit(file: file, line: line)
       }
     }
+    // TODO: Add macro version
+
+    /// Corresponds to ``DeclNameRef/deinit``
     static func `deinit`(
       file: StaticString = #file,
       line: UInt = #line
     ) -> DeclLookupExpectation {
-      DeclLookupExpectation(
-        declRef: DeclNameRef(
+      return .decl(
+        exact: DeclNameRef(
           coreName: .deinit
         ),
         file: file,
@@ -158,9 +170,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       )
     }
 
-    // TODO: Add macro
-
-    /// Creates an `init` declaration reference. Automatically configures lookup to
+    /// Creates an ``DeclNameRef/`init```. Automatically configures lookup to
     /// look for static declarations.
     static func `init`(
       _ optionalArgs: [StaticString?]?,
@@ -168,8 +178,8 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       line: UInt = #line
     ) -> DeclLookupExpectation {
       do {
-        return try DeclLookupExpectation(
-          declRef: DeclNameRef(
+        return try .decl(
+          exact: DeclNameRef(
             coreName: .`init`(
               args: optionalArgs?.map({ (argName: StaticString?) -> Identifier? in
                 try argName.map({ try _parseIdentifier($0, file: file, line: line) })
@@ -181,17 +191,18 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
           line: line
         )
       } catch {
-        return DeclLookupExpectation(declRef: nil, file: file, line: line)
+        return ._failedInit(file: file, line: line)
       }
     }
+    /// Corresponds to ``DeclNameRef/unnamedCall``
     static func unnamed(
       _ args: [StaticString],
       file: StaticString = #file,
       line: UInt = #line
     ) -> DeclLookupExpectation {
       do {
-        return try DeclLookupExpectation(
-          declRef: DeclNameRef(
+        return try .decl(
+          exact: DeclNameRef(
             coreName: .unnamedCall(
               args: args.map({
                 try Optional(_parseIdentifier($0, file: file, line: line))
@@ -202,18 +213,19 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
           line: line
         )
       } catch {
-        return DeclLookupExpectation(declRef: nil, file: file, line: line)
+        return ._failedInit(file: file, line: line)
       }
     }
 
+    /// Corresponds to ``DeclNameRef/subscript``
     static func `subscript`(
       _ args: [StaticString],
       file: StaticString = #file,
       line: UInt = #line
     ) -> DeclLookupExpectation {
       do {
-        return try DeclLookupExpectation(
-          declRef: DeclNameRef(
+        return try .decl(
+          exact: DeclNameRef(
             coreName: .subscript(
               args: args.map({
                 try Optional(_parseIdentifier($0, file: file, line: line))
@@ -224,7 +236,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
           line: line
         )
       } catch {
-        return DeclLookupExpectation(declRef: nil, file: file, line: line)
+        return ._failedInit(file: file, line: line)
       }
     }
 
@@ -235,11 +247,15 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       return copy
     }
   }
+
+  // ``QualifiedLookupSource`` consists of source code strings and
+  // expectation components.
   enum Component {
     case str(String)
     case expectations([DeclLookupExpectation], file: StaticString, line: UInt)
   }
 
+  // Syntactic sugar for listing expectations alongside source code.
   struct Interpolation: StringInterpolationProtocol {
     fileprivate var components: [Component]
 
