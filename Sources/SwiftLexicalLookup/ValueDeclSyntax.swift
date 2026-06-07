@@ -87,50 +87,6 @@ public struct ValueDeclSyntax: SyntaxProtocol, SyntaxHashable {
       .node(EnumCaseElementSyntax.self),
     ])
   }
-
-  // var names: TokenSyntax? {
-  //   switch _syntaxNode.kind {
-  //   // Types
-  //   case .structDecl:
-  //     return _syntaxNode.cast(StructDeclSyntax.self).name
-  //   case .enumDecl:
-  //     return _syntaxNode.cast(EnumDeclSyntax.self).name
-  //   case .classDecl:
-  //     return _syntaxNode.cast(ClassDeclSyntax.self).name
-  //   case .actorDecl:
-  //     return _syntaxNode.cast(ActorDeclSyntax.self).name
-  //   case .protocolDecl:
-  //     return _syntaxNode.cast(ProtocolDeclSyntax.self).name
-  //   case .typeAliasDecl:
-  //     return _syntaxNode.cast(TypeAliasDeclSyntax.self).name
-  //   case .associatedTypeDecl:
-  //     return _syntaxNode.cast(AssociatedTypeDeclSyntax.self).name
-  //   // Functions
-  //   case .functionDecl:
-  //     // TODO: Handle callAsFunction
-  //     return _syntaxNode.cast(FunctionDeclSyntax.self).name
-  //   case .initializerDecl:
-  //     // TODO: Handle inits like Hello() but also the fact that we can't do [1,2].map(String.)
-  //     return "init"
-  //   case .deinitializerDecl:
-  //     // deinits don't have a name
-  //     return nil
-  //   // Storage
-  //   case .identifierPattern:
-  //     return _syntaxNode.cast(IdentifierPatternSyntax.self).identifier
-  //   case .subscriptDecl:
-  //     // TODO: Fix with DeclName
-  //     return nil
-  //   // Macro
-  //   case .macroDecl:
-  //     return _syntaxNode.cast(MacroDeclSyntax.self).name
-  //   // Enum element
-  //   case .enumCaseElement:
-  //     return _syntaxNode.cast(EnumCaseElementSyntax.self).name
-  //   default:
-  //     fatalError("[Internal Error] Invalid syntax kind for ValueDeclSyntax: \(_syntaxNode.raw.kind)")
-  //   }
-  // }
 }
 
 // MARK: Decl Name
@@ -190,27 +146,26 @@ extension ValueDeclSyntax {
   }
 
   var declName: DeclName {
-    switch _syntaxNode.kind {
-    // Types and variable identifiers have no args
-    case .structDecl:
-      return DeclName.fromToken(_syntaxNode.cast(StructDeclSyntax.self).name, args: nil)
-    case .enumDecl:
-      return DeclName.fromToken(_syntaxNode.cast(EnumDeclSyntax.self).name, args: nil)
-    case .classDecl:
-      return DeclName.fromToken(_syntaxNode.cast(ClassDeclSyntax.self).name, args: nil)
-    case .actorDecl:
-      return DeclName.fromToken(_syntaxNode.cast(ActorDeclSyntax.self).name, args: nil)
-    case .protocolDecl:
-      return DeclName.fromToken(_syntaxNode.cast(ProtocolDeclSyntax.self).name, args: nil)
-    case .typeAliasDecl:
-      return DeclName.fromToken(_syntaxNode.cast(TypeAliasDeclSyntax.self).name, args: nil)
-    case .associatedTypeDecl:
-      return DeclName.fromToken(_syntaxNode.cast(AssociatedTypeDeclSyntax.self).name, args: nil)
-    case .identifierPattern:
-      return DeclName.fromToken(_syntaxNode.cast(IdentifierPatternSyntax.self).identifier, args: nil)
+    switch _syntaxNode.as(SyntaxEnum.self) {
+    // Types and pattern identifiers have no args
+    case .structDecl(let structDecl):
+      return DeclName.fromToken(structDecl.name, args: nil)
+    case .enumDecl(let enumDecl):
+      return DeclName.fromToken(enumDecl.name, args: nil)
+    case .classDecl(let classDecl):
+      return DeclName.fromToken(classDecl.name, args: nil)
+    case .actorDecl(let actorDecl):
+      return DeclName.fromToken(actorDecl.name, args: nil)
+    case .protocolDecl(let protocolDecl):
+      return DeclName.fromToken(protocolDecl.name, args: nil)
+    case .typeAliasDecl(let typeAliasDecl):
+      return DeclName.fromToken(typeAliasDecl.name, args: nil)
+    case .associatedTypeDecl(let associatedTypeDecl):
+      return DeclName.fromToken(associatedTypeDecl.name, args: nil)
+    case .identifierPattern(let identifierPattern):
+      return DeclName.fromToken(identifierPattern.identifier, args: nil)
     // Functions
-    case .functionDecl:
-      let funcDecl = _syntaxNode.cast(FunctionDeclSyntax.self)
+    case .functionDecl(let funcDecl):
       guard let identifier = Identifier(validating: funcDecl.name) else {
         return DeclName.invalid(
           nonIdentifier: funcDecl.name.tokenKind,
@@ -222,28 +177,24 @@ extension ValueDeclSyntax {
         return DeclName.callAsFunction(args: _paramsToArgs(funcDecl.signature.parameterClause))
       }
       return DeclName.identifier(identifier: identifier, args: _paramsToArgs(funcDecl.signature.parameterClause))
-    case .initializerDecl:
-      let initDecl = _syntaxNode.cast(InitializerDeclSyntax.self)
+    case .initializerDecl(let initDecl):
       return DeclName.`init`(args: _paramsToArgs(initDecl.signature.parameterClause))
     case .deinitializerDecl:
       // deinits don't have a name
       return DeclName.deinit
-    // Storage
 
-    case .subscriptDecl:
-      let subscriptDecl = _syntaxNode.cast(SubscriptDeclSyntax.self)
+    // Subscripts
+    case .subscriptDecl(let subscriptDecl):
       return DeclName.subscript(args: _subscriptParamsToArgs(subscriptDecl.parameterClause))
     // Macro
-    case .macroDecl:
-      let macroDecl = _syntaxNode.cast(MacroDeclSyntax.self)
+    case .macroDecl(let macroDecl):
       return DeclName.fromToken(
         macroDecl.name,
         macro: _macroType(macroDecl),
         args: _paramsToArgs(macroDecl.signature.parameterClause)
       )
     // Enum element
-    case .enumCaseElement:
-      let enumElement = _syntaxNode.cast(EnumCaseElementSyntax.self)
+    case .enumCaseElement(let enumElement):
       return DeclName.fromToken(
         enumElement.name,
         args: enumElement.parameterClause.flatMap(_enumParamsToArgs(_:))
@@ -690,8 +641,8 @@ extension ValueDeclSyntax {
       return protocolDecl.modifiers
     case .typeAliasDecl(let typeAliasDecl):
       return typeAliasDecl.modifiers
-    case .associatedTypeDecl(let typeAliasDecl):
-      return typeAliasDecl.modifiers
+    case .associatedTypeDecl(let associatedTypeDecl):
+      return associatedTypeDecl.modifiers
     // Functions
     case .functionDecl(let funcDecl):
       return funcDecl.modifiers
@@ -730,8 +681,8 @@ extension ValueDeclSyntax {
       return protocolDecl.attributes
     case .typeAliasDecl(let typeAliasDecl):
       return typeAliasDecl.attributes
-    case .associatedTypeDecl(let typeAliasDecl):
-      return typeAliasDecl.attributes
+    case .associatedTypeDecl(let associatedTypeDecl):
+      return associatedTypeDecl.attributes
     // Functions
     case .functionDecl(let funcDecl):
       return funcDecl.attributes
