@@ -221,7 +221,7 @@ extension ValueDeclSyntax {
   private func _findVariableDeclSyntax(
     _ identifierPattern: IdentifierPatternSyntax
   ) -> VariableDeclSyntax? {
-    // The hierarchy goes as follows
+    // The hierarchy is as follows:
     //   VariableDecl -> PatternBindingList -> PatternBinding -> Pattern
     guard
       let binding = identifierPattern.parent?.as(PatternBindingSyntax.self),
@@ -237,7 +237,7 @@ extension ValueDeclSyntax {
   private func _findEnumCaseDeclSyntax(
     _ enumElement: EnumCaseElementSyntax
   ) -> EnumCaseDeclSyntax? {
-    // The hierarchy goes as follows
+    // The hierarchy is as follows:
     //   EnumCaseDecl -> EnumCaseElementList -> EnumCaseElement
     guard
       let elementList = enumElement.parent?.as(EnumCaseElementListSyntax.self),
@@ -332,7 +332,8 @@ extension ValueDeclSyntax {
     }
   }
 
-  enum StaticLookupFailure: Equatable, Error {
+  /// Reasons why we couldn't determine if a declaration is static.
+  enum StaticLookupFailure: Hashable, Error {
     /// Static only makes sense in a nominal type.
     ///
     /// That is, we check that the value declaration appears inside a decl
