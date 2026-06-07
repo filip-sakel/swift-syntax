@@ -643,6 +643,26 @@ indirect enum UnresolvedTypeRef: Equatable {
 //
 //   }
 // }
+// extension DeclGroupSyntaxType {
+//   // TODO: Implement canonical type
+//   public var type: TypeSyntax? {
+//     if let castNode = box.as(StructDeclSyntax.self) {
+//       TypeSyntax(IdentifierTypeSyntax(name: castNode.name))
+//     } else if let castNode = box.as(EnumDeclSyntax.self) {
+//       TypeSyntax(IdentifierTypeSyntax(castNode.name))
+//     } else if let castNode = box.as(ClassDeclSyntax.self) {
+//       TypeSyntax(IdentifierTypeSyntax(castNode.name))
+//     } else if let castNode = box.as(ActorDeclSyntax.self) {
+//       TypeSyntax(IdentifierTypeSyntax(castNode.name))
+//     } else if let castNode = box.as(ProtocolDeclSyntax.self) {
+//       TypeSyntax(IdentifierTypeSyntax(castNode.name))
+//     } else if let castNode = box.as(ExtensionDeclSyntax.self) {
+//       castNode.extendedType
+//     } else {
+//       nil
+//     }
+//   }
+// }
 
 // MARK: Upcasting
 
@@ -765,11 +785,11 @@ extension ValueDeclSyntax {
 // MARK: DeclSyntaxProtocol Conversions
 
 extension DeclSyntaxProtocol {
-  public func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax? {
+  @_spi(_QualifiedLookup) public func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax? {
     Syntax(self).as(ValueDeclSyntax.self)
   }
 
-  public func `is`(_ syntaxType: ValueDeclSyntax.Type) -> Bool {
+  @_spi(_QualifiedLookup) public func `is`(_ syntaxType: ValueDeclSyntax.Type) -> Bool {
     self.as(syntaxType) != nil
   }
 }

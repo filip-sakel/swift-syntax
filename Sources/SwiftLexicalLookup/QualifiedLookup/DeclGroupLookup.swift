@@ -10,103 +10,272 @@
 //
 //===----------------------------------------------------------------------===//
 
+import SwiftIfConfig
 import SwiftSyntax
 
-@_spi(_QualifiedLookup) public struct DeclGroupSyntaxType: DeclGroupSyntax {
+public struct DeclGroupSyntaxType: SyntaxProtocol {
   // TODO: Consider using the underlying syntax node (like ``ValueDeclSyntax``)
-  private var box: any DeclGroupSyntax
+  public var _syntaxNode: Syntax
 
   public init?(_ node: borrowing some SyntaxProtocol) {
-    if let castNode = node.asProtocol((any NominalTypeDeclSyntax).self) {
-      box = castNode
-    } else if let castNode = node.as(ProtocolDeclSyntax.self) {
-      box = castNode
-    } else if let castNode = node.as(ExtensionDeclSyntax.self) {
-      box = castNode
-    } else {
+    switch node._syntaxNode.kind {
+    case .structDecl, .enumDecl, .classDecl, .actorDecl, .protocolDecl, .extensionDecl:
+      self._syntaxNode = node._syntaxNode
+    default:
       return nil
     }
-  }
-
-  public init(exactly node: some DeclGroupSyntax) {
-    box = node
-  }
-  // public var identifier: Identifier? {
-  //   if let castNode = box.as(StructDeclSyntax.self) {
-  //     castNode.name.identifier
-  //   } else if let castNode = box.as(EnumDeclSyntax.self) {
-  //     castNode.name.identifier
-  //   } else if let castNode = box.as(ClassDeclSyntax.self) {
-  //     castNode.name.identifier
-  //   } else if let castNode = box.as(ActorDeclSyntax.self) {
-  //     castNode.name.identifier
-  //   } else if let castNode = box.as(ProtocolDeclSyntax.self) {
-  //     castNode.name.identifier
-  //   } else { /* extensions have types not identifiers */
-  //     nil
-  //   }
-  // }
-
-  // TODO: Implement canonical type
-  public var type: TypeSyntax? {
-    if let castNode = box.as(StructDeclSyntax.self) {
-      TypeSyntax(IdentifierTypeSyntax(name: castNode.name))
-    } else if let castNode = box.as(EnumDeclSyntax.self) {
-      TypeSyntax(IdentifierTypeSyntax(castNode.name))
-    } else if let castNode = box.as(ClassDeclSyntax.self) {
-      TypeSyntax(IdentifierTypeSyntax(castNode.name))
-    } else if let castNode = box.as(ActorDeclSyntax.self) {
-      TypeSyntax(IdentifierTypeSyntax(castNode.name))
-    } else if let castNode = box.as(ProtocolDeclSyntax.self) {
-      TypeSyntax(IdentifierTypeSyntax(castNode.name))
-    } else if let castNode = box.as(ExtensionDeclSyntax.self) {
-      castNode.extendedType
-    } else {
-      nil
-    }
-  }
-
-  public var attributes: SwiftSyntax.AttributeListSyntax {
-    get { box.attributes }
-    set { box.attributes = newValue }
-  }
-
-  public var modifiers: SwiftSyntax.DeclModifierListSyntax {
-    get { box.modifiers }
-    set { box.modifiers = newValue }
-  }
-
-  public var introducer: SwiftSyntax.TokenSyntax {
-    get { box.introducer }
-    set { box.introducer = newValue }
-  }
-
-  public var inheritanceClause: SwiftSyntax.InheritanceClauseSyntax? {
-    get { box.inheritanceClause }
-    set { box.inheritanceClause = newValue }
-  }
-
-  public var genericWhereClause: SwiftSyntax.GenericWhereClauseSyntax? {
-    get { box.genericWhereClause }
-    set { box.genericWhereClause = newValue }
-  }
-
-  public var memberBlock: SwiftSyntax.MemberBlockSyntax {
-    get { box.memberBlock }
-    set { box.memberBlock = newValue }
-  }
-
-  public var _syntaxNode: SwiftSyntax.Syntax {
-    box._syntaxNode
   }
 
   public static let structure: SwiftSyntax.SyntaxNodeStructure = .choices([
     .node(StructDeclSyntax.self), .node(EnumDeclSyntax.self), .node(ClassDeclSyntax.self),
     .node(ActorDeclSyntax.self), .node(ProtocolDeclSyntax.self), .node(ExtensionDeclSyntax.self),
   ])
+}
 
-  @_spi(Experimental)
-  public var _asLookInMembersScope: LookInMembersScopeSyntax? {
+// private protocol _DeclGroupPropVisitor<T> {
+//   associatedtype T
+//
+//   func visit(declGroup: some DeclGroupSyntax) -> T
+//   func visit(declGroup: inout some DeclGroupSyntax, newValue: T)
+// }
+
+@_spi(_QualifiedLookup) extension DeclGroupSyntaxType: DeclGroupSyntax {
+  private func _getGroupProp<T>(_ prop: KeyPath<(any DeclGroupSyntax), T>) -> T {
+    // switch _syntaxNode.as(SyntaxEnum.self) {
+    // case .structDecl(let declGroup):
+    //   return visitor.visit(declGroup: declGroup)
+    // case .enumDecl(let declGroup):
+    //   return visitor.visit(declGroup: declGroup)
+    // case .classDecl(let declGroup):
+    //   return visitor.visit(declGroup: declGroup)
+    // case .actorDecl(let declGroup):
+    //   return visitor.visit(declGroup: declGroup)
+    // case .protocolDecl(let declGroup):
+    //   return visitor.visit(declGroup: declGroup)
+    // case .extensionDecl(let declGroup):
+    //   return visitor.visit(declGroup: declGroup)
+    // default:
+    //   fatalError("Invalid syntax node for DeclGroupSyntaxType")
+    // }
+    switch _syntaxNode.as(SyntaxEnum.self) {
+    case .structDecl(let declGroup):
+      return declGroup[keyPath: prop]
+    case .enumDecl(let declGroup):
+      return declGroup[keyPath: prop]
+    case .classDecl(let declGroup):
+      return declGroup[keyPath: prop]
+    case .actorDecl(let declGroup):
+      return declGroup[keyPath: prop]
+    case .protocolDecl(let declGroup):
+      return declGroup[keyPath: prop]
+    case .extensionDecl(let declGroup):
+      return declGroup[keyPath: prop]
+    default:
+      fatalError("Invalid syntax node for DeclGroupSyntaxType")
+    }
+  }
+  private mutating func _setGroupProp<T>(
+    // _ visitor: some _DeclGroupVisitor<T>, newValue: T
+    _ keyPath: WritableKeyPath<(any DeclGroupSyntax), T>,
+    newValue: T
+  ) {
+    // switch _syntaxNode.as(SyntaxEnum.self) {
+    // case .structDecl(var declGroup):
+    //   defer { _syntaxNode = Syntax(declGroup) }
+    //   return visitor.visit(declGroup: &declGroup, newValue: newValue)
+    // case .enumDecl(var declGroup):
+    //   defer { _syntaxNode = Syntax(declGroup) }
+    //   return visitor.visit(declGroup: &declGroup, newValue: newValue)
+    // case .classDecl(var declGroup):
+    //   defer { _syntaxNode = Syntax(declGroup) }
+    //   return visitor.visit(declGroup: &declGroup, newValue: newValue)
+    // case .actorDecl(var declGroup):
+    //   defer { _syntaxNode = Syntax(declGroup) }
+    //   return visitor.visit(declGroup: &declGroup, newValue: newValue)
+    // case .protocolDecl(var declGroup):
+    //   defer { _syntaxNode = Syntax(declGroup) }
+    //   return visitor.visit(declGroup: &declGroup, newValue: newValue)
+    // case .extensionDecl(var declGroup):
+    //   defer { _syntaxNode = Syntax(declGroup) }
+    //   return visitor.visit(declGroup: &declGroup, newValue: newValue)
+    // default:
+    //   fatalError("Invalid syntax node for DeclGroupSyntaxType")
+    // }
+    switch _syntaxNode.as(SyntaxEnum.self) {
+    case .structDecl(let declGroup):
+      var box: any DeclGroupSyntax = declGroup
+      box[keyPath: keyPath] = newValue
+      _syntaxNode = box._syntaxNode
+    case .enumDecl(let declGroup):
+      var box: any DeclGroupSyntax = declGroup
+      box[keyPath: keyPath] = newValue
+      _syntaxNode = box._syntaxNode
+    case .classDecl(let declGroup):
+      var box: any DeclGroupSyntax = declGroup
+      box[keyPath: keyPath] = newValue
+      _syntaxNode = box._syntaxNode
+    case .actorDecl(let declGroup):
+      var box: any DeclGroupSyntax = declGroup
+      box[keyPath: keyPath] = newValue
+      _syntaxNode = box._syntaxNode
+    case .protocolDecl(let declGroup):
+      var box: any DeclGroupSyntax = declGroup
+      box[keyPath: keyPath] = newValue
+      _syntaxNode = box._syntaxNode
+    case .extensionDecl(let declGroup):
+      var box: any DeclGroupSyntax = declGroup
+      box[keyPath: keyPath] = newValue
+      _syntaxNode = box._syntaxNode
+    default:
+      fatalError("Invalid syntax node for DeclGroupSyntaxType")
+    }
+  }
+
+  var box: any DeclGroupSyntax {
+    switch _syntaxNode.as(SyntaxEnum.self) {
+    case .structDecl(let structDecl):
+      return structDecl
+    case .enumDecl(let enumDecl):
+      return enumDecl
+    case .classDecl(let classDecl):
+      return classDecl
+    case .actorDecl(let actorDecl):
+      return actorDecl
+    case .protocolDecl(let protocolDecl):
+      return protocolDecl
+    case .extensionDecl(let extensionDecl):
+      return extensionDecl
+    default:
+      fatalError("Invalid syntax node for DeclGroupSyntaxType")
+    }
+  }
+
+  public init(exactly node: some DeclGroupSyntax) {
+    self.init(node)!
+  }
+
+  public var attributes: AttributeListSyntax {
+    get { _getGroupProp(\.attributes) }
+    set { _setGroupProp(\.attributes, newValue: newValue) }
+  }
+
+  public var modifiers: DeclModifierListSyntax {
+    get { _getGroupProp(\.modifiers) }
+    set { _setGroupProp(\.modifiers, newValue: newValue) }
+  }
+  public var introducer: TokenSyntax {
+    get { _getGroupProp(\.introducer) }
+    set { _setGroupProp(\.introducer, newValue: newValue) }
+  }
+
+  public var inheritanceClause: InheritanceClauseSyntax? {
+    get { _getGroupProp(\.inheritanceClause) }
+    set { _setGroupProp(\.inheritanceClause, newValue: newValue) }
+  }
+
+  public var genericWhereClause: GenericWhereClauseSyntax? {
+    get { _getGroupProp(\.genericWhereClause) }
+    set { _setGroupProp(\.genericWhereClause, newValue: newValue) }
+  }
+
+  public var memberBlock: MemberBlockSyntax {
+    get { _getGroupProp(\.memberBlock) }
+    set { _setGroupProp(\.memberBlock, newValue: newValue) }
+  }
+
+  var _asLookInMembersScope: LookInMembersScopeSyntax? {
     Syntax(self).asProtocol((any SyntaxProtocol).self) as? any LookInMembersScopeSyntax
+  }
+}
+
+// MARK: Lookup
+
+extension DeclGroupSyntax {
+  /// Find named member declarations in the given group declaration.
+  ///
+  /// Results are filtered in the following ways:
+  /// 1. If an identifier is given, only return declaration matching that name.
+  /// 2. Only returns declarations matching `memberKind`.
+  /// 3. If a configuredRegion is provided, consider only the active clause's
+  ///    members.
+  ///
+  /// Note that implicit members such as `self`, `Type`, or `Protocol` aren't
+  /// value declarations (they're not actual members) and we don't return them here.
+  @_spi(_QualifiedLookup) public func findDirectMembers(
+    name: DeclNameRef?,
+    kind memberKind: MemberKind = .default,
+    configuredRegions: ConfiguredRegions? = nil
+  ) -> [ValueDeclSyntax] {
+    /// Filter the given declaration based on the given ``name`` and ``memberKind``
+    func filterDecl(_ valueDecl: ValueDeclSyntax) -> ValueDeclSyntax? {
+      // Check name matches
+      // // TODO: Remove debuggins statement
+      // if let name {
+      //   print(
+      //     "[Lookup Debugging] Match between \(valueDecl.declName) and \(name) is:",
+      //     valueDecl.declName.tryMatch(reference: name.baseName),
+      //     "with kind match:",
+      //     valueDecl.isKind(memberKind)
+      //   )
+      // }
+
+      // If given a name, check for a match
+      if let expectedName = name,
+        case .failure = valueDecl.declName.tryMatch(reference: expectedName.baseName)
+      {
+        return nil
+      }
+      // Filter for the kind
+      guard valueDecl.isKind(memberKind) else { return nil }
+
+      return valueDecl
+    }
+
+    /// Process a member or a member nested inside an if-config declaration.
+    ///
+    /// This pattern is similar to the SyntaxVisitor pattern, but a SyntaxVisitor
+    /// doesn't work because we use protocols like `NamedDeclSyntax`
+    func processMember(member: MemberBlockItemSyntax) -> [ValueDeclSyntax] {
+      // Get only value declarations
+      if let valueDecl = member.decl.as(ValueDeclSyntax.self) {
+        return if let valueDecl = filterDecl(valueDecl) { [valueDecl] } else { [] }
+      }
+      // Visit variable declarations to get identifier patterns
+      else if let varDecl = member.decl.as(VariableDeclSyntax.self) {
+        return varDecl.bindings.compactMap({ binding in
+          ValueDeclSyntax(binding.pattern.as(IdentifierPatternSyntax.self)).flatMap(filterDecl(_:))
+        })
+      }
+      // Visit enum cases to get enum elements
+      else if let enumCase = member.decl.as(EnumCaseDeclSyntax.self) {
+        return enumCase.elements.compactMap({ enumElement in
+          filterDecl(ValueDeclSyntax(enumElement))
+        })
+      }
+      // If configuredRegions is set, visit the members of the active clause (if it exists)
+      //
+      // We do this recursively to handle nested if-config declarations
+      else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self),
+        let configuredRegions,
+        case .decls(let members) = configuredRegions.activeClause(for: ifConfigDecl)?.elements
+      {
+        return members.flatMap(processMember(member:))
+      }
+      // If configuredRegions is nil, visit all if-config clauses
+      else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self) {
+        return ifConfigDecl.clauses.flatMap({ clause -> [ValueDeclSyntax] in
+          guard case .decls(let members) = clause.elements else { return [] }
+          return members.flatMap(processMember(member:))
+        })
+      }
+      // No name, no gain
+      else {
+        return []
+      }
+    }
+
+    // Add each member in the group declaration
+    return self.memberBlock.members
+      .flatMap(processMember(member:))
   }
 }

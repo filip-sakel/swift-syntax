@@ -413,97 +413,6 @@ extension SymbolTable {
     }
   }
 
-  private func _castAsNamedDecl(decl: any NamedDeclSyntax) -> (any (NamedDeclSyntax & DeclSyntaxProtocol)) {
-    Syntax(decl).asProtocol(SyntaxProtocol.self) as! any (NamedDeclSyntax & DeclSyntaxProtocol)
-  }
-
-  /// Find named member declarations in the given group declaration.
-  /// If an identifier is given, only return declaration matching that name.
-  /// If a configuredRegion is provided, consider only the active clause's
-  /// members.
-  ///
-  private func _getDirectMembers(
-    of groupDecl: DeclGroupSyntax,
-    name: DeclNameRef?,
-    kind memberKind: MemberKind,
-    configuredRegions: ConfiguredRegions?
-  ) -> [ValueDeclSyntax] {
-    // print(
-    //   ">>Looking for direct members for ref '\(name?.debugDescription ?? "_")' in group decl: '\(groupDecl.trimmedDescription)'"
-    // )
-
-    /// Filter the given declaration based on the given ``name`` and ``memberKind``
-    func filterDecl(_ valueDecl: ValueDeclSyntax) -> ValueDeclSyntax? {
-      // Check name matches
-      if let name {
-        print(
-          "[Lookup Debugging] Match between \(valueDecl.declName) and \(name) is:",
-          valueDecl.declName.tryMatch(reference: name.baseName),
-          "with kind match:",
-          valueDecl.isKind(memberKind)
-        )
-      }
-
-      // If given a name, check for a match
-      if let expectedName = name,
-        case .failure = valueDecl.declName.tryMatch(reference: expectedName.baseName)
-      {
-        return nil
-      }
-      // Filter for the kind
-      guard valueDecl.isKind(memberKind) else { return nil }
-
-      return valueDecl
-    }
-
-    /// Process a member or a member nested inside an if-config declaration.
-    ///
-    /// This pattern is similar to the SyntaxVisitor pattern, but a SyntaxVisitor
-    /// doesn't work because we use protocols like `NamedDeclSyntax`
-    func processMember(member: MemberBlockItemSyntax) -> [ValueDeclSyntax] {
-      // Get only value declarations
-      if let valueDecl = member.decl.as(ValueDeclSyntax.self) {
-        return if let valueDecl = filterDecl(valueDecl) { [valueDecl] } else { [] }
-      }
-      // Visit variable declarations to get identifier patterns
-      else if let varDecl = member.decl.as(VariableDeclSyntax.self) {
-        return varDecl.bindings.compactMap({ binding in
-          ValueDeclSyntax(binding.pattern.as(IdentifierPatternSyntax.self)).flatMap(filterDecl(_:))
-        })
-      }
-      // Visit enum cases to get enum elements
-      else if let enumCase = member.decl.as(EnumCaseDeclSyntax.self) {
-        return enumCase.elements.compactMap({ enumElement in
-          filterDecl(ValueDeclSyntax(enumElement))
-        })
-      }
-      // If configuredRegions is set, visit the members of the active clause (if it exists)
-      //
-      // We do this recursively to handle nested if-config declarations
-      else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self),
-        let configuredRegions,
-        case .decls(let members) = configuredRegions.activeClause(for: ifConfigDecl)?.elements
-      {
-        return members.flatMap(processMember(member:))
-      }
-      // If configuredRegions is nil, visit all if-config clauses
-      else if let ifConfigDecl = member.decl.as(IfConfigDeclSyntax.self) {
-        return ifConfigDecl.clauses.flatMap({ clause -> [ValueDeclSyntax] in
-          guard case .decls(let members) = clause.elements else { return [] }
-          return members.flatMap(processMember(member:))
-        })
-      }
-      // No name, no gain
-      else {
-        return []
-      }
-    }
-
-    // Add each member in the group declaration
-    return groupDecl.memberBlock.members
-      .flatMap(processMember(member:))
-  }
-
   private func _visitSupertypes(
     of groupDecl: DeclGroupSyntax,
     lookingFor name: DeclNameRef?,
@@ -538,8 +447,7 @@ extension SymbolTable {
     //   ">>Looking for group members for ref '\(name?.debugDescription ?? "_")' in group decl: '\(group.trimmedDescription)'"
     // )
     // Add direct members
-    let directMembers = _getDirectMembers(
-      of: group,
+    let directMembers = group.findDirectMembers(
       name: name,
       kind: memberKind,
       configuredRegions: config.configuredRegions
@@ -751,8 +659,7 @@ extension SymbolTable {
       // Look up each possible main declaration
       for mainDecl in mainDecls {
         // Find members
-        let directMembers = _getDirectMembers(
-          of: mainDecl,
+        let directMembers = mainDecl.findDirectMembers(
           name: name,
           kind: memberKind,
           configuredRegions: config.configuredRegions,
