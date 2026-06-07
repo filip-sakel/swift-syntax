@@ -139,7 +139,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       do {
         return try .decl(
           exact: DeclNameRef(
-            coreName: .identifier(
+            baseName: .identifier(
               identifier: _parseIdentifier(name, file: file, line: line),
               args: optionalArgs?.map({ (argName: StaticString?) -> Identifier? in
                 try argName.map({ try _parseIdentifier($0, file: file, line: line) })
@@ -162,7 +162,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
     ) -> DeclLookupExpectation {
       return .decl(
         exact: DeclNameRef(
-          coreName: .deinit
+          baseName: .deinit
         ),
         file: file,
         line: line
@@ -179,7 +179,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       do {
         return try .decl(
           exact: DeclNameRef(
-            coreName: .`init`(
+            baseName: .`init`(
               args: optionalArgs?.map({ (argName: StaticString?) -> Identifier? in
                 try argName.map({ try _parseIdentifier($0, file: file, line: line) })
               })
@@ -202,7 +202,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       do {
         return try .decl(
           exact: DeclNameRef(
-            coreName: .unnamedCall(
+            baseName: .unnamedCall(
               args: args.map({
                 try Optional(_parseIdentifier($0, file: file, line: line))
               })
@@ -225,7 +225,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       do {
         return try .decl(
           exact: DeclNameRef(
-            coreName: .subscript(
+            baseName: .subscript(
               args: args.map({
                 try Optional(_parseIdentifier($0, file: file, line: line))
               })

@@ -648,7 +648,7 @@ extension SymbolTable {
       if let name {
         print(
           "[Lookup Debugging] Match between \(valueDecl.declName) and \(name) is:",
-          valueDecl.declName.tryMatch(reference: name.coreName),
+          valueDecl.declName.tryMatch(reference: name.baseName),
           "with kind match:",
           valueDecl.isKind(memberKind)
         )
@@ -656,7 +656,7 @@ extension SymbolTable {
 
       // If given a name, check for a match
       if let expectedName = name,
-        case .failure = valueDecl.declName.tryMatch(reference: expectedName.coreName)
+        case .failure = valueDecl.declName.tryMatch(reference: expectedName.baseName)
       {
         return nil
       }
@@ -867,7 +867,7 @@ extension SymbolTable {
     // Ensure identifier is valid (can't do lookup with invalid identifier)
     guard let typeIdentifier = Identifier(validating: type.name) else { return }
 
-    let typeName = DeclNameRef(coreName: .identifier(identifier: typeIdentifier))
+    let typeName = DeclNameRef(baseName: .identifier(identifier: typeIdentifier))
 
     // Two scopes can introduce members in nested types. The main declaration
     // and any top-level extensions (nested extensions are currently illegal).

@@ -204,16 +204,16 @@ import SwiftSyntax
   /// Examples include "Swift" in `Swift::String`
   public let moduleIdentifier: Identifier?
   /// The base name reference.
-  public let coreName: DeclNameRefBase
+  public let baseName: DeclNameRefBase
 
-  public init(moduleIdentifier: Identifier? = nil, coreName: DeclNameRefBase) {
+  public init(moduleIdentifier: Identifier? = nil, baseName: DeclNameRefBase) {
     self.moduleIdentifier = moduleIdentifier
-    self.coreName = coreName
+    self.baseName = baseName
   }
 
   public var debugDescription: String {
     let modulePrefix = if let moduleIdentifier { "\(moduleIdentifier.name)::" } else { "" }
-    return "\(modulePrefix)\(coreName.debugDescription)"
+    return "\(modulePrefix)\(baseName.debugDescription)"
   }
 }
 
