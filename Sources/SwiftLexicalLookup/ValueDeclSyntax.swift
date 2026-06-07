@@ -482,29 +482,35 @@ extension ValueDeclSyntax {
 
 // MARK: Type Queries
 
-/// The context in which a type is defined.
-// enum DeclContext {
-//   /// A type that can be referenced "globally" in the module,
-//   /// versus in an "anonymous" context (see ``DeclContext/anonymous``).
-//   ///
-//   /// Global doesn't refer to access control; it simply contrasts with
-//   /// ``anonymous`` contexts. For instance, consider:
-//   ///   struct A { struct B {} }
-//   ///   func myFunc() { struct C {} }
-//   /// Though `B` is nested, we can still refer to it as `A.B`. However,
-//   /// there's no way to refer to `C` outside the body of `myFunc`.
-//   case global
-//
-//   /// An anonymous context is any context whose child declarations can't
-//   /// be referenced outside said context.
-//   ///
-//   /// Basically any ``CodeBlockItemListSyntax`` that isn't the direct
-//   /// descendant of ``SourceFileSyntax`` introduces an anonymous context.
-//   /// For instance, we have no way of referring to `MyStruct` outside of
-//   /// `myFunc` body:
-//   ///   func myFunc() { struct MyStruct {} }
-//   case anonymous(inside: DeclSyntax)
-// }
+/// A declaration scope is basically any ``CodeBlockItemListSyntax``, whose
+/// child declarations can only be referenced within said scope's block
+/// items (with the exception of ``SourceFileSyntax``). Usually accessed
+/// through ``ValueDeclSyntax/declScope``.
+///
+/// The most common declaration scope is the code block of the source file
+/// itself:
+///   // File.swift
+///   struct MyStruct {}
+/// Here, `MyStruct` is accessible within the entire file and --because
+/// source files are special-- within the rest of the module.
+///
+/// Here's a more elaborate example:
+///   // File.swift
+///   struct A {
+///     struct B {}
+///     func myFunc() { struct C {} }
+///   }
+/// In this example there are two declarations scope: (1) the source file
+/// itself (like in any valid syntax tree) and (2) the body of `myFunc`.
+/// Because structs `A` and `B` are in the same scope, which happens to be
+/// a file scope, they're accessible in the entire module as `A` and `A.B`.
+/// However, they're no way to refer to `C` outside of the body of `myFunc`.
+@_spi(_QualifiedLookup) public struct DeclScope {
+  /// The code items, some of which are (scoped) declarations.
+  public let codeItems: CodeBlockItemListSyntax
+  /// Whether this declaration scope is file scope. `nil` if unknown.
+  public let isFileScope: Bool?
+}
 
 extension SyntaxProtocol {
   /// Try to convert this syntax to a declaration scope consisting of the
@@ -514,44 +520,23 @@ extension SyntaxProtocol {
   /// is a declaration scope (code block item list syntax) without a parent,
   /// we set `isFileScope` to `nil`. We only get `isFileScope == true`
   /// when the scope is the direct child of ``SourceFileSyntax``.
-  fileprivate var _asDeclScope: (CodeBlockItemListSyntax, isFileScope: Bool?)? {
+  fileprivate var _asDeclScope: DeclScope? {
     // Check we a code block with a parent.
-    guard let codeBlock = self.as(CodeBlockItemListSyntax.self) else { return nil }
+    guard let codeItems = self.as(CodeBlockItemListSyntax.self) else { return nil }
 
     // There's one ``SourceFileSyntax`` per syntax tree with exactly one
     // ``CodeBlockItemListSyntax`` child.
     //
     // If the code block doesn't have a parent, the syntax tree is likely
     // invalid so we set `isSourceFile` to nil.
-    let isSourceFile = codeBlock.parent?.is(SourceFileSyntax.self)
+    let isFileScope = codeItems.parent?.is(SourceFileSyntax.self)
 
-    return (codeBlock, isSourceFile)
+    return DeclScope(codeItems: codeItems, isFileScope: isFileScope)
   }
 
   /// Finds the declaration scope of the current value declaration by looking
   /// through its recursive parents.
-  ///
-  /// A declaration scope is basically any ``CodeBlockItemListSyntax``, whose
-  /// child declarations can only be referenced within said scope's block
-  /// items (with the exception of ``SourceFileSyntax``). The most common
-  /// declaration scope is the code block of the source file itself:
-  ///   // File.swift
-  ///   struct MyStruct {}
-  /// Here, `MyStruct` is accessible within the entire file and --because
-  /// source files are special-- within the rest of the module.
-  ///
-  /// Here's a more elaborate example:
-  ///   // File.swift
-  ///   struct A {
-  ///     struct B {}
-  ///     func myFunc() { struct C {} }
-  ///   }
-  /// In this example there are two declarations scope: (1) the source file
-  /// itself (like in any valid syntax tree) and (2) the body of `myFunc`.
-  /// Because structs `A` and `B` are in the same scope, which happens to be
-  /// a file scope, they're accessible in the entire module as `A` and `A.B`.
-  /// However, they're no way to refer to `C` outside of the body of `myFunc`.
-  var declScope: (CodeBlockItemListSyntax, isFileScope: Bool?)? {
+  @_spi(_QualifiedLookup) public var declScope: DeclScope? {
     // No parent means no scope.
     //
     // In this case, if `self` isn't a `SourceFileSyntax`, the syntax tree
@@ -560,25 +545,6 @@ extension SyntaxProtocol {
 
     // See if parent is a declaration context; otherwise, get its context.
     return parent._asDeclScope ?? parent.declScope
-
-    // // See if our parent forms a declaration context.
-    // guard let codeBlock = parent.as(CodeBlockItemListSyntax.self) else {
-    //   // Otherwise, check parent's context
-    //   return parent.declContext
-    // }
-    //
-    // // Every valid ``CodeBlockItemListSyntax`` has a parent. Basically anything
-    // // with a code block item list syntax conforms to ``WithStatementsSyntax``.
-    // //
-    // // If we can't find a code block's parents, the syntax tree is likely
-    // // invalid so we return `nil`.
-    // guard let codeBlockContainer = codeBlock.parent else { return nil }
-    //
-    // // There's one ``SourceFileSyntax`` per syntax tree with exactly one
-    // // ``CodeBlockItemListSyntax`` child.
-    // let isSourceFile = codeBlockContainer.is(SourceFileSyntax.self)
-    //
-    // return (codeBlock, isSourceFile)
   }
 }
 
@@ -726,7 +692,6 @@ indirect enum UnresolvedTypeRef: Equatable {
 //       // Either ScopeLookupError, or RetType not provided error for computer, or .inferFromLet, or VarDecl RetType
 //     case .functionDecl:
 //       // Either (Self) -> (Args...) -> RetType or (Args...) -> RetType
-//       // TODO: Handle callAsFunction
 //       return _syntaxNode.cast(FunctionDeclSyntax.self).name
 //     case .subscriptDecl:
 //       // Either (Self) -> (Args...) -> RetType or (Args...) -> RetType
@@ -803,7 +768,7 @@ extension ValueDeclSyntax {
 
 // Protocols
 extension ValueDeclSyntax {
-  init(fromProtocol syntax: __shared any NominalTypeDeclSyntax) {
+  init(fromProtocol syntax: borrowing some NominalTypeDeclSyntax) {
     // We know this cast is going to succeed. Go through `init(_: SyntaxData)` just to double-check and
     // verify the kind matches in debug builds and get maximum performance in release builds.
     self = Syntax(syntax).cast(ValueDeclSyntax.self)
