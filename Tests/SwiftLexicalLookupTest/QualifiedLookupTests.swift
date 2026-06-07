@@ -265,18 +265,56 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
     let file: StaticString
     let line: UInt
 
-    static func decl(
-      _ stringLiteral: String,
-      file: StaticString = #file,
-      line: UInt = #line
-    ) -> DeclLookupExpectation {
-      let exprSyntax = ExprSyntax(stringLiteral: stringLiteral)
-      return DeclLookupExpectation(
-        declRef: parseDeclRefName(exprSyntax, file: file, line: line),
-        file: file,
-        line: line
-      )
+    // static func decl(
+    //   _ stringLiteral: String,
+    //   file: StaticString = #file,
+    //   line: UInt = #line
+    // ) -> DeclLookupExpectation {
+    //   let exprSyntax = ExprSyntax(stringLiteral: stringLiteral)
+    //   return DeclLookupExpectation(
+    //     declRef: parseDeclRefName(exprSyntax, file: file, line: line),
+    //     file: file,
+    //     line: line
+    //   )
+    // }
+
+    /// Try to parse the given string as an identifier token. Creates XCT assertion failure
+    /// and throws upon failure
+    static func _parseIdentifier(_ tokenString: StaticString, file: StaticString, line: UInt) throws -> Identifier {
+      struct InvalidIdentifierFailure: Error {}
+
+      // let token = TokenSyntax(stringLiteral: tokenString)
+      let tokens = Array(ExprSyntax(stringLiteral: tokenString.description).tokens(viewMode: .all))
+      guard tokens.count == 1, let token = tokens.first else {
+        XCTFail(
+          "Invalid expectation identifier; expected one token but got three tokens instead '\(tokens.map(\.tokenKind))'",
+          file: file,
+          line: line
+        )
+        throw InvalidIdentifierFailure()
+
+      }
+      // print(
+      //   "[Lookup debugging] ExprSynt",
+      //   ExprSyntax(stringLiteral: tokenString).tokens(viewMode: .all).map { $0.tokenKind }
+      // )
+      // print("[Lookup debugging] Found token: '\(token)' of kind '\(token.tokenKind)'")
+      guard Identifier(validating: token) != nil else {
+        XCTFail(
+          "Invalid expectation token; expected identifier or dollar identifier but got token kind '\(token.tokenKind)' instead.",
+          file: file,
+          line: line
+        )
+        throw InvalidIdentifierFailure()
+      }
+      // TODO: Handle `identifier`-style "non canonical" identifiers
+      let identifier = Identifier(canonicalName: tokenString)
+      print("[Lookup debuggin] final id name '\(identifier.name)'")
+      // Construct identifier through static string because we can't use a string
+      // that's not in the syntax tree
+      return identifier
     }
+
     static func decl(
       exact ref: DeclNameRef,
       file: StaticString = #file,
@@ -290,19 +328,23 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       file: StaticString = #file,
       line: UInt = #line
     ) -> DeclLookupExpectation {
-      DeclLookupExpectation(
-        declRef: DeclNameRef(
-          coreName: .identifier(
-            identifier: Identifier(canonicalName: name),
-            macro: nil,
-            args: optionalArgs?.map({ (argName: StaticString?) -> Identifier? in
-              argName.map({ Identifier(canonicalName: $0) })
-            })
-          )
-        ),
-        file: file,
-        line: line
-      )
+      do {
+        return try DeclLookupExpectation(
+          declRef: DeclNameRef(
+            coreName: .identifier(
+              identifier: _parseIdentifier(name, file: file, line: line),
+              macro: nil,
+              args: optionalArgs?.map({ (argName: StaticString?) -> Identifier? in
+                try argName.map({ try _parseIdentifier($0, file: file, line: line) })
+              })
+            )
+          ),
+          file: file,
+          line: line
+        )
+      } catch {
+        return DeclLookupExpectation(declRef: nil, file: file, line: line)
+      }
     }
     // TODO: Add macro
     static func `deinit`(
@@ -324,31 +366,43 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       file: StaticString = #file,
       line: UInt = #line
     ) -> DeclLookupExpectation {
-      DeclLookupExpectation(
-        declRef: DeclNameRef(
-          coreName: .`init`(
-            args: optionalArgs?.map({ (argName: StaticString?) -> Identifier? in
-              argName.map({ Identifier(canonicalName: $0) })
-            })
-          )
-        ),
-        memberKind: .includeAllMembers,
-        file: file,
-        line: line
-      )
+      do {
+        return try DeclLookupExpectation(
+          declRef: DeclNameRef(
+            coreName: .`init`(
+              args: optionalArgs?.map({ (argName: StaticString?) -> Identifier? in
+                try argName.map({ try _parseIdentifier($0, file: file, line: line) })
+              })
+            )
+          ),
+          memberKind: .includeAllMembers,
+          file: file,
+          line: line
+        )
+      } catch {
+        return DeclLookupExpectation(declRef: nil, file: file, line: line)
+      }
     }
     static func unnamed(
       _ args: [StaticString],
       file: StaticString = #file,
       line: UInt = #line
     ) -> DeclLookupExpectation {
-      DeclLookupExpectation(
-        declRef: DeclNameRef(
-          coreName: .unnamedCall(args: args.map({ Optional(Identifier(canonicalName: $0)) }))
-        ),
-        file: file,
-        line: line
-      )
+      do {
+        return try DeclLookupExpectation(
+          declRef: DeclNameRef(
+            coreName: .unnamedCall(
+              args: args.map({
+                try Optional(_parseIdentifier($0, file: file, line: line))
+              })
+            )
+          ),
+          file: file,
+          line: line
+        )
+      } catch {
+        return DeclLookupExpectation(declRef: nil, file: file, line: line)
+      }
     }
 
     static func `subscript`(
@@ -356,13 +410,21 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       file: StaticString = #file,
       line: UInt = #line
     ) -> DeclLookupExpectation {
-      DeclLookupExpectation(
-        declRef: DeclNameRef(
-          coreName: .subscript(args: args.map({ Optional(Identifier(canonicalName: $0)) }))
-        ),
-        file: file,
-        line: line
-      )
+      do {
+        return try DeclLookupExpectation(
+          declRef: DeclNameRef(
+            coreName: .subscript(
+              args: args.map({
+                try Optional(_parseIdentifier($0, file: file, line: line))
+              })
+            )
+          ),
+          file: file,
+          line: line
+        )
+      } catch {
+        return DeclLookupExpectation(declRef: nil, file: file, line: line)
+      }
     }
 
     /// Looks only for static declarations.
@@ -854,7 +916,8 @@ final class TestQualifiedLookup: XCTestCase {
     assertTypeMemberLookup(
       """
       struct MyStruct {
-        var \(.named("a"))a,
+        // Test variables with no args plus args (MyStruct could be callable)
+        var \(.named("a"), .named("a", args: ["randomArg"]))a,
             \(.named("b"))b: Int
 
         \(.named("hello", args: []),
@@ -874,7 +937,10 @@ final class TestQualifiedLookup: XCTestCase {
         func callAsFunction() {}
 
         // We assume the user meant static functions (diagnosed elsewhere)
-        case \(.named("case1").static())case1, \(.named("case2").static())case2
+        case \(.named("case1").static())
+             case1,
+             \(.named("case2", args: ["a"]).static())
+             case2(a: Int)
 
         // When `callAsFunction` is static, it exhibits no special behavior
         static
@@ -887,6 +953,19 @@ final class TestQualifiedLookup: XCTestCase {
       """
     )
   }
+  // func testEnumCase() {
+  //   assertTypeMemberLookup(
+  //     """
+  //     struct MyStruct {
+  //       // We assume the user meant static functions (diagnosed elsewhere)
+  //       case \(.named("case1").static())
+  //            case1,
+  //            \(.named("case2", args: ["a"]).static())
+  //            case2(a: Int)
+  //     }
+  //     """
+  //   )
+  // }
 
   // TODO: Test lookup of an associated type and how it interacts with MyProto.Type, etc.
 

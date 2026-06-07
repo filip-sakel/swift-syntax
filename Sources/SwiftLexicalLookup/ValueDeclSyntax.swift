@@ -429,6 +429,9 @@ indirect enum DeclName: Hashable, CustomDebugStringConvertible {
       guard macroMatches else { return .failure(MatchFailure.wrongMacroType) }
 
       // Check ids match
+      print(
+        "[Lookup Debugging] Match between .identifier; id match between '\(idA.name)' and '\(idB.name)': \(idA == idB)"
+      )
       guard idA == idB else { return .failure(MatchFailure.idMismatch) }
 
       // Check args only if both the declaration and reference specify them.

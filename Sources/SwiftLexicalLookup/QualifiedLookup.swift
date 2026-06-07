@@ -645,12 +645,14 @@ extension SymbolTable {
     /// Filter the given declaration based on the given ``name`` and ``memberKind``
     func filterDecl(_ valueDecl: ValueDeclSyntax) -> ValueDeclSyntax? {
       // Check name matches
-      // if let name {
-      //   print(
-      //     "Match between \(valueDecl.declName) and \(name) is:",
-      //     valueDecl.declName.tryMatch(reference: name.coreName)
-      //   )
-      // }
+      if let name {
+        print(
+          "[Lookup Debugging] Match between \(valueDecl.declName) and \(name) is:",
+          valueDecl.declName.tryMatch(reference: name.coreName),
+          "with kind match:",
+          valueDecl.isKind(memberKind)
+        )
+      }
 
       // If given a name, check for a match
       if let expectedName = name,

@@ -463,6 +463,18 @@ final class TestValueDeclSyntax: XCTestCase {
       isTypeDecl: false,
       scopeKind: nil
     )
+    // Check for resilience: enum cases with labels but no type
+    assertValueDecl(
+      of: DeclSyntax("case caseWithoutTypes(a:, b:)")
+        .children(ofType: EnumCaseElementSyntax.self)[0],
+      name: DeclName.identifier(
+        identifier: Identifier(canonicalName: "caseWithoutTypes"),
+        args: [Identifier(canonicalName: "a"), Identifier(canonicalName: "b")]
+      ),
+      isStatic: .failure(.unsupportedAtTopLevel),
+      isTypeDecl: false,
+      scopeKind: nil
+    )
 
     // Subscripts don't have argument labels by default :(
     assertValueDecl(
