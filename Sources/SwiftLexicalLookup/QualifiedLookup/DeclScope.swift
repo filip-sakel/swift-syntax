@@ -35,9 +35,13 @@ import SwiftSyntax
 /// Because structs `A` and `B` are in the same scope, which happens to be
 /// a file scope, they're accessible in the entire module as `A` and `A.B`.
 /// However, they're no way to refer to `C` outside of the body of `myFunc`.
-@_spi(_QualifiedLookup) public struct DeclScope {
+@_spi(_QualifiedLookup) public struct DeclScope: Hashable {
   /// The code items, some of which are (scoped) declarations.
   public let codeItems: CodeBlockItemListSyntax
+
+  // TODO:: Make `isFileScope` a computed prop and change `codeItems`
+  //        to ensure we're not part of a nominal type (not a new scope!!)
+
   /// Whether this declaration scope is file scope. `nil` if unknown.
   public let isFileScope: Bool?
 }

@@ -526,6 +526,63 @@ final class TestQualifiedLookup: XCTestCase {
       """
     )
   }
+
+  assertIdentifierTypeLookup() {
+    assertTypeIdLookup("""
+    🟥struct A {
+      struct 🟩B {
+        static func f() -> \("🟩")B {}
+        static func makeSelf() -> \("🟩")Self
+      }
+
+      func anonymousScope() {
+        let a: \("🟥")A = self
+        let me: \("🟥")Self = self
+
+        🟦struct C {
+          func f(c: \("🟦")C) -> \("🟦")Self {
+            self as \("🟦")Self
+          }
+        }
+
+        let c: C = \("🟦")C()
+      }
+
+      static var getA: \("🟥")A { self }
+      static func makeSelf() -> \("🟥")Self {}
+      static func makeB() -> \("🟩")B {}
+
+      static func invalidRefToC() -> \(.noResults)C {}
+    }
+
+    func anonymousScope() {
+      var a: \(.noResults)Self
+
+      🟨struct A {
+        subscript(a: \("🟨")A) -> \("🟨")Self { a }
+      }
+      enum D {}
+
+      var a: \("🟨")A {}
+    }
+
+    \("🟥")A
+    \(.noResults)B
+    \(.noResults)D
+
+    """)
+    assertTypeIdLookup("""
+    🟧protocol Proto {
+      struct 🟪B {
+        static func f(b: \("🟪")B) -> \("🟪")Self {}
+      }
+      static func makeSelf() -> \("🟧")Self
+    }
+    \("🟧")Proto
+    \(.noResults)B
+    """)
+
+  }
   // func testEnumCase() {
   //   assertTypeMemberLookup(
   //     """

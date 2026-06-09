@@ -50,6 +50,7 @@ public struct QualifiedTableLookupConfig {
 @_spi(_QualifiedLookup) public enum QualifiedLookupResult {
   public enum ImplicitDeclaration {
     case `Type`
+    case `Protocol`
     case `self`
   }
 
