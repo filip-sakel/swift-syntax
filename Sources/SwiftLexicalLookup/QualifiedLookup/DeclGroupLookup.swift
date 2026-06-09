@@ -2,7 +2,7 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2024 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2026 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
 // See https://swift.org/LICENSE.txt for license information
@@ -14,8 +14,7 @@ import SwiftIfConfig
 import SwiftSyntax
 
 public struct DeclGroupSyntaxType: SyntaxProtocol {
-  // TODO: Consider using the underlying syntax node (like ``ValueDeclSyntax``)
-  public var _syntaxNode: Syntax
+  public internal(set) var _syntaxNode: Syntax
 
   public init?(_ node: borrowing some SyntaxProtocol) {
     switch node._syntaxNode.kind {
@@ -119,7 +118,8 @@ public struct DeclGroupSyntaxType: SyntaxProtocol {
     set { _setGroupProp(\.memberBlock, newValue: newValue) }
   }
 
-  var _asLookInMembersScope: LookInMembersScopeSyntax? {
+  // Useful for ASTGen validation
+  public var _asLookInMembersScope: LookInMembersScopeSyntax? {
     Syntax(self).asProtocol((any SyntaxProtocol).self) as? any LookInMembersScopeSyntax
   }
 }
@@ -144,17 +144,6 @@ extension DeclGroupSyntax {
   ) -> [ValueDeclSyntax] {
     /// Filter the given declaration based on the given ``name`` and ``memberKind``
     func filterDecl(_ valueDecl: ValueDeclSyntax) -> ValueDeclSyntax? {
-      // Check name matches
-      // // TODO: Remove debuggins statement
-      // if let name {
-      //   print(
-      //     "[Lookup Debugging] Match between \(valueDecl.declName) and \(name) is:",
-      //     valueDecl.declName.tryMatch(reference: name.baseName),
-      //     "with kind match:",
-      //     valueDecl.isKind(memberKind)
-      //   )
-      // }
-
       // If given a name, check for a match
       if let expectedName = name,
         case .failure = valueDecl.declName.tryMatch(reference: expectedName.baseName)
@@ -213,5 +202,32 @@ extension DeclGroupSyntax {
     // Add each member in the group declaration
     return self.memberBlock.members
       .flatMap(processMember(member:))
+  }
+}
+
+// MARK: Utilities
+
+extension DeclGroupSyntaxType {
+  /// The type syntax of this declaration group. An identifier type syntax for nominal types,
+  /// or the extended type for extensions.
+  ///
+  /// Useful for debugging
+  @_spi(_QualifiedLookup) public var type: TypeSyntax? {
+    switch _syntaxNode.as(SyntaxEnum.self) {
+    case .structDecl(let structDecl):
+      return TypeSyntax(IdentifierTypeSyntax(name: structDecl.name))
+    case .enumDecl(let enumDecl):
+      return TypeSyntax(IdentifierTypeSyntax(enumDecl.name))
+    case .classDecl(let classDecl):
+      return TypeSyntax(IdentifierTypeSyntax(classDecl.name))
+    case .actorDecl(let actorDecl):
+      return TypeSyntax(IdentifierTypeSyntax(actorDecl.name))
+    case .protocolDecl(let protocolDecl):
+      return TypeSyntax(IdentifierTypeSyntax(protocolDecl.name))
+    case .extensionDecl(let extensionDecl):
+      return extensionDecl.extendedType
+    default:
+      fatalError("[Internal Error] Invalid syntax kind for DeclGroupSyntaxType: \(_syntaxNode.kind)")
+    }
   }
 }

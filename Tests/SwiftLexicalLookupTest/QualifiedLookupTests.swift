@@ -2,7 +2,7 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2024 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2026 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
 // See https://swift.org/LICENSE.txt for license information
@@ -11,12 +11,10 @@
 //===----------------------------------------------------------------------===//
 
 import Foundation
+@_spi(_QualifiedLookup) @_spi(Experimental) import SwiftLexicalLookup
 import SwiftParser
 import SwiftSyntax
 import XCTest
-
-// TODO: Fully switch over to `@_spi(_QualifiedLookup)`
-@_spi(_QualifiedLookup) @_spi(Experimental) @testable import SwiftLexicalLookup
 
 /// Source code annotated with qualified-lookup expectations.
 ///
@@ -453,15 +451,12 @@ final class TestQualifiedLookup: XCTestCase {
     }
 
     // Perform lookup
-    let symbolTable = SymbolTable(sourceFile: sourceFile)
     for (nameAndMemberKind, expectations) in namesToExpectations {
       let (name, memberKind) = (nameAndMemberKind.a, nameAndMemberKind.b)
 
-      let foundDecls = symbolTable.lookupMember(
-        withName: name,
-        inDeclGroup: sharedDeclGroup,
-        fromLocation: AbsolutePosition(utf8Offset: 0),
-        memberKind: memberKind
+      let foundDecls = sharedDeclGroup.findDirectMembers(
+        name: name,
+        kind: memberKind
       )
 
       // Cross out matched decls and diagnose unmatched

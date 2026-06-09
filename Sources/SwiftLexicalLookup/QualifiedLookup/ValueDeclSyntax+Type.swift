@@ -2,7 +2,7 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2024 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2026 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
 // See https://swift.org/LICENSE.txt for license information
@@ -14,7 +14,7 @@ import SwiftSyntax
 
 // MARK: Type Queries
 
-indirect enum UnresolvedTypeRef: Equatable {
+@_spi(_QualifiedLookup) public indirect enum UnresolvedTypeRef: Equatable {
   // E.g. Int, Swift::Int, String::Swift::UTF8View
   // TODO: Implement generics
   case member(base: UnresolvedTypeRef?, moduleName: Identifier?, typeName: Identifier)
@@ -30,7 +30,7 @@ indirect enum UnresolvedTypeRef: Equatable {
   //   // FIXME: TODO
   // }
 
-  enum Failure: Error {
+  public enum Failure: Error {
     case invalidKind(SyntaxKind)
     case invalidIdentifier(TokenSyntax)
     case genericsNotYetSupported
@@ -43,7 +43,7 @@ indirect enum UnresolvedTypeRef: Equatable {
   static let _stdlibModuleIdentifier = Identifier(canonicalName: "Swift")
 
   // TODO: Implement the rest
-  static func fromTypeSyntax(_ typeSyntax: TypeSyntax) -> Result<UnresolvedTypeRef, Failure> {
+  public static func fromTypeSyntax(_ typeSyntax: TypeSyntax) -> Result<UnresolvedTypeRef, Failure> {
     func parseIdentifier(token: TokenSyntax) throws(Failure) -> Identifier {
       guard let identifier = Identifier(validating: token) else {
         throw Failure.invalidIdentifier(token)
@@ -174,24 +174,3 @@ indirect enum UnresolvedTypeRef: Equatable {
 //
 //   }
 // }
-extension DeclGroupSyntaxType {
-  // TODO: Implement canonical type
-  public var type: TypeSyntax? {
-    switch _syntaxNode.as(SyntaxEnum.self) {
-    case .structDecl(let structDecl):
-      return TypeSyntax(IdentifierTypeSyntax(name: structDecl.name))
-    case .enumDecl(let enumDecl):
-      return TypeSyntax(IdentifierTypeSyntax(enumDecl.name))
-    case .classDecl(let classDecl):
-      return TypeSyntax(IdentifierTypeSyntax(classDecl.name))
-    case .actorDecl(let actorDecl):
-      return TypeSyntax(IdentifierTypeSyntax(actorDecl.name))
-    case .protocolDecl(let protocolDecl):
-      return TypeSyntax(IdentifierTypeSyntax(protocolDecl.name))
-    case .extensionDecl(let extensionDecl):
-      return extensionDecl.extendedType
-    default:
-      fatalError("[Internal Error] Invalid syntax kind for DeclGroupSyntaxType: \(_syntaxNode.kind)")
-    }
-  }
-}

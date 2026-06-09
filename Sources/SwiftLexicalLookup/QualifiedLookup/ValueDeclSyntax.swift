@@ -2,7 +2,7 @@
 //
 // This source file is part of the Swift.org open source project
 //
-// Copyright (c) 2014 - 2024 Apple Inc. and the Swift project authors
+// Copyright (c) 2014 - 2026 Apple Inc. and the Swift project authors
 // Licensed under Apache License v2.0 with Runtime Library Exception
 //
 // See https://swift.org/LICENSE.txt for license information
@@ -92,7 +92,7 @@ import SwiftSyntax
 // MARK: Declalaration Name
 
 extension Identifier {
-  init?(validating token: TokenSyntax) {
+  @_spi(_QualifiedLookup) public init?(validating token: TokenSyntax) {
     guard let identifier = token.identifier, !token.hasError else {
       return nil
     }
@@ -134,7 +134,6 @@ extension ValueDeclSyntax {
   /// Returns true if the given macro is freestanding; false if attached.
   func _macroType(_ macroDecl: MacroDeclSyntax) -> DeclName.MacroType {
     // TODO: Implement in a way that handles if configs
-
     // return macroDecl.attributes.reduce(
     //   DeclName.MacroType(isFreestanding: false, isAttached: false),
     //   { (macroType: DeclName.MacroType, attribute: AttributeListSyntax.Element) -> DeclName.MacroType in
@@ -153,7 +152,7 @@ extension ValueDeclSyntax {
   /// The canonical name of the declaration, including argument names where applicable.
   ///
   /// For instance, `func f(x: Int, y: Int)` has a canonical name of ''f(x:y:)''.
-  var declName: DeclName {
+  public var declName: DeclName {
     switch _syntaxNode.as(SyntaxEnum.self) {
     // Types and pattern identifiers have no args
     case .structDecl(let structDecl):
@@ -333,7 +332,7 @@ extension ValueDeclSyntax {
   }
 
   /// Reasons why we couldn't determine if a declaration is static.
-  enum StaticLookupFailure: Hashable, Error {
+  public enum StaticLookupFailure: Hashable, Error {
     /// Static only makes sense in a nominal type.
     ///
     /// That is, we check that the value declaration appears inside a decl
@@ -365,7 +364,7 @@ extension ValueDeclSyntax {
   /// 3. Pattern identifiers that aren't inside a ``VariableDeclSyntax``
   ///    scope, or enum elements that aren't in ``EnumCaseDeclSyntax``
   ///    return a ``.scopeFailure``.
-  var isStatic: Result<Bool, StaticLookupFailure> {
+  public var isStatic: Result<Bool, StaticLookupFailure> {
     /// Check that this value declaration is in a declaration group.
     func checkParentIsDeclGroup(_ parent: Syntax?) throws(StaticLookupFailure) {
       // The hierarchy is as follows:
@@ -438,7 +437,7 @@ extension ValueDeclSyntax {
 
   /// Whether the declaration is a type declaration, meaning it introduces a
   /// new type (or alias thereof).
-  var isTypeDecl: Bool {
+  public var isTypeDecl: Bool {
     switch _syntaxNode.kind {
     case .structDecl, .enumDecl, .classDecl, .actorDecl, .protocolDecl, .typeAliasDecl, .associatedTypeDecl:
       return true
