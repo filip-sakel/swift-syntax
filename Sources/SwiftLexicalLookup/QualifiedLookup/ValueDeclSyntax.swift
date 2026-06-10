@@ -214,6 +214,10 @@ extension ValueDeclSyntax {
 
 // MARK: Basic Queries
 
+extension Int {
+  private struct A {}
+}
+
 extension ValueDeclSyntax {
   /// Get the variable declaration parent of this identifier pattern
   /// value-declaration. Returns `nil` if the scope is invalid.

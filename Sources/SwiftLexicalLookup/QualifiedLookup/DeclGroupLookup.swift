@@ -126,78 +126,98 @@ public struct DeclGroupSyntaxType: SyntaxProtocol {
 
 // MARK: Lookup
 
-private protocol _MemberBlockLike {
-  func _forEachMember(_ perform: (DeclSyntax) -> Void)
-}
-extension _MemberBlockLike {
-  func _visitDirectMembers(
-    configuredRegions: ConfiguredRegions?,
-    visit: (ValueDeclSyntax) -> Void
-  ) {
-    /// Process a member or a member nested inside an if-config declaration.
-    ///
-    /// This pattern is similar to the SyntaxVisitor pattern, but a SyntaxVisitor
-    /// doesn't work because we use protocols like `NamedDeclSyntax`
-    func processMember(decl: DeclSyntax) {
-      // Get only value declarations
-      if let valueDecl = decl.as(ValueDeclSyntax.self) {
+// private protocol _MemberBlockLike {
+//   func _forEachMember(_ perform: (DeclSyntax) -> Void)
+// }
+private func _visitDirectMembersOfDecl(
+  decl: DeclSyntax,
+  configuredRegions: ConfiguredRegions?,
+  visit: (ValueDeclSyntax) -> Void
+) {
+  /// Process a member or a member nested inside an if-config declaration.
+  ///
+  /// This pattern is similar to the SyntaxVisitor pattern, but a SyntaxVisitor
+  /// doesn't work because we use protocols like `NamedDeclSyntax`
+  func processMember(decl: DeclSyntax) {
+    // Get only value declarations
+    if let valueDecl = decl.as(ValueDeclSyntax.self) {
+      visit(valueDecl)
+    }
+    // Visit variable declarations to get identifier patterns
+    else if let varDecl = decl.as(VariableDeclSyntax.self) {
+      for binding in varDecl.bindings {
+        guard let valueDecl = ValueDeclSyntax(binding.pattern.as(IdentifierPatternSyntax.self)) else { continue }
         visit(valueDecl)
       }
-      // Visit variable declarations to get identifier patterns
-      else if let varDecl = decl.as(VariableDeclSyntax.self) {
-        for binding in varDecl.bindings {
-          guard let valueDecl = ValueDeclSyntax(binding.pattern.as(IdentifierPatternSyntax.self)) else { continue }
-          visit(valueDecl)
-        }
+    }
+    // Visit enum cases to get enum elements
+    else if let enumCase = decl.as(EnumCaseDeclSyntax.self) {
+      for enumElement in enumCase.elements {
+        visit(ValueDeclSyntax(enumElement))
       }
-      // Visit enum cases to get enum elements
-      else if let enumCase = decl.as(EnumCaseDeclSyntax.self) {
-        for enumElement in enumCase.elements {
-          visit(ValueDeclSyntax(enumElement))
-        }
+    }
+    // If configuredRegions is set, visit the members of the active clause (if it exists)
+    //
+    // We do this recursively to handle nested if-config declarations
+    else if let ifConfigDecl = decl.as(IfConfigDeclSyntax.self),
+      let configuredRegions,
+      case .decls(let members) = configuredRegions.activeClause(for: ifConfigDecl)?.elements
+    {
+      for member in members {
+        processMember(decl: member.decl)
       }
-      // If configuredRegions is set, visit the members of the active clause (if it exists)
-      //
-      // We do this recursively to handle nested if-config declarations
-      else if let ifConfigDecl = decl.as(IfConfigDeclSyntax.self),
-        let configuredRegions,
-        case .decls(let members) = configuredRegions.activeClause(for: ifConfigDecl)?.elements
-      {
+    }
+    // If configuredRegions is nil, visit all if-config clauses
+    else if let ifConfigDecl = decl.as(IfConfigDeclSyntax.self) {
+      for clause in ifConfigDecl.clauses {
+        guard case .decls(let members) = clause.elements else { return }
         for member in members {
           processMember(decl: member.decl)
         }
       }
-      // If configuredRegions is nil, visit all if-config clauses
-      else if let ifConfigDecl = decl.as(IfConfigDeclSyntax.self) {
-        for clause in ifConfigDecl.clauses {
-          guard case .decls(let members) = clause.elements else { return }
-          for member in members {
-            processMember(decl: member.decl)
-          }
-        }
-      }
     }
-
-    // Visit all declaration members
-    _forEachMember(processMember(decl:))
   }
+
+  // Find all ValueDeclSyntax members in this declaration
+  processMember(decl: decl)
 }
 
-extension CodeBlockItemListSyntax: _MemberBlockLike {
-  fileprivate func _forEachMember(_ perform: (DeclSyntax) -> Void) {
+extension CodeBlockItemListSyntax {  //: _MemberBlockLike {
+  func _visitDirectMembers(
+    configuredRegions: ConfiguredRegions?,
+    visit: (ValueDeclSyntax) -> Void,
+  ) {
     for listItem in self {
       guard case .decl(let decl) = listItem.item else { continue }
-      perform(decl)
+      _visitDirectMembersOfDecl(
+        decl: decl,
+        configuredRegions: configuredRegions,
+        visit: visit
+      )
     }
   }
+  // fileprivate func _forEachMember(_ perform: (DeclSyntax) -> Void) {
+  //   for listItem in self {
+  //     guard case .decl(let decl) = listItem.item else { continue }
+  //     perform(decl)
+  //   }
+  // }
 }
 
-extension MemberBlockSyntax: _MemberBlockLike {
-  fileprivate func _forEachMember(_ perform: (DeclSyntax) -> Void) {
-    for member in members {
-      perform(member.decl)
-    }
-  }
+extension MemberBlockSyntax {  //: _MemberBlockLike {
+  // fileprivate func _forEachMember(_ perform: (DeclSyntax) -> Void) {
+  //   for member in members {
+  //     perform(member.decl)
+  //   }
+  // }
+
+  // func _visitDirectMembers(
+  //   configuredRegions: ConfiguredRegions?,
+  //   visit: (ValueDeclSyntax) -> Void,
+  // ) {
+  //   for member in members {
+  //   }
+  // }
 }
 
 extension DeclGroupSyntax {
@@ -205,7 +225,10 @@ extension DeclGroupSyntax {
     configuredRegions: ConfiguredRegions?,
     visit: (ValueDeclSyntax) -> Void
   ) {
-    self.memberBlock._visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
+    for member in memberBlock.members {
+      _visitDirectMembersOfDecl(decl: member.decl, configuredRegions: configuredRegions, visit: visit)
+    }
+    // self.memberBlock._visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
   }
 
   /// Find named member declarations in the given group declaration.

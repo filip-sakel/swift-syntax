@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-import SwiftSyntax
 import SwiftIfConfig
+import SwiftSyntax
 
 // MARK: Type Queries
 
@@ -302,16 +302,72 @@ extension TokenSyntax {
 
 indirect enum TypeNameRef: Hashable {
   case member(base: TypeNameRef?, moduleName: Identifier?, name: Identifier)
+
+  enum NominalValidationFailure: Error {
+    case invalidModuleIdentifier
+    case invalidNameIdentifier
+    case nonNominalType(TypeSyntax)
+  }
+  static func validatingNominal(_ type: TypeSyntax) -> Result<TypeNameRef, NominalValidationFailure> {
+    let baseTypeSyntax: TypeSyntax?
+    let moduleToken: TokenSyntax?
+    let nameToken: TokenSyntax
+    if let identifierType = type.as(IdentifierTypeSyntax.self) {
+      (baseTypeSyntax, moduleToken, nameToken) = (nil, identifierType.moduleSelector?.moduleName, identifierType.name)
+    } else if let memberType = type.as(MemberTypeSyntax.self) {
+      (baseTypeSyntax, moduleToken, nameToken) = (
+        memberType.baseType, memberType.moduleSelector?.moduleName, memberType.name
+      )
+    }
+    // TODO: Add sugar types like Array, Dict, InlineArray, Optional
+
+    return Result(catching: { () throws(NominalValidationFailure) -> TypeNameRef in
+      // Validate base
+      let baseType = try baseTypeSyntax.map({ baseTypeSyntax throws(NominalValidationFailure) in
+        try validatingNominal(baseTypeSyntax).get()
+      })
+      // Validate module name, if provided
+      let moduleName = try moduleToken.map({ moduleToken throws(NominalValidationFailure) in
+        guard let unwrappedModuleName = Identifier(validating: moduleToken) else {
+          throw NominalValidationFailure.invalidModuleIdentifier
+        }
+        return unwrappedModuleName
+      })
+      // Validate name
+      guard let name = Identifier(validating: nameToken) else {
+        throw NominalValidationFailure.invalidNameIdentifier
+      }
+      // Init self
+      return TypeNameRef.member(base: baseType, moduleName: moduleName, name: name)
+    })
+  }
+}
+
+extension Int {
+  private struct A {}
 }
 
 struct SymbolTable2 {
-  enum SourceType {
-    case nominal(mainDecl: any NominalTypeDeclSyntax, extensions: [ExtensionDeclSyntax])
+  enum MainTypeDecl {
+    case nominal(NominalTypeDeclSyntax)
     case alias(TypeAliasDeclSyntax)
     case associatedType(AssociatedTypeDeclSyntax)
   }
-  typealias ScopeTypeMap = [TypeNameRef: [SourceType]]
-  let typeMap: [DeclScope: ScopeTypeMap]
+  struct SourceType {
+    /// We'll always show the first mainDecl, because other type decls
+    /// of the same name *in the same scope* are redeclarations.
+    ///
+    /// For instance, if we have `extension Int { private struct A {} }`
+    /// in FileA.swift and then again in FileB.swift, those two are different
+    /// file scopes.
+    var mainDecls: [MainTypeDecl] = []
+    var extensions: [ExtensionDeclSyntax] = []
+    var aliasedBy: [(UnresolvedTypeRef, TypeAliasDeclSyntax)] = []
+  }
+  typealias ScopeTypeMap = [TypeNameRef: SourceType]
+
+  var scopeMap = [CodeBlockItemListSyntax: ScopeTypeMap]()
+  let configuredRegions: ConfiguredRegions?
 }
 
 // MARK: Scope Map
@@ -324,56 +380,200 @@ struct SymbolTable2 {
 //   }
 // }
 
+/// Visits type declarations (nominal types, type aliases and associated types),
+/// in addition to extensions.
+func _visitDirectTypesOfDecl(
+  decl: DeclSyntax,
+  configuredRegions: ConfiguredRegions?,
+  visit: (DeclSyntax) -> Void
+) {
+  /// Process a member or a member nested inside an if-config declaration.
+  ///
+  /// This pattern is similar to the SyntaxVisitor pattern, but a SyntaxVisitor
+  /// doesn't work because we use protocols like `NamedDeclSyntax`
+  func processMember(decl: DeclSyntax) {
+    switch decl.as(DeclSyntaxEnum.self) {
+    // Visit type and extension decls
+    case .structDecl, .enumDecl, .classDecl, .actorDecl, .typeAliasDecl, .associatedTypeDecl, .extensionDecl:
+      visit(decl)
+    // Recursively handle if-configs
+    case .ifConfigDecl(let ifConfigDecl):
+      // If `configuredRegions` is provided, only look at active clause
+      if let configuredRegions,
+        case .decls(let members) = configuredRegions.activeClause(for: ifConfigDecl)?.elements
+      {
+        for member in members {
+          processMember(decl: member.decl)
+        }
+      }
+      // Without a configuration, visit all clauses
+      else {
+        for clause in ifConfigDecl.clauses {
+          guard case .decls(let members) = clause.elements else { return }
+          for member in members {
+            processMember(decl: member.decl)
+          }
+        }
+      }
+    // Otherwise, do nothing
+    default: break
+    }
+  }
+
+  // Find all ValueDeclSyntax members in this declaration
+  processMember(decl: decl)
+}
+
 extension SymbolTable2 {
   func visitBlock(
     in parentType: some NominalTypeDeclSyntax,
     base: TypeNameRef?,
     module: Identifier?,
-    addingTo results: inout [TypeNameRef: [SourceType]]
+    addingTo results: inout [TypeNameRef: SourceType]
   ) {
-    // Visit type decls and store names
-    // TODO: Add configured regions
-    parentType.visitDirectMembers(configuredRegions: nil, visit: { valueDecl in
-      // Only process type declarations (only type decls have type names)
-      guard let typeNameToken = valueDecl.typeName, let typeID = Identifier(validating: typeNameToken) else {
+    //   // Visit type decls and store names
+    //   // TODO: Add configured regions
+    //   parentType.visitDirectMembers(configuredRegions: nil, visit: { valueDecl in
+    //     // Only process type declarations (only type decls have type names)
+    //     guard let typeNameToken = valueDecl.typeName, let typeID = Identifier(validating: typeNameToken) else {
+    //       return
+    //     }
+    //
+    //     let typeRef = TypeNameRef.member(base: base, moduleName: module, name: typeID)
+    //
+    //     let sourceType: SourceType
+    //     if let nominalDecl = valueDecl.asProtocol((any NominalTypeDeclSyntax).self) {
+    //       sourceType = .nominal(mainDecl: nominalDecl, extensions: [])
+    //     } else if let typeAliasDecl = valueDecl.as(TypeAliasDeclSyntax.self) {
+    //       sourceType = .alias(typeAliasDecl)
+    //     } else if let associatedTypeDecl = valueDecl.as(AssociatedTypeDeclSyntax.self) {
+    //       sourceType = .associatedType(associatedTypeDecl)
+    //     } else {
+    //       assertionFailure("[SwiftLexicalLookup] Internal error: No other known type/value declarations")
+    //       return
+    //     }
+    //
+    //     results[typeRef, default: []].append(sourceType)
+    //   })
+  }
+
+  // TODO: Do we need to get into the child scopes?
+  func mapScopeTypes(
+    scope: CodeBlockItemListSyntax,
+    moduleName: Identifier?
+  ) -> [TypeNameRef: SourceType] {
+    var results = [TypeNameRef: SourceType]()
+    // Other decls we need to handle.
+    var unvisitedTypes = [(typeRef: TypeNameRef?, nominalType: any NominalTypeDeclSyntax)]()
+
+    // Add the given value declaration with the given parent type reference.
+    //
+    // For example, consider:
+    //   func f() {
+    //     struct A {
+    //       struct B {}
+    //     }
+    //   }
+    // Here, `A` doesn't have a parent reference (something like `f.A`); we just
+    // refer to it as `A` from the body of the function. However, `B`'s parent type
+    // reference is `A`, since we can write `A.B` to access the nested struct from
+    // the body of the function.
+    func processDecl(_ decl: DeclSyntax, parentTypeRef: TypeNameRef?) {
+      // Handle extensions
+      if let extensionDecl = decl.as(ExtensionDeclSyntax.self) {
+        // We can only extend nominal types
+        guard let typeRef = try? TypeNameRef.validatingNominal(extensionDecl.extendedType).get() else {
+          return
+        }
+        // Add extended type
+        results[typeRef, default: SourceType()].extensions.append(extensionDecl)
         return
       }
 
-      let typeRef = TypeNameRef.member(base: base, moduleName: module, name: typeID)
-
-      let sourceType: SourceType
-      if let nominalDecl = valueDecl.asProtocol((any NominalTypeDeclSyntax).self) {
-        sourceType = .nominal(mainDecl: nominalDecl, extensions: [])
-      } else if let typeAliasDecl = valueDecl.as(TypeAliasDeclSyntax.self) {
-        sourceType = .alias(typeAliasDecl)
-      } else if let associatedTypeDecl = valueDecl.as(AssociatedTypeDeclSyntax.self) {
-        sourceType = .associatedType(associatedTypeDecl)
+      // Only look at type decls
+      let typeNameToken: TokenSyntax
+      let mainDecl: MainTypeDecl
+      if let nominalDecl = decl.asProtocol((any NominalTypeDeclSyntax).self) {
+        (typeNameToken, mainDecl) = (nominalDecl.name, .nominal(nominalDecl))
+      } else if let typeAliasDecl = decl.as(TypeAliasDeclSyntax.self) {
+        (typeNameToken, mainDecl) = (typeAliasDecl.name, .alias(typeAliasDecl))
+      } else if let associatedTypeDecl = decl.as(AssociatedTypeDeclSyntax.self) {
+        (typeNameToken, mainDecl) = (associatedTypeDecl.name, .associatedType(associatedTypeDecl))
       } else {
-        assertionFailure("[SwiftLexicalLookup] Internal error: No other known type/value declarations")
         return
       }
 
-      results[typeRef, default: []].append(sourceType)
-    })
+      // Add the main decl
+      guard let typeName = Identifier(validating: typeNameToken) else { return }
+      let typeRef = TypeNameRef.member(base: parentTypeRef, moduleName: moduleName, name: typeName)
+      results[typeRef, default: SourceType()].mainDecls.append(mainDecl)
+      // Add nominal types to queue
+      if case .nominal(let nominalType) = mainDecl {
+        unvisitedTypes.append((typeRef, nominalType))
+      }
+    }
+
+    // Visit top-scope declarations (no parent type reference)
+    // TODO: Should we discard associated types if nominal type isn't a protocol?
+    for scopeItem in scope {
+      // Skip non-decls
+      guard case .decl(let decl) = scopeItem.item else { continue }
+      // Visit decls (handles if configs)
+      _visitDirectTypesOfDecl(
+        decl: decl,
+        configuredRegions: configuredRegions,
+        visit: { decl in
+          processDecl(decl, parentTypeRef: nil)
+        }
+      )
+    }
+
+    // Visit types nested in nominal types
+    // TODO: Change to Dequeue and use `popFirst` to have more sensible order
+    while let (typeRef, nominalType) = unvisitedTypes.popLast() {
+      for member in nominalType.memberBlock.members {
+        _visitDirectTypesOfDecl(
+          decl: member.decl,
+          configuredRegions: configuredRegions,
+          visit: { decl in
+            processDecl(decl, parentTypeRef: typeRef)
+          }
+        )
+      }
+    }
+
+    return results
   }
 
-  func mapScopeTypes(scope: CodeBlockItemListSyntax) -> [TypeNameRef: DeclGroupSyntaxType] {
+  // // Extensions are only valid at file scope.
+  // // TODO: Consider whether we could add extensions for all scopes
+  // func getScopeExtensions(scope: CodeBlockItemListSyntax) -> [TypeNameRef: [DeclGroupSyntaxType]] {
+  //
+  // }
 
-  }
+  // func mapScope(scope: CodeBlockItemListSyntax) -> ScopeTypeMap {
+  //   var typeMap: ScopeTypeMap = [TypeNameRef: SourceType]()
+  //
+  //   var declQueue = [()]
+  //   for listItem in scope {
+  //     guard
+  //       decl = listItem.item.as(ValueDeclSyntax.self),
+  //       let typeName = decl
+  //   }
+  // }
 
-  // Extensions are only valid at file scope.
-  func getScopeExtensions(scope: CodeBlockItemListSyntax) -> [TypeNameRef: [DeclGroupSyntaxType]] {
-
-  }
-
-  func mapScope(scope: CodeBlockItemListSyntax) -> ScopeTypeMap {
-    var typeMap: ScopeTypeMap = [TypeNameRef: [NominalDeclaration]]()
-
-    var declQueue = [()]
-    for listItem in scope {
-      guard
-        decl = listItem.item.as(ValueDeclSyntax.self),
-        let typeName = decl
+  subscript(
+    scope scope: CodeBlockItemListSyntax,
+    moduleName moduleName: Identifier?,
+  ) -> ScopeTypeMap {
+    mutating _read {
+      guard let map = scopeMap[scope] else {
+        let map = mapScopeTypes(scope: scope, moduleName: moduleName)
+        scopeMap[scope] = map
+        yield map
+        return
+      }
+      yield map
     }
   }
 }
