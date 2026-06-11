@@ -383,42 +383,70 @@ extension Int {
 ///
 ///    To facilitate this lookup, we give declaration names scope identifiers. There are
 ///    three types of identifiers:
-///    1. External-module, top-level names
-///       For instance, `Swift::Int`, `Swift::String.Foundation::Encoding`
-///    2. Internal, top-level names
-///       For instance:
-///       ```
-///       // MyModule>FileA.swift
-///       struct A { // <- MyModule:FileA::A
-///         fileprivate struct B {} // <- MyModule:FileA::A.MyModule:FileA::B
-///       }
-///       extension String {
-///         struct C {} // <- Swift::String.MyModule:FileA::C
-///       }
+///    1. Top-level names
+///       These are accessible from the top-level (without filtering for access control).
+///       They consist of one or more dot-separated components, each fully qualified.
+///       A fully qualified means we specify the module name. Additionally, for internal
+///       declarations (declared in our own module), we specify the file where the main
+///       declaration lives.
 ///
-///       // MyModule>FileB.swift
-///       extension A {
-///         fileprivate struct B {} // <- MyModule:FileA::A.MyModule:FileB::B
-///       }
-///     3. Internal, nested-scope names
+///       Specifying the file name for internal names disambiguates fileprivate
+///       declarations. For instance:
+///         // FileA.swift
+///         fileprivate struct A {}
+///         // FileB.swift
+///         fileprivate struct A {}
+///       Notes:
+///       a. File IDs aren't necessary in external modules because
+///          we can assume everything comes in one module interface file
+///          where everything is public, or internal (e.g. for `@usableFromInline`).
+///       b. File IDs are granular enough for internal declarations. Ultimately,
+///          most times we use `private`, it's interpreted as `fileprivate`:
+///            // MyFile.swift
+///            extension Int {
+///              private struct A {}
+///            }
+///            extension Int {
+///              private struct A {} // ❌ Invalid redeclaration of `A`
+///            }
 ///
-///       ```
-///       func f() {
-///         struct A {} // (`f` scope)::A
-///       }
-///       ```
-///    either in the top-level scope or internal nested scopes. A nested scope is any `CodeBlockItemListSyntax`
-///    that's not a source file. Types declared in nested scopes aren't accessible from the top-level, e.g.,
-///    with `func f() { struct A {} }`, we have no way to access `A`. These nested scopes are called internal
-///    because we only care about them when type-checking function/accessor bodies, which we only need to
-///    do for this module, i.e., internally. Here are some examples:
-///    a. Global types in other modules
-///       // ModuleA
-///       struct A {}                 // ModuleA::A
-///       extension A { struct A {} } // ModuleA::A.A
-///    b. Global types in internal module
-///       // OurModule
+///        Examples include:
+///        a. `Swift::Int` (external module)
+///        b. `Swift::String.Foundation::Encoding` (different external modules)
+///        c. `Swift::Int.MyModule(FileA.swift)::A` and `Swift::Int.MyModule(FileB.swift)::A` in:
+///              // MyModule>FileA.swift
+///              extension Int {
+///                fileprivate struct A {}
+///              }
+///              // MyModule>FileB.swift
+///              extension Int {
+///                fileprivate struct A {}
+///              }
+///     2. Internal, nested-scope names
+///        These are nested scopes, i.e., `CodeBlockItemListSyntax` that's not just
+///        the top-level file scope.
 ///
+///        Notes:
+///        a. Types declared in nested scopes aren't accessible from the top-level.
+///
+///           For instance, we can't access `A` in:
+///             func f() {
+///               struct A { // (`f` scope)->A
+///                 struct B {} // (`f` scope)->A.B
+///               }
+///             }
+///             extension A {} // ❌ Cannot find `A`
+///
+///           Hence, we only need to specify the scope for the base type of a
+///           member type syntax. That is, we don't write "(`f` scope)->A.(`f` scope)->B".
+///
+///        b. Nested-scope types are only relevant for internal declarations.
+///
+///           Since we can't access types declared in nested scopes from the top-level,
+///           they're only useful for type-checking and code generation. However,
+///           all external function/storage declarations have already been type checked.
+///
+///           Hence, we don't need to specify the module; it's implicitly our module.
 ///
 ///    Extended nominal types consist of the the main type declaration
 ///    (`[Struct/Enum/Class/Actor/Protocol]DeclSyntax`) and all the extensions referencing them.
