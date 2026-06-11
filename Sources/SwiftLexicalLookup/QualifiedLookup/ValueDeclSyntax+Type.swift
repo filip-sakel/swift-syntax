@@ -372,14 +372,13 @@ extension Int {
 /// in each.
 ///
 /// 1. Resolving `TypeSyntax`
-///    In valid programs, any type syntax resolves will resolve to one or more extneded nominal
+///    In valid programs, any type syntax resolves will resolve to one or more extended nominal
 ///    types (we'll define these soon). Examples:
 ///    a. `Int` resolves to `Swift::Int`
 ///    b. `Codable` (an alias for `Encodable & Decodable`) resolves to `Swift::Encodable`
 ///    `Swift::Decodable`.
 ///
-///    TODO: Does it make sense to extend to `DeclName`?
-///
+///    TODO: Does it make sense to extend these qualified identifiers to `DeclName`?
 ///
 ///    To facilitate this lookup, we give declaration names scope identifiers. There are
 ///    three types of identifiers:
@@ -431,14 +430,14 @@ extension Int {
 ///
 ///           For instance, we can't access `A` in:
 ///             func f() {
-///               struct A { // (`f` scope)->A
-///                 struct B {} // (`f` scope)->A.B
+///               struct A { // (f scope)->A
+///                 struct B {} // (f scope)->A.B
 ///               }
 ///             }
 ///             extension A {} // ❌ Cannot find `A`
 ///
 ///           Hence, we only need to specify the scope for the base type of a
-///           member type syntax. That is, we don't write "(`f` scope)->A.(`f` scope)->B".
+///           member type syntax. That is, we don't write `(f scope)->A.(f scope)->B`.
 ///
 ///        b. Nested-scope types are only relevant for internal declarations.
 ///
@@ -448,9 +447,78 @@ extension Int {
 ///
 ///           Hence, we don't need to specify the module; it's implicitly our module.
 ///
+///    Type syntax broadly falls into 3 types:
+///    1. Type sugar:
+///
 ///    Extended nominal types consist of the the main type declaration
-///    (`[Struct/Enum/Class/Actor/Protocol]DeclSyntax`) and all the extensions referencing them.
-///    Getting the main declaration is easy as
+///    (`[Struct/Enum/Class/Actor/Protocol]DeclSyntax`) and all the extensions
+///    referencing them. Hence, to find the extended nominal type, we follow
+///    the steps below:
+///    1. Get the referenced type declaration.
+///       We get the main declaration by performing unqualified lookup from the
+///       position of the type syntax looking for the base type name. For instance:
+///         struct A {
+///           func f() {
+///             struct A {
+///               func g(a: A) {}
+///                         `- Lookup `A` from here
+///             }
+///           }
+///         }
+/// │     If unqualified lookup decides not to lie to us, we should get the nested
+/// │     `struct A` declaration. This lookup is similar to the compiler's
+/// │     `directReferencesForUnqualifiedTypeLookup`.
+/// │
+/// │  2. Resolve to a main nominal-type declaration.
+/// │      Unqualified lookup simply returns a type declaration, which could be a:
+/// │      a. Nominal type: great! we can move onto the next step
+/// ├───── b. Type alias: we need to recursively resolve the aliased type syntax
+/// │      c. Associated type or generic parameter: we can't do much here (TODO:: Check the compiler also gives up)
+/// │
+/// │  3. Fully qualify the main type declaration.
+/// │     We go up the syntax tree to find the first `CodeBlockItemListSyntax`
+/// │     ancestor; this is our scope. There are two cases:
+/// │     a. Our main declaration is a direct child of the scope node, so
+/// │        we can qualify it:
+/// │         i. If the scope's parent is a `SourceFileSyntax`, this is a
+/// │            top-level name whose fully qualified name is:
+/// │              MyModule(MyFile.swift)::MyType`.
+/// │            E.g. In FileA.swift `struct A {}` becomes `MyModue(FileA.swift)::A`.
+/// │        ii. Otherwise, we have a nested scope. The qualified name is:
+/// │              (nested scope)->MyType
+/// │            E.g. `func f() { struct A{} }` becomes `(f scope)->A`
+/// │     b. Our main declaration has a declaration-group (nominal type declaration
+/// │        or extension) parent, which we need to qualify first.
+/// │         i. If the declaration-group parent is a nominal-type declaration,
+/// │            we go to step (1).
+/// ╰─────── ii. If the declaration-group parent is an extension, recursively
+///              resolve the extended type syntax. Since we can only extend
+///              nominal types, the resolved type syntax should give us one
+///              extended nominal-type declaration. Based on the parent's type
+///              id, we construct this type's id:
+///              1. if the parent is a top-level id, we have:
+///                   <parent id>.MyModule(MyFile.swift)::MyType
+///              2. if the parent is a nested scope, we have:
+///                   <parent id>.MyType
+///
+///    After identifying the main declaration, we need to find its extensions.
+///    For the lack of an easier way, we actually resolve all extended type
+///    syntax (the compiler does this in `bindExtensions`).
+///      Note: This approach differs from our lazy computations up to this point: we've
+///            only been resolving type syntax that we know is relevant to our query.
+///            The reason is that to lazily find all extensions of a type, we need
+///            to know all of its aliases. Unfortunately, there's no easy way to find
+///            just one type's aliases without resolving *all* type aliases. Hence, it's
+///            easier to directly bind all extensions to a main nominal-type declaration.
+///    Thus, the main declaration and every extension with the same type identifier forms
+///    an _extended_ nominal type.
+///
+///    Finally, in this extended nominal type, we can perform qualified lookup
+///    to find types (`directReferencesForQualifiedTypeLookup` in the compiler).
+///    Namely, we call `_visitDirectMembers` on each `DeclGroupSyntax`
+///    of the extended nominal type, and filter down to type declarations.
+///    type declarations. We can then follow repeat the same process starting
+///    from step (2). Thus, we've resolved a type identifier.
 ///
 /// 2. Looking up names in `DeclGroupSyntax`
 ///    This is handled in `DeclGroupLookup` by calling `_visitDirectMembers`
