@@ -196,6 +196,7 @@ extension CodeBlockItemListSyntax {  //: _MemberBlockLike {
       )
     }
   }
+
   // fileprivate func _forEachMember(_ perform: (DeclSyntax) -> Void) {
   //   for listItem in self {
   //     guard case .decl(let decl) = listItem.item else { continue }

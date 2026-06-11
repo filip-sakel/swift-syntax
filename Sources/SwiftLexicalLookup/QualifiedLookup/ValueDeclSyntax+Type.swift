@@ -44,6 +44,19 @@ extension ValueDeclSyntax {
   }
 }
 
+// MARK: Type in SymbolTable
+//
+// E.g.
+// func f() {
+//   struct A {
+//     struct B {
+//       struct A {
+//         func f(a: A) -> Self {} // <- Looking up `A` and `Self` here resolves to `A.B.A`
+//      }
+//     }
+//   }
+// }
+
 extension TokenSyntax {
   // enum IdentifierTypeLookupFailure: Error {
   //   /// Can't use `Self` in a non-child of a nominal type declaration or extension.
@@ -68,75 +81,75 @@ extension TokenSyntax {
   // TODO: This method is only useful for resolving `Self` (kind of)
 
   /// Returns the declarations the given identifier syntax might refer to.
-  func asTypeIdentifier() -> [ValueDeclSyntax] {
-    // Find first nominal-type parent. Note that we can cross declaration-scope boundaries, e.g.
-    //   struct A {
-    //     func f() { // <- declaration-scope boundary
-    //       var a: Self = A() // `Self` -> `A`
-    //     }
-    //   }
-    // if typeID.tokenKind == .keyword(.Self) {
-    //
-    // }
-
-    // Convert to identifier
-    guard let typeID = self.identifier else { return [] }
-
-    let results = lookup(typeID, with: LookupConfig(_lookupTopScope: true))
-    results.flatMap({ result -> [TypeSyntax] in
-      switch result {
-      case .fromScope(let scope, let names):
-        // Note that we skip non-type declarations, even if they have the same name.
-        // For instance:
-        //   struct A {
-        //     func f() {
-        //       let A = 1
-        //       func A() {}
-        //       var hey: A  = self
-        //     }
-        //   }
-        names.compactMap({ name -> TypeSyntax? in
-          switch name {
-          case .implicit(.`Self`(let decl)):
-            // TODO: Should probably be DeclGroupSyntax to begin with
-            guard let groupDecl = decl.as(DeclGroupSyntaxType.self) else { return nil }
-            return groupDecl.type
-          case .declaration(let decl):
-            // Skip non-type declarations
-            guard
-              let valueDecl = decl.as(ValueDeclSyntax.self),
-              let typeName = valueDecl.typeName
-            else { return nil }
-
-            return TypeSyntax(IdentifierTypeSyntax(name: typeName))
-          // Identifiers, `self`, `newValue`, `error`, and `oldValue` can't be type decls.
-          case .identifier, .implicit(.`self`), .implicit(.newValue), .implicit(.oldValue), .implicit(.error):
-            return nil
-          }
-        })
-      case .lookForMembers(let declGroup):
-        let typeDecls = declGroup.findDirectMembers(
-          name: DeclNameRef(baseName: .identifier(identifier: typeID, args: nil)),
-          kind: .includeTypes
-        )
-        return typeDecls.compactMap({ typeDecl in
-          guard let typeName = typeDecl.typeName else {
-            assertionFailure("[SwiftLexicalLookup] Internal Error: Expected type-only lookup to yield only types.")
-          }
-          return TypeSyntax(IdentifierTypeSyntax(name: typeName))
-        })
-      case .lookForGenericParameters(let genericParams):
-        return TypeSyntax(
-          IdentifierTypeSyntax(
-            name: TokenSyntax.init(.identifier(typeID), presence: .present).with(\.position, genericParams.position)
-          )
-        )
-      // Closure parameters can't be type declarations
-      case .lookForImplicitClosureParameters(_):
-        return []
-      }
-    })
-  }
+  // func asTypeIdentifier() -> [ValueDeclSyntax] {
+  //   // Find first nominal-type parent. Note that we can cross declaration-scope boundaries, e.g.
+  //   //   struct A {
+  //   //     func f() { // <- declaration-scope boundary
+  //   //       var a: Self = A() // `Self` -> `A`
+  //   //     }
+  //   //   }
+  //   // if typeID.tokenKind == .keyword(.Self) {
+  //   //
+  //   // }
+  //
+  //   // Convert to identifier
+  //   guard let typeID = Identifier(validating: self) else { return [] }
+  //
+  //   let results = lookup(typeID, with: LookupConfig(_lookupTopScope: true))
+  //   results.flatMap({ result -> [TypeSyntax] in
+  //     switch result {
+  //     case .fromScope(let scope, let names):
+  //       // Note that we skip non-type declarations, even if they have the same name.
+  //       // For instance:
+  //       //   struct A {
+  //       //     func f() {
+  //       //       let A = 1
+  //       //       func A() {}
+  //       //       var hey: A  = self
+  //       //     }
+  //       //   }
+  //       names.compactMap({ name -> TypeSyntax? in
+  //         switch name {
+  //         case .implicit(.`Self`(let decl)):
+  //           // TODO: Should probably be DeclGroupSyntax to begin with
+  //           guard let groupDecl = decl.as(DeclGroupSyntaxType.self) else { return nil }
+  //           return groupDecl.type
+  //         case .declaration(let decl):
+  //           // Skip non-type declarations
+  //           guard
+  //             let valueDecl = decl.as(ValueDeclSyntax.self),
+  //             let typeName = valueDecl.typeName
+  //           else { return nil }
+  //
+  //           return TypeSyntax(IdentifierTypeSyntax(name: typeName))
+  //         // Identifiers, `self`, `newValue`, `error`, and `oldValue` can't be type decls.
+  //         case .identifier, .implicit(.`self`), .implicit(.newValue), .implicit(.oldValue), .implicit(.error):
+  //           return nil
+  //         }
+  //       })
+  //     case .lookForMembers(let declGroup):
+  //       let typeDecls = declGroup.findDirectMembers(
+  //         name: DeclNameRef(baseName: .identifier(identifier: typeID, args: nil)),
+  //         kind: .includeTypes
+  //       )
+  //       return typeDecls.compactMap({ typeDecl in
+  //         guard let typeName = typeDecl.typeName else {
+  //           assertionFailure("[SwiftLexicalLookup] Internal Error: Expected type-only lookup to yield only types.")
+  //         }
+  //         return TypeSyntax(IdentifierTypeSyntax(name: typeName))
+  //       })
+  //     case .lookForGenericParameters(let genericParams):
+  //       return TypeSyntax(
+  //         IdentifierTypeSyntax(
+  //           name: TokenSyntax.init(.identifier(typeID), presence: .present).with(\.position, genericParams.position)
+  //         )
+  //       )
+  //     // Closure parameters can't be type declarations
+  //     case .lookForImplicitClosureParameters(_):
+  //       return []
+  //     }
+  //   })
+  // }
 }
 
 @_spi(_QualifiedLookup) public indirect enum UnresolvedTypeRef: Equatable {
@@ -320,6 +333,9 @@ indirect enum TypeNameRef: Hashable {
       )
     }
     // TODO: Add sugar types like Array, Dict, InlineArray, Optional
+    // TODO: Ensure we reject `Self` and `Any` (along with metatypes, some/any, tuples, and other non nominal)
+    // TODO: We should probably reject force-unwrapped optional, e.g.,
+    //         `typealias A = Int!` and `extension Int! {}`
 
     return Result(catching: { () throws(NominalValidationFailure) -> TypeNameRef in
       // Validate base
@@ -347,12 +363,88 @@ extension Int {
   private struct A {}
 }
 
+/// The symbol table facilitates lookup. The central API consists of looking up
+/// a declaration name reference in some type syntax. For instance, in type
+/// `Int` >lookup> `bitWidth`.
+///
+/// Taking a step back, these are two operations: (1) find all declaration groups (nominal types
+/// and extensions) that `Int` refers to, and (2) look up the declaration name reference `bitWidth`
+/// in each.
+///
+/// 1. Resolving `TypeSyntax`
+///    In valid programs, any type syntax resolves will resolve to one or more extneded nominal
+///    types (we'll define these soon). Examples:
+///    a. `Int` resolves to `Swift::Int`
+///    b. `Codable` (an alias for `Encodable & Decodable`) resolves to `Swift::Encodable`
+///    `Swift::Decodable`.
+///
+///    TODO: Does it make sense to extend to `DeclName`?
+///
+///
+///    To facilitate this lookup, we give declaration names scope identifiers. There are
+///    three types of identifiers:
+///    1. External-module, top-level names
+///       For instance, `Swift::Int`, `Swift::String.Foundation::Encoding`
+///    2. Internal, top-level names
+///       For instance:
+///       ```
+///       // MyModule>FileA.swift
+///       struct A { // <- MyModule:FileA::A
+///         fileprivate struct B {} // <- MyModule:FileA::A.MyModule:FileA::B
+///       }
+///       extension String {
+///         struct C {} // <- Swift::String.MyModule:FileA::C
+///       }
+///
+///       // MyModule>FileB.swift
+///       extension A {
+///         fileprivate struct B {} // <- MyModule:FileA::A.MyModule:FileB::B
+///       }
+///     3. Internal, nested-scope names
+///
+///       ```
+///       func f() {
+///         struct A {} // (`f` scope)::A
+///       }
+///       ```
+///    either in the top-level scope or internal nested scopes. A nested scope is any `CodeBlockItemListSyntax`
+///    that's not a source file. Types declared in nested scopes aren't accessible from the top-level, e.g.,
+///    with `func f() { struct A {} }`, we have no way to access `A`. These nested scopes are called internal
+///    because we only care about them when type-checking function/accessor bodies, which we only need to
+///    do for this module, i.e., internally. Here are some examples:
+///    a. Global types in other modules
+///       // ModuleA
+///       struct A {}                 // ModuleA::A
+///       extension A { struct A {} } // ModuleA::A.A
+///    b. Global types in internal module
+///       // OurModule
+///
+///
+///    Extended nominal types consist of the the main type declaration
+///    (`[Struct/Enum/Class/Actor/Protocol]DeclSyntax`) and all the extensions referencing them.
+///    Getting the main declaration is easy as
+///
+/// 2. Looking up names in `DeclGroupSyntax`
+///    This is handled in `DeclGroupLookup` by calling `_visitDirectMembers`
 struct SymbolTable2 {
   enum MainTypeDecl {
-    case nominal(NominalTypeDeclSyntax)
+    case nominal(any NominalTypeDeclSyntax)
     case alias(TypeAliasDeclSyntax)
     case associatedType(AssociatedTypeDeclSyntax)
+
+    var decl: ValueDeclSyntax {
+      return switch self {
+      case .nominal(let decl):
+        ValueDeclSyntax(fromProtocol: decl)
+      case .alias(let decl):
+        ValueDeclSyntax(decl)
+      case .associatedType(let decl):
+        ValueDeclSyntax(decl)
+      }
+    }
   }
+
+  // TODO: Assert we have at least one `mainDecl` and provide `.mainDecl` property
   struct SourceType {
     /// We'll always show the first mainDecl, because other type decls
     /// of the same name *in the same scope* are redeclarations.
@@ -364,7 +456,10 @@ struct SymbolTable2 {
     var extensions: [ExtensionDeclSyntax] = []
     var aliasedBy: [(UnresolvedTypeRef, TypeAliasDeclSyntax)] = []
   }
-  typealias ScopeTypeMap = [TypeNameRef: SourceType]
+  /// Maps from type refs to types, and type declarations (nominal, aliases and associated types)
+  /// to type refs.
+  // TODO: Use CanonicalType for type decls, and type refs for extensions
+  typealias ScopeTypeMap = (typeToRef: [TypeNameRef: SourceType], refToType: [ValueDeclSyntax: TypeNameRef])
 
   var scopeMap = [CodeBlockItemListSyntax: ScopeTypeMap]()
   let configuredRegions: ConfiguredRegions?
@@ -394,7 +489,8 @@ func _visitDirectTypesOfDecl(
   func processMember(decl: DeclSyntax) {
     switch decl.as(DeclSyntaxEnum.self) {
     // Visit type and extension decls
-    case .structDecl, .enumDecl, .classDecl, .actorDecl, .typeAliasDecl, .associatedTypeDecl, .extensionDecl:
+    case .structDecl, .enumDecl, .classDecl, .actorDecl, .protocolDecl, .typeAliasDecl, .associatedTypeDecl,
+      .extensionDecl:
       visit(decl)
     // Recursively handle if-configs
     case .ifConfigDecl(let ifConfigDecl):
@@ -425,44 +521,13 @@ func _visitDirectTypesOfDecl(
 }
 
 extension SymbolTable2 {
-  func visitBlock(
-    in parentType: some NominalTypeDeclSyntax,
-    base: TypeNameRef?,
-    module: Identifier?,
-    addingTo results: inout [TypeNameRef: SourceType]
-  ) {
-    //   // Visit type decls and store names
-    //   // TODO: Add configured regions
-    //   parentType.visitDirectMembers(configuredRegions: nil, visit: { valueDecl in
-    //     // Only process type declarations (only type decls have type names)
-    //     guard let typeNameToken = valueDecl.typeName, let typeID = Identifier(validating: typeNameToken) else {
-    //       return
-    //     }
-    //
-    //     let typeRef = TypeNameRef.member(base: base, moduleName: module, name: typeID)
-    //
-    //     let sourceType: SourceType
-    //     if let nominalDecl = valueDecl.asProtocol((any NominalTypeDeclSyntax).self) {
-    //       sourceType = .nominal(mainDecl: nominalDecl, extensions: [])
-    //     } else if let typeAliasDecl = valueDecl.as(TypeAliasDeclSyntax.self) {
-    //       sourceType = .alias(typeAliasDecl)
-    //     } else if let associatedTypeDecl = valueDecl.as(AssociatedTypeDeclSyntax.self) {
-    //       sourceType = .associatedType(associatedTypeDecl)
-    //     } else {
-    //       assertionFailure("[SwiftLexicalLookup] Internal error: No other known type/value declarations")
-    //       return
-    //     }
-    //
-    //     results[typeRef, default: []].append(sourceType)
-    //   })
-  }
-
   // TODO: Do we need to get into the child scopes?
   func mapScopeTypes(
     scope: CodeBlockItemListSyntax,
     moduleName: Identifier?
-  ) -> [TypeNameRef: SourceType] {
-    var results = [TypeNameRef: SourceType]()
+  ) -> ScopeTypeMap {
+    var refToType = [TypeNameRef: SourceType]()
+    var typeToRef = [ValueDeclSyntax: TypeNameRef]()
     // Other decls we need to handle.
     var unvisitedTypes = [(typeRef: TypeNameRef?, nominalType: any NominalTypeDeclSyntax)]()
 
@@ -478,6 +543,7 @@ extension SymbolTable2 {
     // refer to it as `A` from the body of the function. However, `B`'s parent type
     // reference is `A`, since we can write `A.B` to access the nested struct from
     // the body of the function.
+    // TODO: Include protocols as nominal types
     func processDecl(_ decl: DeclSyntax, parentTypeRef: TypeNameRef?) {
       // Handle extensions
       if let extensionDecl = decl.as(ExtensionDeclSyntax.self) {
@@ -486,7 +552,9 @@ extension SymbolTable2 {
           return
         }
         // Add extended type
-        results[typeRef, default: SourceType()].extensions.append(extensionDecl)
+        refToType[typeRef, default: SourceType()].extensions.append(extensionDecl)
+        // Note we don't reference extensions back (it's trivial to get .extendedType from
+        // an extension decl)
         return
       }
 
@@ -506,7 +574,8 @@ extension SymbolTable2 {
       // Add the main decl
       guard let typeName = Identifier(validating: typeNameToken) else { return }
       let typeRef = TypeNameRef.member(base: parentTypeRef, moduleName: moduleName, name: typeName)
-      results[typeRef, default: SourceType()].mainDecls.append(mainDecl)
+      refToType[typeRef, default: SourceType()].mainDecls.append(mainDecl)
+      typeToRef[mainDecl.decl] = typeRef
       // Add nominal types to queue
       if case .nominal(let nominalType) = mainDecl {
         unvisitedTypes.append((typeRef, nominalType))
@@ -542,7 +611,7 @@ extension SymbolTable2 {
       }
     }
 
-    return results
+    return (refToType, typeToRef)
   }
 
   // // Extensions are only valid at file scope.
@@ -575,5 +644,256 @@ extension SymbolTable2 {
       }
       yield map
     }
+  }
+}
+
+// MARK: Resolving TypeRefs
+enum ResolvedScope {
+  // We can't access non-file scopes from other modules, and
+  // everything in file-scope declared public/internal must be unique
+  // for lookup purposes.
+  //
+  // Note that `internal` is accessible under `@usableFromInline`-like attributes.
+  case externalModule(Identifier)
+  // We might have multiple declarations at module scope so we need a fileID
+  // to discriminate.
+  //
+  // For instnace, the following is common:
+  //   // FileA.swift
+  //   fileprivate struct A {}
+  //   // FileB.swift
+  //   fileprivate struct A {}
+  //
+  // Note that `private` is often interpreted as fileprivate:
+  //   extension Int {
+  //     private struct A {}
+  //   }
+  //   extension Int {
+  //     private struct A {} // <- Invalid redeclaration of `A`
+  //   }
+  // So lookup is unambiguous after specifying the fileID.
+  case internalModule(fileID: SyntaxIdentifier)
+  // Each nested scope allows for one valid declaration.
+  //
+  // E.g. A function body, variable accessor, `do` body.
+  // Because nested scopes can't be extended, we don't have to worry
+  // about multiple types of the same name (see `internalModule` above)
+  case internalNested(CodeBlockItemListSyntax)
+}
+
+indirect enum ResolvedTypeName {
+  case member(base: ResolvedTypeName?, scope: ResolvedScope, typeName: Identifier)
+}
+
+struct Module {
+  let name: Identifier
+  let interfaceSyntax: SourceFileSyntax
+}
+
+extension SymbolTable2 {
+  enum ResolutionFailure: Error {
+    case typeNotFound(TypeNameRef)
+    case invalidScope
+  }
+
+  func moduleLookup(module: Identifier, name: DeclNameRef) {}
+  func moduleLookup(module: Identifier, typeName: Identifier) {}
+
+  func internalLookup(decl)
+
+  // Resolves a type reference to a source type (with at least one) main declaration.
+  // Returns appropriate error if not possible.
+  //
+  // Handles:
+  // 1. Same top-level names in a module, e.g.:
+  //
+  // E.g.
+  //
+  // // FileA.swift
+  // extension Int {
+  //   fileprivate struct A {}
+  // }
+  // // FileB.swift
+  // extension Int.A {} // <- What does Int.A refer to?
+  //
+  // We resolve to `Swift::Int.OurModule::FileA.swift:A`
+  // In this case, `Int.A` does to FileA's scope Int.A
+  //
+  // 2. Same names across modules, e.g.:
+  //   // FileA.swift
+  //   fileprivate struct Int {}
+  //   // FileB.swift
+  //   fileprivate struct Int {}
+  //   extension Int {} // <- Refers to OurModule::FileB:Int
+  func resolveTypeRef(_ typeRef: TypeNameRef, in scope: CodeBlockItemListSyntax, moduleName: Identifier?) -> Result<ResolvedTypeName, ResolutionFailure> {
+    // Get base type
+    func getBaseTypeRef(typeRef: TypeNameRef) -> TypeNameRef {
+      switch typeRef {
+      case .member(let base?, _, _):
+        base
+      default:
+        typeRef
+      }
+    }
+    // let baseType: (moduleName: Identifier?, typeName: Identifier) = switch getBaseTypeRef(typeRef: typeRef) {
+    //   case .member(_, let moduleName, let typeName): (moduleName, typeName)
+    // }
+    let baseType = getBaseTypeRef(typeRef: typeRef)
+
+    func isInternal(moduleName queryName: Identifier?) -> Bool {
+      moduleName == queryName
+    }
+
+    switch typeRef {
+    case .member(base: nil, let moduleName, let typeName):
+      guard isInternal(moduleName: moduleName) else {
+        fatalError("[SwiftLexicalLookup] Module lookup not yet implemented")
+      }
+
+      guard let scope = scopeMap[scope] else {
+        return .failure(.invalidScope)
+      }
+      guard let
+    case .member(let base?, let moduleName, let typeName):
+    }
+
+
+    // Find base type in scope
+    // FIXME: Here we assume this is a top-level type ref
+    guard let baseTypeSource = scopeMap[scope]?.typeToRef[baseType] else {
+      return .failure(.typeNotFound(baseType))
+    }
+    guard let mainDecl = baseTypeSource.mainDecls.first else {
+      fatalError("[SwiftLexicalLookup] Internal Error: Type map should have at least one main declaration.")
+    }
+
+  }
+}
+
+// MARK: IdType -> SourceType
+
+extension SymbolTable {
+  enum TypeIDResult {
+    // Look inside members of the given DeclGroupSyntax
+    // E.g.
+    //   struct A {
+    //     struct B {
+    //       func f() -> A {} // Look up `A`
+    //     }
+    //   }
+    //   extension A.B {
+    //     struct A {}
+    //   }
+    // In this case, `A` resolves to `A.B.A`. If we removed the extension, it would
+    // instead refer to `A`. Hence, we need to look inside `A.B` first, and then
+    // consider `A` if we get no results.
+    case lookInside(DeclGroupSyntaxType)
+
+    // E.g. the return type `A` in `struct A { struct B { func f() -> A { ... } } }` refers
+    // to the decl `struct A`.
+    case mainTypeDecl(ValueDeclSyntax)
+    // A top-level reference to a type generated by an extension.
+    //
+    // E.g. `Self` in `extension Int { func f() -> Self { ... } }`
+    // references `Int`.
+    //
+    // Top-level reference means the type is `Int` relative to the file scope.
+    case fileScopeReference(TypeNameRef)
+    case genericParameter
+    // Always emitted at the end
+    // case lookInModule
+    // case lookInImportedModule
+
+    func resolve() {
+      // For main decl, get typeref
+      // For lookInside with nominal, get nominal's typeref
+      // For lookInside with extension, resolve extended-type ref, look up name in typeref
+      // For fileScopeReference, resolve typeref
+      // For generic param, give up
+    }
+  }
+
+  func findTypeID(
+    _ typeName: TokenSyntax
+  ) -> [DeclSyntax] {
+    // Find first nominal-type parent. Note that we can cross declaration-scope boundaries, e.g.
+    //   struct A {
+    //     func f() { // <- declaration-scope boundary
+    //       var a: Self = A() // `Self` -> `A`
+    //     }
+    //   }
+    // if typeID.tokenKind == .keyword(.Self) {
+    //
+    // }
+
+    // Convert to identifier
+    guard let typeID = Identifier(validating: typeName) else { return [] }
+
+    // TODO: Handle generic type decls (show up as a .fromScope(GenericParameterSyntax))
+    func handleDecl(_ decl: DeclSyntax) -> Bool {
+      return switch decl.kind {
+      case .structDecl, .enumDecl, .classDecl, .actorDecl, .protocolDecl,
+        .typeAliasDecl, .associatedTypeDecl:
+        self[scope:]
+      default:
+        false
+      }
+    }
+
+    let results = typeName.lookup(typeID, with: LookupConfig(_lookupTopScope: true))
+    results.flatMap({ result -> [TypeSyntax] in
+      switch result {
+      case .fromScope(let scope, let names):
+        // Note that we skip non-type declarations, even if they have the same name.
+        // For instance:
+        //   struct A {
+        //     func f() {
+        //       let A = 1
+        //       func A() {}
+        //       var hey: A  = self
+        //     }
+        //   }
+        names.compactMap({ name -> TypeSyntax? in
+          switch name {
+          case .implicit(.`Self`(let decl)):
+            // TODO: Should probably be DeclGroupSyntax to begin with
+            guard let groupDecl = decl.as(DeclGroupSyntaxType.self) else { return nil }
+            return groupDecl.type
+          case .declaration(let decl):
+            // Skip non-type declarations
+            guard
+              let valueDecl = decl.as(ValueDeclSyntax.self),
+              let typeName = valueDecl.typeName
+            else { return nil }
+
+            return TypeSyntax(IdentifierTypeSyntax(name: typeName))
+          // Identifiers, `self`, `newValue`, `error`, and `oldValue` can't be type decls.
+          case .identifier, .implicit(.`self`), .implicit(.newValue), .implicit(.oldValue), .implicit(.error):
+            return nil
+          }
+        })
+      case .lookForMembers(let declGroup):
+        // let typeDecls = declGroup.findDirectMembers(
+        //   name: DeclNameRef(baseName: .identifier(identifier: typeID, args: nil)),
+        //   kind: .includeTypes
+        // )
+        // return typeDecls.compactMap({ typeDecl in
+        //   guard let typeName = typeDecl.typeName else {
+        //     assertionFailure("[SwiftLexicalLookup] Internal Error: Expected type-only lookup to yield only types.")
+        //   }
+        //   return TypeSyntax(IdentifierTypeSyntax(name: typeName))
+        // })
+        declGroup.
+      case .lookForGenericParameters(let genericParams):
+        return TypeSyntax(
+          IdentifierTypeSyntax(
+            name: TokenSyntax.init(.identifier(typeID), presence: .present).with(\.position, genericParams.position)
+          )
+        )
+      // Closure parameters can't be type declarations
+      case .lookForImplicitClosureParameters(_):
+        return []
+      }
+    })
   }
 }
