@@ -573,6 +573,7 @@ final class TestNameLookup: XCTestCase {
         """,
       references: [
         "3️⃣": [
+          // TODO: Shouldn't we also return a `.fromScope(StructDeclSyntax.self, expectedNames: .implicit(.Self(...))`
           .lookForMembers(StructDeclSyntax.self),
           .fromScope(ExtensionDeclSyntax.self, expectedNames: [NameExpectation.implicit(.Self("7️⃣"))]),
           .lookForGenericParameters,

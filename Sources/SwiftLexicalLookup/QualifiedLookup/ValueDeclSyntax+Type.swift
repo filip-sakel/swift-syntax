@@ -470,8 +470,51 @@ extension Int {
 ///    (`[Struct/Enum/Class/Actor/Protocol]DeclSyntax`) and all the extensions
 ///    referencing them. Hence, to find the extended nominal type, we follow
 ///    the steps below:
-///    1. Get the referenced type declaration.
-///       // TODO: Handle module selectors
+///    1. Get the referenced base type declaration.
+///       Looking at the base of the member type syntax, there are two possibilities:
+///       1. There's a module selector => perform top-level, external-module lookup
+///
+///          To see why we say top-level, consider the following example:
+///            extension String {
+///              func f(_: Swift::UTF8View) {} // ❌ `UTF8View` not imported through swift
+///              func g(_: UTF8View, _: Self..Swift::UTF8View) {} // ✅
+///            }
+///            let _: String.Swift::UTF8View // ✅
+///          Hence, despite `UTF8View` being a valid declaration within `String`,
+///          when we write `Swift::UTF8View`, we don't just filter normal qualified
+///          lookup to type declarations introduced in `Swift`, but we use a
+///          completely different process entirely.
+///
+///        2. There's only an identifier => unqualified lookup
+///
+///           Namely, we go up the syntax tree and look at potential names using
+///           `SyntaxProtocol/lookup(_:with:)`, including top-level results.
+///           We choose the first name that refers to a type declaration or extension:
+///           1. Look for names in scope
+///              a. Declaration -> try to cast to `DeclGroupSyntax`
+///              b. Implicit `Self` -> return associated `DeclGroupSyntax
+///              c. Else -> continue
+///                 Identifier cannot represent type syntax. Equivalent names
+///                 only occur in `switch` cases. Other implicit names (`self`,
+///                 `newValue`, `oldValue`, `error`) can't be types.
+///
+///           2. Look for members in declaration group
+///              Resolve declaration group to extended nominal type
+///              and perform qualified lookup.
+///
+///           3. Generic parameters -> return (considered type declarations)
+///
+///           4. Implicit closure parameters -> continue (can't be type syntax)
+///
+///           If none of these yield any results, perform top-level lookup
+///           in our internal module, then top-level lookup in (implicitly)
+///           imported modules
+///           (TODO: Handle @_exported imports, specify shadowing order for
+///                  imports)
+///
+///           Now, we should have a type declaration or extension. If we have
+///           an extension, e.g. when searching for `Self` in `extension Int { func f(_: Self) }`,
+///           we need to resolve the extended type.
 ///
 ///       We get the main declaration by performing unqualified lookup from the
 ///       position of the type syntax looking for the base type name. For instance:
@@ -486,7 +529,7 @@ extension Int {
 /// │     If unqualified lookup decides not to lie to us, we should get the nested
 /// │     `struct A` declaration. This lookup is similar to the compiler's
 /// │     `directReferencesForUnqualifiedTypeLookup`.
-/// │
+///
 /// │  2. Resolve to a main nominal-type declaration.
 /// │      Unqualified lookup simply returns a type declaration, which could be a:
 /// │      a. Nominal type: great! we can move onto the next step

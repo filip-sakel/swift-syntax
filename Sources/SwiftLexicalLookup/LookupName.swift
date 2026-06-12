@@ -152,6 +152,9 @@ public enum LookupName {
   /// ```
   /// For lookup at the given position, the result
   /// contains only one name, that represents both `let x` declarations.
+  ///
+  /// This result is currently returned only for switch expressions
+  /// whose cases introduce matching names.
   case equivalentNames([LookupName])
 
   /// Syntax associated with this name.
