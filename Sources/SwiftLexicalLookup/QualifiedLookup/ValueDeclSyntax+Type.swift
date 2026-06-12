@@ -399,14 +399,35 @@ extension Int {
 ///       a. File IDs aren't necessary in external modules because
 ///          we can assume everything comes in one module interface file
 ///          where everything is public, or internal (e.g. for `@usableFromInline`).
-///       b. File IDs are granular enough for internal declarations. Ultimately,
-///          most times we use `private`, it's interpreted as `fileprivate`:
-///            // MyFile.swift
-///            extension Int {
-///              private struct A {}
+///       b. File IDs are granular enough for internal declarations. That's because
+///          we can't declare types of the same name in the same type within the
+///          same file.
+///
+///          Though, `private` is a little peculiar because it acts both as a lexical
+//           and semantic access-control modifier (see
+///          https://docs.swift.org/swift-book/documentation/the-swift-programming-language/accesscontrol/#Private-Members-in-Extensions)
+///          Namely, we can access private declarations across extensions/main
+///          declarations in the same file:
+///            struct A {
+///              private typealias T = Int
+///              struct B {
+///                // `T` is private to type `A`, but `B` can access it as
+///                // it's within the main declaration of `A` (lexical behavior)
+///                private func f(x: T) {}
+///              }
 ///            }
-///            extension Int {
-///              private struct A {} // ❌ Invalid redeclaration of `A`
+///
+///            extension A {
+///              // `T` is accessible to extensions of `A` in the *same file*
+///              // (semantic because we extend `A`)
+///              private func g(x: T) {}
+///              typealias T = Int // ❌ Invalid redeclaration
+///            }
+///
+///            extension A.B {
+///              // We meet neither the lexical (not nested in `A`) nor
+///              // semantic criteria (not an extension of `A`).
+///              private func g(x: T) {} // ❌ Cannot find `T` in scope
 ///            }
 ///
 ///        Examples include:
