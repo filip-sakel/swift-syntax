@@ -13,5 +13,7 @@
 import SwiftSyntax
 
 extension NominalTypeDeclSyntax2 {
-  var qualifiedTypeName:
+  var qualifiedTypeName: QualifiedTypeName {
+
+  }
 }

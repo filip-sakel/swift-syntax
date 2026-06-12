@@ -35,3 +35,81 @@ import SwiftSyntax
     ])
   }
 }
+
+extension NominalTypeDeclSyntax2: DeclGroupSyntax {
+  private func _getGroupProp<T>(_ prop: KeyPath<(any DeclGroupSyntax), T>) -> T {
+    switch _syntaxNode.as(SyntaxEnum.self) {
+    case .structDecl(let declGroup):
+      return declGroup[keyPath: prop]
+    case .enumDecl(let declGroup):
+      return declGroup[keyPath: prop]
+    case .classDecl(let declGroup):
+      return declGroup[keyPath: prop]
+    case .actorDecl(let declGroup):
+      return declGroup[keyPath: prop]
+    case .protocolDecl(let declGroup):
+      return declGroup[keyPath: prop]
+    default:
+      fatalError("[Internal Error] Invalid syntax kind for NominalTypeDeclSyntax \(_syntaxNode.kind)")
+    }
+  }
+
+  private mutating func _setGroupProp<T>(
+    _ keyPath: WritableKeyPath<(any DeclGroupSyntax), T>,
+    newValue: T
+  ) {
+    switch _syntaxNode.as(SyntaxEnum.self) {
+    case .structDecl(let declGroup):
+      var box: any DeclGroupSyntax = declGroup
+      box[keyPath: keyPath] = newValue
+      _syntaxNode = box._syntaxNode
+    case .enumDecl(let declGroup):
+      var box: any DeclGroupSyntax = declGroup
+      box[keyPath: keyPath] = newValue
+      _syntaxNode = box._syntaxNode
+    case .classDecl(let declGroup):
+      var box: any DeclGroupSyntax = declGroup
+      box[keyPath: keyPath] = newValue
+      _syntaxNode = box._syntaxNode
+    case .actorDecl(let declGroup):
+      var box: any DeclGroupSyntax = declGroup
+      box[keyPath: keyPath] = newValue
+      _syntaxNode = box._syntaxNode
+    case .protocolDecl(let declGroup):
+      var box: any DeclGroupSyntax = declGroup
+      box[keyPath: keyPath] = newValue
+      _syntaxNode = box._syntaxNode
+    default:
+      fatalError("[Internal Error] Invalid syntax kind for DeclGroupSyntaxType: \(_syntaxNode.kind)")
+    }
+  }
+
+  public var attributes: AttributeListSyntax {
+    get { _getGroupProp(\.attributes) }
+    set { _setGroupProp(\.attributes, newValue: newValue) }
+  }
+
+  public var modifiers: DeclModifierListSyntax {
+    get { _getGroupProp(\.modifiers) }
+    set { _setGroupProp(\.modifiers, newValue: newValue) }
+  }
+  public var introducer: TokenSyntax {
+    get { _getGroupProp(\.introducer) }
+    set { _setGroupProp(\.introducer, newValue: newValue) }
+  }
+
+  public var inheritanceClause: InheritanceClauseSyntax? {
+    get { _getGroupProp(\.inheritanceClause) }
+    set { _setGroupProp(\.inheritanceClause, newValue: newValue) }
+  }
+
+  public var genericWhereClause: GenericWhereClauseSyntax? {
+    get { _getGroupProp(\.genericWhereClause) }
+    set { _setGroupProp(\.genericWhereClause, newValue: newValue) }
+  }
+
+  public var memberBlock: MemberBlockSyntax {
+    get { _getGroupProp(\.memberBlock) }
+    set { _setGroupProp(\.memberBlock, newValue: newValue) }
+  }
+}

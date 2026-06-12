@@ -51,7 +51,6 @@ public struct DeclGroupSyntaxType: SyntaxProtocol {
     }
   }
   private mutating func _setGroupProp<T>(
-    // _ visitor: some _DeclGroupVisitor<T>, newValue: T
     _ keyPath: WritableKeyPath<(any DeclGroupSyntax), T>,
     newValue: T
   ) {
