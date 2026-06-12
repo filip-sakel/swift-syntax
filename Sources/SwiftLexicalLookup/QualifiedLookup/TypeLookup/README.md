@@ -116,11 +116,18 @@ b. Nested-scope types are only relevant for internal declarations.
 
   Hence, we don't need to specify the module; it's implicitly our module.
 
-## Direct Lookup
+## Direct Qualified Lookup
 
 Given a nominal type --meaning its main declaration and extensions-- we can look through each one to find the types direct members. We say directly because we don't look into supertypes (inherited protocols, superclasses, etc.).
 
-We can, further, filter this lookup to directly look for type members.
+// TODO: Explain how this qualified lookup handles module selectors.
+
+We can, further, filter this lookup to directly look for type members (`directReferencesForQualifiedTypeLookup` in the compiler). In this codebase, we call `_visitDirectMembers` on each `DeclGroupSyntax` of the extended nominal type, and filter down to type declarations.
+
+## Finding Members in Nominal Type
+There are three cases depending on the type:
+a. Nominal type: call `_visitDirectMembers` on the main declaration
+  and extensions' 'DeclGroupSyntax'
 
 # Process
 
@@ -166,124 +173,96 @@ Finally, we merge all results.
 
 ### Resolving `IdentifierTypeSyntax`
 
-Extended nominal types consist of the main type declaration
-(`[Struct/Enum/Class/Actor/Protocol]DeclSyntax`) and all the extensions
-referencing them. Hence, to find the extended nominal type, we follow
-the steps below:
-1. Get the referenced base type declaration.
-  Looking at the base of the member type syntax, there are two possibilities:
-  1. There's a module selector => perform top-level, external-module lookup
+As explained above, (extended) nominal types consist of the main type declaration (`[Struct/Enum/Class/Actor/Protocol]DeclSyntax`) and all the extensions referencing them. So we first find the main declaration, then get its *qualified* type name (also defined above), and use the qualified type name to find the type's extensions.
 
-      To see why we say top-level, consider the following example:
-        extension String {
-          func f(_: Swift::UTF8View) {} // ❌ `UTF8View` not imported through swift
-          func g(_: UTF8View, _: Self..Swift::UTF8View) {} // ✅
-        }
-        let _: String.Swift::UTF8View // ✅
-      Hence, despite `UTF8View` being a valid declaration within `String`,
-      when we write `Swift::UTF8View`, we don't just filter normal qualified
-      lookup to type declarations introduced in `Swift`, but we use a
-      completely different process entirely.
+With the resolved nominal type, we can simply use direct lookup (described above) to find the desired declaration.
 
-    2. There's only an identifier => unqualified lookup
+#### Resolving the Main Declaration
 
-      Namely, we go up the syntax tree and look at potential names using
-      `SyntaxProtocol/lookup(_:with:)`, including top-level results.
-      We choose the first name that refers to a type declaration or extension:
-      1. Look for names in scope
-          a. Declaration -> try to cast to `DeclGroupSyntax`
-          b. Implicit `Self` -> return associated `DeclGroupSyntax
-          c. Else -> continue
-            Identifier cannot represent type syntax. Equivalent names
-            only occur in `switch` cases. Other implicit names (`self`,
-            `newValue`, `oldValue`, `error`) can't be types.
+##### Finding the Main Declaration
+Looking at the base of the member type syntax, there are two possibilities (this step is similar to the compiler's ` `directReferencesForUnqualifiedTypeLookup``):
+1. There's a module selector => perform top-level, external-module lookup
 
-      2. Look for members in declaration group
-          Resolve declaration group to extended nominal type
-          and perform qualified lookup.
-
-      3. Generic parameters -> return (considered type declarations)
-
-      4. Implicit closure parameters -> continue (can't be type syntax)
-
-      If none of these yield any results, perform top-level lookup
-      in our internal module, then top-level lookup in (implicitly)
-      imported modules
-      (TODO: Handle @_exported imports, specify shadowing order for
-              imports)
-
-      Now, we should have a type declaration or extension. If we have
-      an extension, e.g. when searching for `Self` in `extension Int { func f(_: Self) }`,
-      we need to resolve the extended type.
-
-  We get the main declaration by performing unqualified lookup from the
-  position of the type syntax looking for the base type name. For instance:
-    struct A {
-      func f() {
-        struct A {
-          func g(a: A) {}
-                    `- Lookup `A` from here
-        }
+    To see why we say top-level, consider the following example:
+      extension String {
+        func f(_: Swift::UTF8View) {} // ❌ `UTF8View` not imported through swift
+        func g(_: UTF8View, _: Self..Swift::UTF8View) {} // ✅
       }
-    }
-│     If unqualified lookup decides not to lie to us, we should get the nested
-│     `struct A` declaration. This lookup is similar to the compiler's
-│     `directReferencesForUnqualifiedTypeLookup`.
+      let _: String.Swift::UTF8View // ✅
+    Hence, despite `UTF8View` being a valid declaration within `String`,
+    when we write `Swift::UTF8View`, we don't just filter normal qualified
+    lookup to type declarations introduced in `Swift`, but we use a
+    completely different process entirely.
 
-│  2. Resolve to a main nominal-type declaration.
-│      Unqualified lookup simply returns a type declaration, which could be a:
-│      a. Nominal type: great! we can move onto the next step
-├───── b. Type alias: we need to recursively resolve the aliased type syntax
-│      c. Associated type or generic parameter: we can't do much here (TODO:: Check the compiler also gives up)
-│
-│  3. Fully qualify the main type declaration.
-│     We go up the syntax tree to find the first `CodeBlockItemListSyntax`
-│     ancestor; this is our scope. There are two cases:
-│     a. Our main declaration is a direct child of the scope node, so
-│        we can qualify it:
-│         i. If the scope's parent is a `SourceFileSyntax`, this is a
-│            top-level name whose fully qualified name is:
-│              MyModule(MyFile.swift)::MyType`.
-│            E.g. In FileA.swift `struct A {}` becomes `MyModue(FileA.swift)::A`.
-│        ii. Otherwise, we have a nested scope. The qualified name is:
-│              (nested scope)->MyType
-│            E.g. `func f() { struct A{} }` becomes `(f scope)->A`
-│     b. Our main declaration has a declaration-group (nominal type declaration
-│        or extension) parent, which we need to qualify first.
-│         i. If the declaration-group parent is a nominal-type declaration,
+2. There's only an identifier => unqualified lookup
+
+  Namely, we go up the syntax tree and look at potential names using
+  `SyntaxProtocol/lookup(_:with:)`, including top-level results.
+  We choose the first name that refers to a type declaration or extension:
+  1. Look for names in scope
+      a. Declaration -> try to cast to `DeclGroupSyntax`
+      b. Implicit `Self` -> return associated `DeclGroupSyntax
+      c. Else -> continue
+        Identifier cannot represent type syntax. Equivalent names
+        only occur in `switch` cases. Other implicit names (`self`,
+        `newValue`, `oldValue`, `error`) can't be types.
+
+  2. Look for members in declaration group
+      Resolve declaration group to extended nominal type
+      and perform qualified lookup.
+
+  3. Generic parameters -> return (considered type declarations)
+
+  4. Implicit closure parameters -> continue (can't be type syntax)
+
+  If none of these yield any results, perform top-level lookup
+  in our internal module, then top-level lookup in (implicitly)
+  imported modules
+  (TODO: Handle @_exported imports, specify shadowing order for
+          imports)
+
+  Now, we should have a type declaration or extension. If we have
+  an extension, e.g. when searching for `Self` in `extension Int { func f(_: Self) }`,
+  we need to resolve the extended type.
+
+##### Resolving to Main Nominal-Type Declaration
+Unqualified lookup simply returns a type declaration, which could be a:
+a. Nominal type: great! we can move onto the next step
+b. Type alias: we need to recursively resolve the aliased type syntax
+c. Associated type or generic parameter: we can't do much here (TODO: Check the compiler also gives up)
+
+#### Obtaining Fully Qualified Type
+
+We go up the syntax tree to find the first `CodeBlockItemListSyntax` ancestor; this is our scope. There are two cases:
+1. Our main declaration is a direct child of the scope node, so
+    we can qualify it:
+    i. If the scope's parent is a `SourceFileSyntax`, this is a
+        top-level name whose fully qualified name is:
+          MyModule(MyFile.swift)::MyType`.
+        E.g. In FileA.swift `struct A {}` becomes `MyModue(FileA.swift)::A`.
+    ii. Otherwise, we have a nested scope. The qualified name is:
+          (nested scope)->MyType
+        E.g. `func f() { struct A{} }` becomes `(f scope)->A`
+2. Our main declaration has a declaration-group (nominal type declaration
+    or extension) parent, which we need to qualify first.
+    i. If the declaration-group parent is a nominal-type declaration,
 │            we go to step (1).
-╰─────── ii. If the declaration-group parent is an extension, recursively
-          resolve the extended type syntax. Since we can only extend
-          nominal types, the resolved type syntax should give us one
-          extended nominal-type declaration. Based on the parent's type
-          id, we construct this type's id:
-          1. if the parent is a top-level id, we have:
-              <parent id>.MyModule(MyFile.swift)::MyType
-          2. if the parent is a nested scope, we have:
-              <parent id>.MyType
+    ii. If the declaration-group parent is an extension, recursively
+    resolve the extended type syntax. Since we can only extend
+    nominal types, the resolved type syntax should give us one
+    extended nominal-type declaration. Based on the parent's type
+    id, we construct this type's id:
+    1. if the parent is a top-level id, we have:
+        <parent id>.MyModule(MyFile.swift)::MyType
+    2. if the parent is a nested scope, we have:
+        <parent id>.MyType
 
-After identifying the main declaration, we need to find its extensions.
-For the lack of an easier way, we actually resolve all extended type
-syntax (the compiler does this in `bindExtensions`).
-  Note: This approach differs from our lazy computations up to this point: we've
-        only been resolving type syntax that we know is relevant to our query.
-        The reason is that to lazily find all extensions of a type, we need
-        to know all of its aliases. Unfortunately, there's no easy way to find
-        just one type's aliases without resolving *all* type aliases. Hence, it's
-        easier to directly bind all extensions to a main nominal-type declaration.
-Thus, the main declaration and every extension with the same type identifier forms
-an _extended_ nominal type.
+#### Finding Extensions
 
-Finally, in this extended nominal type, we can perform qualified lookup
-to find types (`directReferencesForQualifiedTypeLookup` in the compiler).
-Namely, we call `_visitDirectMembers` on each `DeclGroupSyntax`
-of the extended nominal type, and filter down to type declarations.
-type declarations. We can then follow repeat the same process starting
-from step (2). Thus, we've resolved a type identifier.
+After identifying the main declaration, we need to find its extensions. For the lack of an easier way, we actually resolve all extended type syntax (the compiler does this in `bindExtensions`).
 
-// TODO: Explain how this qualified lookup handles module selectors.
+<aside>
+Note: This approach differs from our lazy computations up to this point: we've only been resolving type syntax that we know is relevant to our query. The reason is that to lazily find all extensions of a type, we need to know all of its aliases. Unfortunately, there's no easy way to find just one type's aliases without resolving *all* type aliases. Hence, it's easier to directly bind all extensions to a main nominal-type declaration.
+</aside>
 
-## Finding Members in Nominal Type
-There are three cases depending on the type:
-a. Nominal type: call `_visitDirectMembers` on the main declaration
-  and extensions' 'DeclGroupSyntax'
+Thus, the main declaration and every extension with the same type identifier forms an _extended_ nominal type.
