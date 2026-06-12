@@ -447,14 +447,32 @@ extension Int {
 ///
 ///           Hence, we don't need to specify the module; it's implicitly our module.
 ///
-///    Type syntax broadly falls into 3 types:
-///    1. Type sugar:
+///    Type syntax broadly falls into the following categories (the compiler
+///    handles this in `directReferencesForTypeRepr`):
+///    1. Regular: `IdentifierTypeSyntax` and `MemberTypeSyntax` are the main syntax we care about.
+///    2. Type sugar: ArrayTypeSyntax -> `Swift::Array`, DictionaryTypeSyntax -> `Swift::Dictionary`,
+///                   InlineArrayTypeSyntax -> `Swift::InlineArray`,
+///                   OptionalTypeSyntax, ImplicitlyUnwrappedOptionalTypeSyntax -> `Swift::Optional
+///    3. Forwards to base type(s): `ClassRestrictionTypeSyntax`,
+///         `CompositionTypeSyntax` (multiple base types), `SomeOrAnyTypeSyntax`,
+///         `PackElementTypeSyntax`, `PackExpansionTypeSyntax`
+///    4. No names: `FunctionTypeSyntax`, `MetatypeTypeSyntax`, `NamedOpaqueReturnTypeSyntax`
+///    5. Special: `SuppressedTypeSyntax`, `TupleTypeSyntax` (actually forwards if a `isParen`,
+///               i.e. simple type wrapped in parentheses, not actual tuple)
+///    6. Unresolvable: `MissingTypeSyntax`, `.Self`
+///
+///    Thus, we either can't resolve type syntax or we end up in the regular
+///    (base) case with a type syntax consisting of one or more type references
+///    separated by dots (`directReferencesForDeclRefTypeRepr` in the compiler), e.g.:
+///      `ModuleA::TypeA.TypeB...ModuleC::TypeC`
 ///
 ///    Extended nominal types consist of the the main type declaration
 ///    (`[Struct/Enum/Class/Actor/Protocol]DeclSyntax`) and all the extensions
 ///    referencing them. Hence, to find the extended nominal type, we follow
 ///    the steps below:
 ///    1. Get the referenced type declaration.
+///       // TODO: Handle module selectors
+///
 ///       We get the main declaration by performing unqualified lookup from the
 ///       position of the type syntax looking for the base type name. For instance:
 ///         struct A {
@@ -520,8 +538,17 @@ extension Int {
 ///    type declarations. We can then follow repeat the same process starting
 ///    from step (2). Thus, we've resolved a type identifier.
 ///
-/// 2. Looking up names in `DeclGroupSyntax`
-///    This is handled in `DeclGroupLookup` by calling `_visitDirectMembers`
+///    // TODO: Explain how this qualified lookup handles module selectors.
+///
+/// 2. Looking up names in the type.
+///    There are three cases depending on the type:
+///    a. Nominal type: call `_visitDirectMembers` on the main declaration
+///       and extensions' 'DeclGroupSyntax'
+///    b. Tuple type: Return optional labels and `.0`, ..., `.[n]` members.
+///    c. Functions: Return `callAsFunction` member
+///    d. No members for other?
+///    TODO: Check that functions are the only ones that may not produce extended
+///          nominal types (and have special handling).
 struct SymbolTable2 {
   enum MainTypeDecl {
     case nominal(any NominalTypeDeclSyntax)
