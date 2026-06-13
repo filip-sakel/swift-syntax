@@ -15,7 +15,7 @@ import SwiftSyntax
 // A global type name, `Swift::Int._(MyFileA.swift)::MyType`.
 public struct QualifiedTypeNameGlobalType: CustomDebugStringConvertible {
   public enum Qualifier {
-    case `internal`(fileID: String)
+    case `internal`(fileID: SyntaxIdentifier)
     case external(moduleName: Identifier)
   }
   /// A component of a qualified type name, external or internal. For instance,

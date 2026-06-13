@@ -12,8 +12,60 @@
 
 import SwiftSyntax
 
-extension NominalTypeDeclSyntax2 {
-  var qualifiedTypeName: QualifiedTypeName {
+// For global, we still need to resolve extensions
+extension SyntaxProtocol {
+  enum QualifiedTypeResolutionFailure: Error {
+    /// No scope exists or scope doesn't have a parent (not even `SourceFileSyntax`)
+    case invalidScope
+  }
 
+  enum ResolutionResult {
+   case resolveTopLevelBase(extensionType: TypeSyntax)
+   case scope(CodeBlockItemListSyntax, isTopLevel: Bool)
+   case resolved(QualifiedTypeName)
+   case failure(QualifiedTypeResolutionFailure)
+  }
+
+  var _enclosingQualifiedTypeName: Result<QualifiedTypeName, QualifiedTypeResolutionFailure> {
+    guard let parent else { return .failure(.invalidScope) }
+
+    if let nominal = NominalTypeDeclSyntax2(parent) {
+      nominal._enclosingQualifiedTypeName
+    } else if let extension = ExtensionDeclSyntax(parent) {
+
+      } else if let scope = CodeBlockItemListSyntax(parent) {
+      // Top level
+      // TODO: Use `DeclScope` isFileScope and throw appropriate errors
+      if scope.parent?.is(SourceFileSyntax.self) {
+        // Global
+        return QualifiedTypeName()
+      } else {
+        // Nested
+      }
+    }
+  }
+}
+
+extension NominalTypeDeclSyntax2 {
+
+  var qualifiedTypeName: Result<QualifiedTypeName, QualifiedTypeResolutionFailure> {
+    Result(catching: { throws(QualifiedTypeResolutionFailure) in
+      // Get scope
+      guard
+        let scope = self.declScope,
+        let isFileScope = scope.isFileScope
+      else {
+        throw QualifiedTypeResolutionFailure.invalidScope
+      }
+
+      // Top-level name
+      if isFileScope {
+
+      }
+      // Else, nested
+      else {
+
+      }
+    })
   }
 }
