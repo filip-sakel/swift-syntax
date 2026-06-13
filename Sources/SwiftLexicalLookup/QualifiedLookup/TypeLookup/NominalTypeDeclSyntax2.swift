@@ -37,7 +37,7 @@ import SwiftSyntax
 }
 
 extension NominalTypeDeclSyntax2: DeclGroupSyntax {
-  private func _getGroupProp<T>(_ prop: KeyPath<(any DeclGroupSyntax), T>) -> T {
+  private func _getGroupProp<T>(_ prop: KeyPath<any DeclGroupSyntax & NamedDeclSyntax, T>) -> T {
     switch _syntaxNode.as(SyntaxEnum.self) {
     case .structDecl(let declGroup):
       return declGroup[keyPath: prop]
@@ -55,33 +55,38 @@ extension NominalTypeDeclSyntax2: DeclGroupSyntax {
   }
 
   private mutating func _setGroupProp<T>(
-    _ keyPath: WritableKeyPath<(any DeclGroupSyntax), T>,
+    _ keyPath: WritableKeyPath<any DeclGroupSyntax & NamedDeclSyntax, T>,
     newValue: T
   ) {
     switch _syntaxNode.as(SyntaxEnum.self) {
     case .structDecl(let declGroup):
-      var box: any DeclGroupSyntax = declGroup
+      var box: any DeclGroupSyntax & NamedDeclSyntax = declGroup
       box[keyPath: keyPath] = newValue
       _syntaxNode = box._syntaxNode
     case .enumDecl(let declGroup):
-      var box: any DeclGroupSyntax = declGroup
+      var box: any DeclGroupSyntax & NamedDeclSyntax = declGroup
       box[keyPath: keyPath] = newValue
       _syntaxNode = box._syntaxNode
     case .classDecl(let declGroup):
-      var box: any DeclGroupSyntax = declGroup
+      var box: any DeclGroupSyntax & NamedDeclSyntax = declGroup
       box[keyPath: keyPath] = newValue
       _syntaxNode = box._syntaxNode
     case .actorDecl(let declGroup):
-      var box: any DeclGroupSyntax = declGroup
+      var box: any DeclGroupSyntax & NamedDeclSyntax = declGroup
       box[keyPath: keyPath] = newValue
       _syntaxNode = box._syntaxNode
     case .protocolDecl(let declGroup):
-      var box: any DeclGroupSyntax = declGroup
+      var box: any DeclGroupSyntax & NamedDeclSyntax = declGroup
       box[keyPath: keyPath] = newValue
       _syntaxNode = box._syntaxNode
     default:
       fatalError("[Internal Error] Invalid syntax kind for DeclGroupSyntaxType: \(_syntaxNode.kind)")
     }
+  }
+
+  public var name: TokenSyntax {
+    get { _getGroupProp(\.name) }
+    set { _setGroupProp(\.name, newValue: newValue) }
   }
 
   public var attributes: AttributeListSyntax {
