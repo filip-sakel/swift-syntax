@@ -24,13 +24,13 @@ struct PartiallyResolvedNominalTypeChain {
   let sourceFile: SourceFileSyntax
 
   // IMPORTANT: Base and members must share the same fileSyntax root.
-  init(base: TypeSyntax, members: [(name: Identifier, decl: NominalTypeDeclSyntax2)]) {
+  init(base: TypeSyntax, members: [(decl: NominalTypeDeclSyntax2, name: Identifier)]) {
     // precondition(base.root == members.root, "Invalid root")
     guard let sourceFile = base.root.as(SourceFileSyntax.self) else {
       preconditionFailure("Invalid root, not source file")
     }
     // Map and check source file
-    let memberNames = members.map({ (name, decl) in
+    let memberNames = members.map({ (decl, name) in
       assert(decl.root == sourceFile.root, "Invalid decl root, not source file")
       return name
     })
@@ -54,9 +54,7 @@ struct PartiallyResolvedNominalTypeChain {
         (qualifier: qualifier, name: name)
       })
       return QualifiedTypeName.topLevel(
-        QualifiedTypeNameGlobalType(
-          components: globalType.components + memberComponents
-        )
+        globalType.addingComponents(memberComponents)
       )
     case .nestedScope(let scope, let type):
       return QualifiedTypeName.nestedScope(scope: scope, type: type.addingComponents(memberNames))
@@ -100,17 +98,16 @@ extension SyntaxProtocol {
 }
 
 extension NominalTypeDeclSyntax2 {
-
   enum ChainResolutionFailure: Error {
+    // We can only perform chain resolution in nodes nested within a file
+    case noSourceFileRoot(root: Syntax)
+    // We need all type names in the chain to be valid identifiers
     case invalidIdentifier(TokenSyntax)
   }
 
-  // Find the type chain of this source location. Module or `nil` for this module (internal).
+  /// Find the type chain of this source location. External module or `nil` for this module (internal).
   func findTypeChain(module: Identifier?) -> Result<ChainResult, ChainResolutionFailure> {
-    guard let sourceFile = root.as(SourceFileSyntax.self) else {
-      // FIXME: Throw
-    }
-
+    /// Parse the token into a valid identifier or throw
     func parseName(_ token: TokenSyntax) throws(ChainResolutionFailure) -> Identifier {
       guard let identifier = Identifier(validating: token) else {
         throw .invalidIdentifier(token)
@@ -118,15 +115,22 @@ extension NominalTypeDeclSyntax2 {
       return identifier
     }
 
-    Result(catching: { () throws(ChainResolutionFailure) in
+    return Result(catching: { () throws(ChainResolutionFailure) in
+      guard let sourceFile = root.as(SourceFileSyntax.self) else {
+        throw .noSourceFileRoot(root: root)
+      }
+
       var ancestor: Syntax? = parent
       // All the members. Since we include `self`, `members.count>=1`
-      var members = [self]
+      var members = [(decl: self, name: try parseName(self.name))]
 
       while let currentAncestor = ancestor {
+        // Nominal types go to the "chain"
         if let nominalTypeDecl = currentAncestor.as(NominalTypeDeclSyntax2.self) {
-          members.append(nominalTypeDecl)
-        } else if let extensionDecl = currentAncestor.as(ExtensionDeclSyntax.self) {
+          try members.append((decl: nominalTypeDecl, name: parseName(nominalTypeDecl.name)))
+        }
+        // Extensions can't be resolved right now.
+        else if let extensionDecl = currentAncestor.as(ExtensionDeclSyntax.self) {
           return ChainResult.partiallyResolved(
             PartiallyResolvedNominalTypeChain(base: extensionDecl.extendedType, members: members)
           )
@@ -139,10 +143,12 @@ extension NominalTypeDeclSyntax2 {
             } else {
               .internal(fileID: sourceFile.id)
             }
-          let components = try members.map({ (qualifier: qualifier, name: try parseName($0.name)) })
+          let components = members.map({ (qualifier: qualifier, name: $0.name) })
           // Assert we have ennough members (we include `self` above)
           guard let globalType = QualifiedTypeNameGlobalType(components: components) else {
-            fatalError("Members shouldn't be empty")
+            fatalError(
+              "[SwiftLexicalLookup] Internal error: Unexpectedly got `nil` globalType, implying that `components` is empty, which shouldn't happen since `members` are always nonempty."
+            )
           }
 
           return ChainResult.resolved(
@@ -153,13 +159,13 @@ extension NominalTypeDeclSyntax2 {
         }
         // Nested scope (if CodeBlockItemListSyntax isn't nested directly under `SourceFileSyntax`)
         else if let scope = currentAncestor.as(CodeBlockItemListSyntax.self) {
-          let components = try members.map({ member throws(ChainResolutionFailure) in
-            try parseName(member.name)
-          })
+          let components = members.map(\.name)
 
           // Assert we have ennough members (we include `self` above)
           guard let nestedType = QualifiedTypeNameNestedType(components: components) else {
-            fatalError("Members shouldn't be empty")
+            fatalError(
+              "[SwiftLexicalLookup] Internal error: Unexpectedly got `nil` globalType, implying that `components` is empty, which shouldn't happen since `members` are always nonempty."
+            )
           }
 
           return ChainResult.resolved(

@@ -22,8 +22,11 @@ public struct QualifiedTypeNameGlobalType: CustomDebugStringConvertible {
   /// `Swift::Int` (external) and `_(FileA.swift)::MyType` (internal).
   public typealias Component = (qualifier: Qualifier, name: Identifier)
 
+  /// The types components. Guaranteed to be non-empty
   public let components: [Component]
 
+  /// Creates a a global type with the given components.
+  /// - Returns: `nil` if no components are provided
   public init?(components: [Component]) {
     // precondition(
     //   !components.isEmpty,
@@ -31,6 +34,16 @@ public struct QualifiedTypeNameGlobalType: CustomDebugStringConvertible {
     // )
     guard !components.isEmpty else { return nil }
     self.components = components
+  }
+
+  public func addingComponents(_ tailComponents: [Component]) -> QualifiedTypeNameGlobalType {
+    // Shouldn't return `nil` because `self.components` should be nonempty
+    guard let newType = QualifiedTypeNameGlobalType(components: components + tailComponents) else {
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Unexpectedly got `QualifiedTypeNameNestedType` instance with empty components."
+      )
+    }
+    return newType
   }
 
   public var debugDescription: String {

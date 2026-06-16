@@ -14,7 +14,7 @@ import SwiftSyntax
 
 @_spi(_QualifiedLoookup) public enum PartiallyResolvedType: Sendable {
   // Non-nominal types
-  case function
+  case function(argumentCount: Int)
   case tuple(labels: [Identifier?])
   // Nominal
   case nominalIdentifier(module: Identifier?, name: Identifier)
@@ -70,8 +70,8 @@ extension TypeSyntaxProtocol {
     // Non-nominal base cases
     //
     // Functions
-    case .functionType:
-      return types.append(.function)
+    case .functionType(let functionType):
+      return types.append(.function(argumentCount: functionType.parameters.count))
     // Valid tuples (we treat single-element tuples as their only contained type below)
     case .tupleType(let tupleType) where tupleType.elements.count >= 1:
       // Get labels and collect identifier errors
@@ -123,7 +123,7 @@ extension TypeSyntaxProtocol {
       // resolve the base type even if the `moduleName` and `typeName` below
       // are invalid to produce thorough and consistent diagnostics.
       var baseTypes = [PartiallyResolvedType]()
-      memberType.baseType.resolve(types: &baseTypes, failures: &failures)
+      memberType.baseType.partiallyResolve(types: &baseTypes, failures: &failures)
 
       // Parse module name if provided; fail if invalid.
       //
@@ -179,16 +179,16 @@ extension TypeSyntaxProtocol {
 
     // Recursive cases
     case .attributedType(let attributedType):
-      attributedType.resolve(types: &types, failures: &failures)
+      attributedType.partiallyResolve(types: &types, failures: &failures)
     case .someOrAnyType(let someOrAnyTypeType):
-      someOrAnyTypeType.resolve(types: &types, failures: &failures)
+      someOrAnyTypeType.partiallyResolve(types: &types, failures: &failures)
     case .classRestrictionType(let classRestrictionType):
-      classRestrictionType.resolve(types: &types, failures: &failures)
+      classRestrictionType.partiallyResolve(types: &types, failures: &failures)
     // TODO: Explain pack element & expansion types
     case .packElementType(let packElementType):
-      packElementType.resolve(types: &types, failures: &failures)
+      packElementType.partiallyResolve(types: &types, failures: &failures)
     case .packExpansionType(let packExpansionType):
-      packExpansionType.resolve(types: &types, failures: &failures)
+      packExpansionType.partiallyResolve(types: &types, failures: &failures)
     case .tupleType(let tupleType) /* where tupleType.elements.count == 1 */:
       // Single-element tuples are invalid; forward to the element's type (diagnosed elsewhere)
       guard
@@ -200,11 +200,11 @@ extension TypeSyntaxProtocol {
         )
       }
       // Forward resolution
-      soleTupleElement.type.resolve(types: &types, failures: &failures)
+      soleTupleElement.type.partiallyResolve(types: &types, failures: &failures)
     case .compositionType(let compositionType):
       // Add all types and failures from composition types
       for compositionType in compositionType.elements {
-        compositionType.type.resolve(types: &types, failures: &failures)
+        compositionType.type.partiallyResolve(types: &types, failures: &failures)
       }
     }
   }
