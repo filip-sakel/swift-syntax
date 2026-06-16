@@ -62,7 +62,7 @@ import SwiftSyntax
 
 extension TypeSyntaxProtocol {
   // TODO: Handle `.Self`, `.Type`, `.Protocol`, etc. (check compiler)
-  @_spi(_QualifiedLoookup) public func resolve(
+  @_spi(_QualifiedLoookup) public func partiallyResolve(
     types: inout [PartiallyResolvedType],
     failures: inout [TypeResolutionFailure]
   ) {

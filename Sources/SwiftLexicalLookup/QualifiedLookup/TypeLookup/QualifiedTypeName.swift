@@ -24,11 +24,12 @@ public struct QualifiedTypeNameGlobalType: CustomDebugStringConvertible {
 
   public let components: [Component]
 
-  public init(components: [Component]) {
-    precondition(
-      !components.isEmpty,
-      "[SwiftLexicalLookup] Internal error: Cannot have qualified type name with no components"
-    )
+  public init?(components: [Component]) {
+    // precondition(
+    //   !components.isEmpty,
+    //   "[SwiftLexicalLookup] Internal error: Cannot have qualified type name with no components"
+    // )
+    guard !components.isEmpty else { return nil }
     self.components = components
   }
 
@@ -61,6 +62,22 @@ public indirect enum QualifiedTypeNameNestedType: CustomDebugStringConvertible {
     case .member(let base, let name):
       return base._components + [name]
     }
+  }
+
+  public init?(components: [Identifier]) {
+    guard let first = components.first else { return nil }
+    // TODO: Optimize
+    self = QualifiedTypeNameNestedType.base(first).addingComponents(Array(components.dropFirst()))
+  }
+
+  // TODO: Make more efficient
+  func addingComponents(_ tailComponents: [Identifier]) -> QualifiedTypeNameNestedType {
+    tailComponents.reduce(
+      self,
+      { currentBase, tail in
+        QualifiedTypeNameNestedType.member(base: currentBase, name: tail)
+      }
+    )
   }
 
   public var debugDescription: String {
