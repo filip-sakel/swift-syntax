@@ -12,10 +12,17 @@
 
 import SwiftSyntax
 
-indirect enum PartiallyResolvedTypeIdentifier {
-  case base(module: Identifier?, name: Identifier)
-  // Base shouldn't be an empty array
-  case member(base: [PartiallyResolvedTypeIdentifier], module: Identifier?, name: Identifier)
+struct PartiallyResolvedTypeIdentifier {
+  typealias Component = (module: Identifier?, name: Identifier)
+  private(set) var baseMembers: [Component] = []
+  let component: Component
+
+  func addingComponent(_ newComponent: Component) -> PartiallyResolvedTypeIdentifier {
+    PartiallyResolvedTypeIdentifier(
+      baseMembers: self.baseMembers + [self.component],
+      component: newComponent
+    )
+  }
 }
 
 enum ReducingTypeResolutionFailure: Error {
@@ -83,7 +90,7 @@ extension [PartiallyResolvedType] {
         // Only valid case for functions/tuples handled above.
         return .failure(ReducingTypeResolutionFailure.invalidComposition(nonNominal: type))
       case .nominalIdentifier(let module, let name):
-        members.append(PartiallyResolvedTypeIdentifier.base(module: module, name: name))
+        members.append(PartiallyResolvedTypeIdentifier(component: (module, name)))
       case .nominalMember(let bases, let module, let name):
         // Throw if the base is invalid (we can't do anything smart)
         let lookupResult: MemberLookupResult<PartiallyResolvedTypeIdentifier>
@@ -100,14 +107,10 @@ extension [PartiallyResolvedType] {
           return .failure(ReducingTypeResolutionFailure.noFunctionTypeMembers)
         case .tuple:
           return .failure(ReducingTypeResolutionFailure.noTupleTypeMembers)
-        case .memberResults(let results) where !results.isEmpty:
-          members.append(
-            PartiallyResolvedTypeIdentifier.member(
-              base: members,
-              module: module,
-              name: name
-            )
-          )
+        case .memberResults(let baseMembers) where !baseMembers.isEmpty:
+          for baseMember in baseMembers {
+            members.append(baseMember.addingComponent((module, name)))
+          }
         case .memberResults:  // where results.isEmpty
           return .failure(ReducingTypeResolutionFailure.noTypeMembers(in: bases))
         }
