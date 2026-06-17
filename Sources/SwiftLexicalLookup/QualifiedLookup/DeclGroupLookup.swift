@@ -13,10 +13,10 @@
 import SwiftIfConfig
 import SwiftSyntax
 
-public struct DeclGroupSyntaxType: SyntaxProtocol {
+@_spi(_QualifiedLookup) public struct DeclGroupSyntaxType: SyntaxProtocol {
   public internal(set) var _syntaxNode: Syntax
 
-  public init?(_ node: borrowing some SyntaxProtocol) {
+  public init?(_ node: __shared some SyntaxProtocol) {
     switch node._syntaxNode.kind {
     case .structDecl, .enumDecl, .classDecl, .actorDecl, .protocolDecl, .extensionDecl:
       self._syntaxNode = node._syntaxNode
@@ -242,7 +242,7 @@ extension DeclGroupSyntax {
   /// Note that implicit members such as `self`, `Type`, or `Protocol` aren't
   /// value declarations (they're not actual members) and we don't return them here.
   @_spi(_QualifiedLookup) public func findDirectMembers(
-    name: DeclNameRef?,
+    name: DeclNameReference?,
     kind memberKind: MemberKind = .default,
     configuredRegions: ConfiguredRegions? = nil
   ) -> [ValueDeclSyntax] {

@@ -73,7 +73,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
     ///
     /// It's set to `nil` if  the test uses an invalid declaration name (which
     /// we diagnose when initializing `DeclLookupExpectation`)
-    let declRef: DeclNameRef?
+    let declRef: DeclNameReference?
     /// The kind of members we request during lookup
     var memberKind: MemberKind
     // Source location where this expectation was created
@@ -115,7 +115,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
     /// Creates a raw ``DeclNameRef`` using ``memberKind`` for lookup.
     /// You can use other static functions in ``DeclLookupExpectation`` for convenience.
     static func decl(
-      exact ref: DeclNameRef,
+      exact ref: DeclNameReference,
       memberKind: MemberKind = .default,
       file: StaticString = #file,
       line: UInt = #line
@@ -130,17 +130,17 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
     /// Corresponds to a non-macro ``DeclNameRef/identifier``
     static func named(
       _ name: StaticString,
-      args optionalArgs: [StaticString?]? = nil,
+      args optionalArguments: [StaticString?]? = nil,
       file: StaticString = #file,
       line: UInt = #line
     ) -> DeclLookupExpectation {
       do {
         return try .decl(
-          exact: DeclNameRef(
+          exact: DeclNameReference(
             baseName: .identifier(
               identifier: _parseIdentifier(name, file: file, line: line),
-              args: optionalArgs?.map({ (argName: StaticString?) -> Identifier? in
-                try argName.map({ try _parseIdentifier($0, file: file, line: line) })
+              arguments: optionalArguments?.map({ (argumentName: StaticString?) -> Identifier? in
+                try argumentName.map({ try _parseIdentifier($0, file: file, line: line) })
               })
             )
           ),
@@ -159,7 +159,7 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
       line: UInt = #line
     ) -> DeclLookupExpectation {
       return .decl(
-        exact: DeclNameRef(
+        exact: DeclNameReference(
           baseName: .deinit
         ),
         file: file,
@@ -176,9 +176,9 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
     ) -> DeclLookupExpectation {
       do {
         return try .decl(
-          exact: DeclNameRef(
+          exact: DeclNameReference(
             baseName: .`init`(
-              args: optionalArgs?.map({ (argName: StaticString?) -> Identifier? in
+              arguments: optionalArgs?.map({ (argName: StaticString?) -> Identifier? in
                 try argName.map({ try _parseIdentifier($0, file: file, line: line) })
               })
             )
@@ -199,9 +199,9 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
     ) -> DeclLookupExpectation {
       do {
         return try .decl(
-          exact: DeclNameRef(
+          exact: DeclNameReference(
             baseName: .unnamedCall(
-              args: args.map({
+              arguments: args.map({
                 try Optional(_parseIdentifier($0, file: file, line: line))
               })
             )
@@ -222,9 +222,9 @@ struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInt
     ) -> DeclLookupExpectation {
       do {
         return try .decl(
-          exact: DeclNameRef(
+          exact: DeclNameReference(
             baseName: .subscript(
-              args: args.map({
+              arguments: args.map({
                 try Optional(_parseIdentifier($0, file: file, line: line))
               })
             )
@@ -384,7 +384,9 @@ final class TestQualifiedLookup: XCTestCase {
 
     var sharedDeclGroup: DeclGroupSyntaxType? = nil
     struct Pair<A: Hashable, B: Hashable>: Hashable { let a: A, b: B }
-    var namesToExpectations = [Pair<DeclNameRef, MemberKind>: [(ValueDeclSyntax, file: StaticString, line: UInt)]]()
+    var namesToExpectations = [
+      Pair<DeclNameReference, MemberKind>: [(ValueDeclSyntax, file: StaticString, line: UInt)]
+    ]()
 
     for (sourceIndex, (expectations, file, line)) in lookupSource.positionsToExpectations {
       // The assertion expects this to be an introducer token

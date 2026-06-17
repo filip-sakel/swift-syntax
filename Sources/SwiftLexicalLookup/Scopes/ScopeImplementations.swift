@@ -426,11 +426,11 @@ import SwiftSyntax
       return LookupResult.getResultArray(for: self, withNames: implicitSelf)
         + [.lookForGenericParameters(of: self)]
         + defaultLookupImplementation(identifier, at: lookUpPosition, with: config, propagateToParent: false)
-        + [.lookForMembers(in: DeclGroupSyntaxType(exactly: self))]
+        + [.lookForMembers(in: Syntax(self))]
         + lookupInParent(identifier, at: lookUpPosition, with: config)
     } else if !extendedType.range.contains(lookUpPosition), let genericWhereClause {
       if genericWhereClause.range.contains(lookUpPosition) {
-        return [.lookForGenericParameters(of: self)] + [.lookForMembers(in: DeclGroupSyntaxType(exactly: self))]
+        return [.lookForGenericParameters(of: self)] + [.lookForMembers(in: Syntax(self))]
           + defaultLookupImplementation(identifier, at: lookUpPosition, with: config)
       }
 
@@ -725,7 +725,7 @@ import SwiftSyntax
     let lookInMembers: [LookupResult]
 
     if !(inheritanceClause?.range.contains(lookUpPosition) ?? false) {
-      lookInMembers = [.lookForMembers(in: DeclGroupSyntaxType(exactly: self))]
+      lookInMembers = [.lookForMembers(in: Syntax(self))]
     } else {
       lookInMembers = []
     }
