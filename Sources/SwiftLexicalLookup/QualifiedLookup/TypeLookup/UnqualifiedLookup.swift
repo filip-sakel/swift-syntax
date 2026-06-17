@@ -40,6 +40,11 @@ enum TypeResultLookup {
 @_spi(_QualifiedLookup) public enum UnqualifiedResult {
   case lookIn(PartiallyResolvedType, includeGenericParams: Bool)
 }
+
+func findUnqualifiedType(name: Identifier, at position: (fileID: SourceFileSyntax, position: AbsolutePosition)) -> TypeDeclSyntax {
+
+}
+
 extension SyntaxProtocol {
   func findUnqualifiedType1(identifier: Identifier?, name: Identifier?) -> TypeDeclSyntax? {
     // Get next parent
@@ -47,6 +52,8 @@ extension SyntaxProtocol {
     var parentNames = [TypeDeclSyntax]()
 
   }
+
+
   func findUnqualifiedType2(
     _ typeName: TokenSyntax
   ) -> [DeclSyntax] {

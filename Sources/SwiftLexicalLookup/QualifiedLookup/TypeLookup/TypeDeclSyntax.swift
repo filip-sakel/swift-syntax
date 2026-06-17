@@ -40,3 +40,30 @@ import SwiftSyntax
     ])
   }
 }
+
+// MARK: Name
+
+extension TypeDeclSyntax {
+  public var name: TokenSyntax {
+    switch _syntaxNode.as(SyntaxEnum.self) {
+    case .structDecl(let structDecl):
+      return structDecl.name
+    case .enumDecl(let enumDecl):
+      return enumDecl.name
+    case .classDecl(let classDecl):
+      return classDecl.name
+    case .actorDecl(let actorDecl):
+      return actorDecl.name
+    case .protocolDecl(let protocolDecl):
+      return protocolDecl.name
+    case .typeAliasDecl(let typeAliasDecl):
+      return typeAliasDecl.name
+    case .associatedTypeDecl(let associatedTypeDecl):
+      return associatedTypeDecl.name
+    case .genericParameter(let genericParameter):
+      return genericParameter.name
+    default:
+      fatalError("[Internal Error] Invalid syntax kind for TypeDeclSyntax: \(_syntaxNode.kind)")
+    }
+  }
+}

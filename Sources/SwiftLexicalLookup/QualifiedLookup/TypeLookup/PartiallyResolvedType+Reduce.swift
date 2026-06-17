@@ -44,7 +44,7 @@ extension TypeSyntaxProtocol {
   /// Reduces this array of resolved types to a lookup result, a union
   /// of a function type, tuple type, or array of type identifiers.
   // TODO: Consider integrating with TypeSyntaxProtocol.partiallyResolve for efficiency
-  func reducingPartialResolve(
+  func resolve(
     failures: inout [TypeResolutionFailure]
   ) -> Result<
     MemberLookupResult<PartiallyResolvedTypeIdentifier>,
@@ -57,7 +57,7 @@ extension TypeSyntaxProtocol {
   }
 }
 extension [PartiallyResolvedType] {
-  /// Helper for ``TypeSyntaxProtocol/reducingPartialResolve``.
+  /// Helper for ``TypeSyntaxProtocol/resolve``.
   fileprivate func _reduceToIdentifiers() -> Result<
     MemberLookupResult<PartiallyResolvedTypeIdentifier>,
     ReducingTypeResolutionFailure
