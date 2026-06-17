@@ -634,7 +634,7 @@ extension SymbolTable2 {
     case invalidScope
   }
 
-  func moduleLookup(module: Identifier, name: DeclNameRef) {}
+  func moduleLookup(module: Identifier, name: DeclNameReference) {}
   func moduleLookup(module: Identifier, typeName: Identifier) {}
 
   func internalLookup(decl)
