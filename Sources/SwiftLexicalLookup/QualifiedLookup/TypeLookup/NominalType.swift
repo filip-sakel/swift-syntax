@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-import SwiftSyntax
 import SwiftIfConfig
+import SwiftSyntax
 
 // TODO: Assert each decl has a source-file parent
 @_spi(_QualifiedName) public struct NominalType {
@@ -99,7 +99,8 @@ extension NominalType {
     }
     // If no module is selected, look into this file, this module, and modules in reverse
     // order of the import list
-    else /* selectedModule == nil */ {
+    else /* selectedModule == nil */
+    {
       for declGroup in thisFile {
         declGroup.visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
       }
@@ -118,9 +119,9 @@ extension NominalType {
     return .success(())
   }
 
-  func findMemberType(
-    selectedModule: Identifier? = nil,
-    lookupPosition: (file: SourceFileSyntax, position: AbsolutePosition)
+  func findMemberTypes(
+    component: PartiallyResolvedTypeIdentifier.Component,
+    lookupPosition: (file: SourceFileSyntax, position: AbsolutePosition),
     importedModules: [Identifier],
     moduleMap: [SourceFileSyntax: Identifier],
     configuredRegions: ConfiguredRegions?
@@ -128,12 +129,20 @@ extension NominalType {
     var typeDecls = [TypeDeclSyntax]()
 
     let result = _visitMembers(
+      selectedModule: component.module,
       lookupPosition: lookupPosition,
       importedModules: importedModules,
       moduleMap: moduleMap,
       configuredRegions: configuredRegions,
       visit: { decl in
-        guard let typeDecl = decl.as(TypeDeclSyntax.self) else { return }
+        // Get only types with matching names
+        guard
+          let typeDecl = decl.as(TypeDeclSyntax.self),
+          typeDecl.name.identifier == component.name
+        else {
+          return
+        }
+
         typeDecls.append(typeDecl)
       }
     )

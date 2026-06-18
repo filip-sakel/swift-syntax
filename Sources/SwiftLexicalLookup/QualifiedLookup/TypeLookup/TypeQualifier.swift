@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 import SwiftSyntax
+import SwiftIfConfig
 
 typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTypeName)
 
@@ -22,10 +23,50 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     case noTupleOrFunctionTypeMembers
     case cannotExtendNonNominal(ExtensionDeclSyntax)
     case other(any Error)
+
+    // case noMemberType(PartiallyResolvedTypeIdentifier.Component, in: NominalType)
   }
 
   var failures = [Failure]()
   var boundExtensions = [ExtensionDeclSyntax: MinimalNominal]()
+
+  let moduleMap: [SourceFileSyntax: Identifier]
+  let configuredRegions: ConfiguredRegions
+
+  /// Adds the given result to a collective result.
+  ///
+  /// Returns critical error if one occurs. These occur when we can't compose with tuples/functions.
+  // TODO: Consider returning a Bool and having callers throw
+  fileprivate mutating func addResult(
+    _ result: Result<MemberLookupResult<MinimalNominal>, Failure>,
+    to collectiveResult: inout MemberLookupResult<MinimalNominal>?
+  ) -> Failure? {
+    // Simply log failures  as other type results might succeed
+    let lookupResult: MemberLookupResult<MinimalNominal>
+    switch result {
+    case .success(let result):
+      lookupResult = result
+    case .failure(let failure):
+      self.failures.append(.other(failure))
+    }
+
+    switch (collectiveResult, lookupResult) {
+    // Initial assignment
+    case (nil, let lookupResult):
+      collectiveResult = lookupResult
+    // Cannot compose tuple/function types
+    case (_, .function), (_, .tuple):
+      return Failure.cannotComposeTupleOrFunction
+    case (.function, _), (.tuple, _):
+      return Failure.cannotComposeTupleOrFunction
+    // Otherwise, combine members
+    case (.memberResults(let currentTypes), .memberResults(let newTypes)):
+      collectiveResult = MemberLookupResult.memberResults(currentTypes + newTypes)
+    }
+
+    // No failures
+    return nil
+  }
 
   fileprivate mutating func resolveSyntax(
     typeSyntax: TypeSyntax,
@@ -53,28 +94,32 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     case .memberResults(let typeResults):
       var result: MemberLookupResult<MinimalNominal>? = nil
       for typeIdentifier in typeResults {
-        // Simply log failures  as other type results might succeed
-        let lookupResult: MemberLookupResult<MinimalNominal>
-        switch resolveTypeReferences(typeIdentifier) {
-        case .success(let result):
-          lookupResult = result
-        case .failure(let failure):
-          self.failures.append(.other(failure))
+        if let criticalFailure = addResult(resolveTypeReferences(typeIdentifier), to: &result) {
+          return .failure(criticalFailure)
         }
 
-        switch (result, lookupResult) {
-        // Handle initial assignment
-        case (nil, let lookupResult):
-          result = lookupResult
-        // Cannot compose tuple/function types
-        case (_, .function), (_, .tuple):
-          return .failure(Failure.cannotComposeTupleOrFunction)
-        case (.function, _), (.tuple, _):
-          return .failure(Failure.cannotComposeTupleOrFunction)
-        // Otherwise, combine members
-        case (.memberResults(let currentTypes), .memberResults(let newTypes)):
-          result = MemberLookupResult.memberResults(currentTypes + newTypes)
-        }
+        // // Simply log failures  as other type results might succeed
+        // let lookupResult: MemberLookupResult<MinimalNominal>
+        // switch resolveTypeReferences(typeIdentifier) {
+        // case .success(let result):
+        //   lookupResult = result
+        // case .failure(let failure):
+        //   self.failures.append(.other(failure))
+        // }
+        //
+        // switch (result, lookupResult) {
+        // // Handle initial assignment
+        // case (nil, let lookupResult):
+        //   result = lookupResult
+        // // Cannot compose tuple/function types
+        // case (_, .function), (_, .tuple):
+        //   return .failure(Failure.cannotComposeTupleOrFunction)
+        // case (.function, _), (.tuple, _):
+        //   return .failure(Failure.cannotComposeTupleOrFunction)
+        // // Otherwise, combine members
+        // case (.memberResults(let currentTypes), .memberResults(let newTypes)):
+        //   result = MemberLookupResult.memberResults(currentTypes + newTypes)
+        // }
       }
       return Result.success(result ?? MemberLookupResult.memberResults([]))
     }
@@ -106,21 +151,53 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
       foundType = findUnqualifiedType(name: typeName, at: position)
     }
 
+    // Resolve the type declaration with the member chain
+    return resolveTypeDecl(typeDecl: foundType, memberChain: typeReference.memberChain)
+  }
+
+  mutating func resolveTypeDecl(
+    typeDecl: TypeDeclSyntax,
+    memberChain: [PartiallyResolvedTypeIdentifier.Component]
+  ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
     // We only handle type aliases and nominal types (we skip associated types and generic parameters)
     let baseLookupResult: Result<MemberLookupResult<MinimalNominal>, Failure>
-    if let typeAlias = foundType.as(TypeAliasDeclSyntax.self) {
+    if let nominalDecl = typeDecl.as(NominalTypeDeclSyntax2.self) {
+      // Get the type chain
+      let typeChain: ChainResult
+      switch nominalDecl.findTypeChain(module: nil) {
+      case .success(let result):
+        typeChain = result
+      case .failure(let failure):
+        return .failure(.other(failure))
+      }
+
+      switch typeChain {
+      case .resolved(let qualifiedTypeName):
+        baseLookupResult = Result.success(
+          MemberLookupResult.memberResults([(mainDecl: nominalDecl, name: qualifiedTypeName)])
+        )
+      case .partiallyResolved(let partiallyResolvedName):
+        let qualifiedBaseResults = resolveSyntax(typeSyntax: partiallyResolvedName.base)
+        let module: Identifier? = nil // TODO: Find the actual module
+        // TODO: Keep track of the main decl
+        baseLookupResult = qualifiedBaseResults.map({ qualifiedBaseResult in
+          qualifiedBaseResult.mapMembers({ qualifiedBase in
+            partiallyResolvedName.resolve(resolvedBase: qualifiedBase, module: module)
+          })
+        })
+      }
+    } else if let typeAlias = typeDecl.as(TypeAliasDeclSyntax.self) {
       baseLookupResult = resolveSyntax(typeSyntax: typeAlias.initializer.value)
-    } else if let nominalDecl = foundType.as(NominalTypeDeclSyntax2.self) {
-      baseLookupResult = resolveNominalDecl(nominalDecl: nominalDecl).map({ MemberLookupResult.memberResults([$0]) })
     } else {
       // No members for generic parameters and associated types
       return .success(MemberLookupResult.memberResults([]))
     }
 
     // Return if we don't have type members
-    guard let firstTypeMember = typeReference.memberChain.first else {
+    guard let firstTypeMember = memberChain.first else {
       return baseLookupResult
     }
+    let remainingMemberChain = Array(memberChain.dropFirst())
 
     // Recursively find type members
     //
@@ -129,7 +206,7 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     switch baseLookupResult {
     case .success(.memberResults(let types)):
       baseTypes = types
-    // Tuple/function don't have type members
+    // Tuples/functions don't have type members
     case .success(.function), .success(.tuple):
       return .failure(.noTupleOrFunctionTypeMembers)
     // Nothing smart we can do here
@@ -137,6 +214,7 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
       return .failure(failure)
     }
     // Perform qualified type lookup
+    var result: MemberLookupResult<MinimalNominal>? = nil
     for (mainDecl, name) in baseTypes {
       let extensions = bindExtensions(matchingForName: name)
       let nominalType = NominalType(
@@ -145,39 +223,69 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
         redeclarations: [],
         extensions: extensions
       )
-      let typeDecls: [TypeDeclSyntax] = nominalType.declGroups.flatMap({ declGroup in
-        declGroup.findDirectTypes(matching: firstTypeMember)
-      })
-      // TODO: Call resolveNominalDecl
-    }
-  }
-
-  mutating func resolveNominalDecl(nominalDecl: NominalTypeDeclSyntax2) -> Result<MinimalNominal, Failure> {
-    // Get the type chain
-    let typeChain: ChainResult
-    switch nominalDecl.findTypeChain(module: nil) {
-    case .success(let result):
-      typeChain = result
-    case .failure(let failure):
-      return .failure(.other(failure))
-    }
-
-    switch typeChain {
-    case .resolved(let qualifiedTypeName):
-      return Result.success(
-        MemberLookupResult.memberResults([(mainDecl: nominalDecl, name: qualifiedTypeName)])
+      // TODO: Find lookup position
+      // TODO: Figure out imported modules
+      let lookupPosition: (file: SourceFileSyntax, position: AbsolutePosition)
+      let typeDeclsResult = nominalType.findMemberTypes(
+        component: firstTypeMember,
+        lookupPosition: lookupPosition,
+        importedModules: [],
+        moduleMap: moduleMap,
+        configuredRegions: configuredRegions
       )
-    case .partiallyResolved(let partiallyResolvedName):
-      let qualifiedBaseResults = resolveSyntax(typeSyntax: partiallyResolvedName.base)
-      let module: Identifier? = nil // TODO: Find the actual module
-      // TODO: Keep track of the main decl
-      return qualifiedBaseResults.map({ qualifiedBaseResult in
-        qualifiedBaseResult.mapMembers({ qualifiedBase in
-          partiallyResolvedName.resolve(resolvedBase: qualifiedBase, module: module)
-        })
-      })
+      let memberTypeDecl: TypeDeclSyntax
+      switch typeDeclsResult {
+      case .success(let typeDecls):
+        // Skip this nominal type if it didn't contain said type member.
+        //
+        // E.g. In `(Encodable & Collection<Int>).Element`, `Encodable` may not have an `Element`
+        // type member.
+        //
+        // TODO: Think about whether we need to diagnose multiple type decls here
+        guard let firstDecl = typeDecls.first else { continue }
+
+        // Select the first declaration (others might be shadowed or redeclarations we don't diagnose here)
+        memberTypeDecl = firstDecl
+      case .failure(let failure):
+        failures.append(.other(failure))
+        continue
+      }
+
+      // Resolve this type declaration and add it to the results
+      if let criticalFailure = addResult(resolveTypeDecl(typeDecl: memberTypeDecl, memberChain: remainingMemberChain), to: &result) {
+        return .failure(criticalFailure)
+      }
     }
+
+    return Result.success(result ?? MemberLookupResult.memberResults([]))
   }
+
+  // mutating func resolveNominalDecl(nominalDecl: NominalTypeDeclSyntax2) -> Result<MinimalNominal, Failure> {
+  //   // Get the type chain
+  //   let typeChain: ChainResult
+  //   switch nominalDecl.findTypeChain(module: nil) {
+  //   case .success(let result):
+  //     typeChain = result
+  //   case .failure(let failure):
+  //     return .failure(.other(failure))
+  //   }
+  //
+  //   switch typeChain {
+  //   case .resolved(let qualifiedTypeName):
+  //     return Result.success(
+  //       MemberLookupResult.memberResults([(mainDecl: nominalDecl, name: qualifiedTypeName)])
+  //     )
+  //   case .partiallyResolved(let partiallyResolvedName):
+  //     let qualifiedBaseResults = resolveSyntax(typeSyntax: partiallyResolvedName.base)
+  //     let module: Identifier? = nil // TODO: Find the actual module
+  //     // TODO: Keep track of the main decl
+  //     return qualifiedBaseResults.map({ qualifiedBaseResult in
+  //       qualifiedBaseResult.mapMembers({ qualifiedBase in
+  //         partiallyResolvedName.resolve(resolvedBase: qualifiedBase, module: module)
+  //       })
+  //     })
+  //   }
+  // }
 
   mutating func bindExtensions(matchingForName nameQuery: QualifiedTypeName) -> [ExtensionDeclSyntax] {
     let extensionDecls: [ExtensionDeclSyntax] = symbolTable.extensions(for: file)
