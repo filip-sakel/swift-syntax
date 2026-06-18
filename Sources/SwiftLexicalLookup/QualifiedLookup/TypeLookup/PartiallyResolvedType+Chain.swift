@@ -105,7 +105,7 @@ extension NominalTypeDeclSyntax2 {
     case invalidIdentifier(TokenSyntax)
   }
 
-  /// Find the type chain of this source location. External module or `nil` for this module (internal).
+  /// referencing this type from the given lookup loationFind the type chain of this source location. External module or `nil` for this module (internal).
   func findTypeChain(module: Identifier?) -> Result<ChainResult, ChainResolutionFailure> {
     /// Parse the token into a valid identifier or throw
     func parseName(_ token: TokenSyntax) throws(ChainResolutionFailure) -> Identifier {
