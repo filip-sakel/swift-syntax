@@ -21,5 +21,10 @@ import SwiftSyntax
   let redeclarations: [NominalTypeDeclSyntax2]
   // All extensions organized by the module in which they were declared.
   // Only the modules included in this query are included
-  let moduleToExtensions: [Identifier: [ExtensionDeclSyntax]]
+  // let moduleToExtensions: [Identifier: [ExtensionDeclSyntax]]
+  let extensions: [ExtensionDeclSyntax]
+
+  var declGroups: [DeclGroupSyntaxType] {
+    [DeclGroupSyntaxType(exactly: mainDecl)] + extensions.map(DeclGroupSyntaxType.init(exactly:))
+  }
 }

@@ -26,15 +26,15 @@ enum BaseRequest {
   // syntax, we then need to look up the `Element` type member within.
   case resolveSyntax(
     syntax: TypeSyntax,
-    tailTypes: [PartiallyResolvedTypeIdentifier.Component],
-    toResolveExtensionType: QualifiedTypeName?
+    // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
+    // toResolveExtensionType: [QualifiedTypeName]
   )
 
   /// Resolve the given partial type identifiers.
   case resolveIdentifiers(
     [PartiallyResolvedTypeIdentifier],
-    qualifiedTypeTarget: QualifiedTypeName?,
-    toResolveExtensionType: QualifiedTypeName?
+    // qualifiedTypeTarget: QualifiedTypeName?,
+    // toResolveExtensionType: [QualifiedTypeName]
   )
   // case resolveBase(base: TypeSyntax, sourceFile: SourceFileSyntax, memberNames: [Identifier])
 
@@ -47,13 +47,29 @@ enum BaseRequest {
   // a single `Element` tail type. The syntax would then call `.resolveIdentifiers` on `Collection.Element`.
   // Then, we resolve the base type to `Swift::Collection` so we issue a `.resolveQualifiedType` request
   // looking for the `Element` tail type in `Swift::Colection`.
-  case resolveQualifiedType(mainDecl: NominalTypeDeclSyntax2, qualifiedType: QualifiedTypeName, tailTypes: [PartiallyResolvedTypeIdentifier.Component])
+  case resolveQualifiedType(
+    mainDecl: NominalTypeDeclSyntax2,
+    qualifiedType: QualifiedTypeName,
+    // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
+    // toResolveExtensionType: [QualifiedTypeName]
+  )
+}
+
+/// The reason for which we want to resolve this type syntax
+/// to a set of nominal types.
+indirect enum Requester {
+  case toResolveType
+  case toResolveTypeAlias(requester: Requester)
+  case toResolveTypeMembers(components: [PartiallyResolvedTypeIdentifier.Component])
+  case toQualifyType(partiallyQualified: PartiallyResolvedNominalTypeChain, requester: Requester)
+  case toQualifyExtendedType(toType: QualifiedTypeName, requester: Requester)
 }
 // struct Request {
 //   let base: Base
 //   let tailTypes: [PartiallyResolvedTypeIdentifier.Component]
 // }
-fileprivate typealias Request = BaseRequest //(base: BaseRequest, tailTypes: [PartiallyResolvedTypeIdentifier.Component])
+fileprivate typealias Request = (task: BaseRequest, requester: Requester) //(base: BaseRequest, tailTypes: [PartiallyResolvedTypeIdentifier.Component])
+
 
 enum VisitMembersFailure: Error {
   case noTypeMembersInTupleAndFunction
@@ -89,9 +105,10 @@ struct MemberVisitor<Visitor: MemberVisitorProtocol> {
 
   fileprivate mutating func resolveSyntax(
     typeSyntax: TypeSyntax,
-    tailTypes: [PartiallyResolvedTypeIdentifier.Component],
+    // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
+    requester: Requester,
     queue: inout [Request]
-  ) -> Result<MemberLookupResult<Void>, VisitMembersFailure> {
+  ) -> Result<MemberLookupResult<Void>, VisitMembersFailure>? {
     // Resolve type; throw on failure
     let resolutionResult: MemberLookupResult<PartiallyResolvedTypeIdentifier>
     var failures = [TypeResolutionFailure]()
@@ -103,35 +120,35 @@ struct MemberVisitor<Visitor: MemberVisitorProtocol> {
       return .failure(.typeResolutionFailure(failure))
     }
 
-    switch resolutionResult {
+    switch (resolutionResult, requester) {
     // .function and .tuple are only valid without result types
-    case .function(let argumentCount) where tailTypes.isEmpty:
+    case (.function(let argumentCount), .originalRequest):
       return .success(.function(argumentCount: argumentCount))
-    case .tuple(let labels) where tailTypes.isEmpty:
+    case (.tuple(let labels), .originalRequest):
       return .success(.tuple(labels: labels))
     // Diagnose if we have tail types on non-nominal types with no type members
-    case .function, .tuple:
+    case (.function, _), (.tuple, _):
       return .failure(.noTypeMembersInTupleAndFunction)
     // Issue requests for the underlying type identifiers
-    case .memberResults(let typeResults):
-      // queue.append((base: .resolveIdentifiers(typeResults), tailTypes: tailTypes))
-
-      // Add each type identifier, tacking on the tail types.
-      //
-      // E.g. If the original request was
-      //    typealias A = any Collection<Int>
-      //    func f(_: A.Eleemnt) {} // <- Look up `A.Element` here
-      // Then, this is the request resolving `A` to `Collection`.
-      // Hence, we can now add `.Element` to get `Collection.Element`
-      queue.append(.resolveIdentifiers(typeResults.map({ result in
-        result.addingComponents(tailTypes)
-      })))
+    case (.memberResults(let typeResults), let requester):
+      // let expectsSingleResult = switch requester {
+      // case .toBindExtension, .toQualifyType: return true
+      // case .originalRequest, .toResolveTypeAlias
+      // }
+      queue.append((
+        // task: .resolveIdentifiers(typeResults.map({ result in
+        //   result.addingComponents(tailTypes)
+        // })),
+        task: .resolveIdentifiers(typeResults),
+        requester: requester
+      ))
     }
   }
 
   fileprivate mutating func resolveTypeReferences(
     _ typeReferences: [PartiallyResolvedTypeIdentifier],
     // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
+    requester: Requester,
     queue: inout [Request]
   ) -> Result<MemberLookupResult<Void>, VisitMembersFailure> {
     for typeReference in typeReferences {
@@ -157,7 +174,11 @@ struct MemberVisitor<Visitor: MemberVisitorProtocol> {
 
       // We only handle type aliases and nominal types (we skip associated types and generic parameters)
       if let typeAlias = foundType.as(TypeAliasDeclSyntax.self) {
-        queue.append(.resolveSyntax(typeAlias.initializer.value, tailTypes: typeReference.memberChain))
+        // queue.append(.resolveSyntax(typeAlias.initializer.value, tailTypes: typeReference.memberChain))
+        queue.append((
+          task: .resolveSyntax(syntax: typeAlias.initializer.value),
+          requester: .toResolveTypeAlias(requester: requester)
+        ))
         continue
       }
 
@@ -175,11 +196,20 @@ struct MemberVisitor<Visitor: MemberVisitorProtocol> {
 
       // Add the relevant request
       // TODO: Check if just adding tail types is the right approach. Could we be more direct and just go to the parent each time?
-      switch typeChain {
-      case .resolved(let qualifiedTypeName):
-        queue.append(BaseRequest.resolveQualifiedType(
-          qualifiedType: qualifiedTypeName,
-          tailTypes: typeReference.memberChain
+      switch (typeChain, requester) {
+      case (.resolved(let qualifiedTypeName),
+            .toQualifyType(let partiallyQualified, let originalRequester)):
+        // TODO: Figure out how to pass module
+        let module: Identifier? = nil
+        partiallyQualified.resolve(resolvedBase: qualifiedTypeName, module: module)
+      case (.resolved(let qualifiedTypeName), ):
+
+        queue.append((
+          task: BaseRequest.resolveQualifiedType(
+            qualifiedType: qualifiedTypeName,
+            tailTypes: typeReference.memberChain
+          ),
+          requester:
         ))
       case .partiallyResolved(let partiallyResolvedName):
         // queue.append(.resolveBase(
@@ -207,6 +237,16 @@ struct MemberVisitor<Visitor: MemberVisitorProtocol> {
   ) -> Result<MemberLookupResult<Void>, VisitMembersFailure> {
     // Find (extended) nominal type
 
+  }
+
+  fileprivate mutating resolveRequester(_ requester: Requester, types: [NominalType]) {
+    switch requester {
+    case .originalRequest:
+      // Return types
+    case .toBindExtensions(lookForType: QualifiedTypeName, requester: Requester):
+      // TODO: How do we resolve a `bindExtensions`; this is supposed to find qualified types;
+      // how do we supply it with nominal types?
+    }
   }
 
   /// Visit type members from this source location

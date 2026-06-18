@@ -16,6 +16,17 @@ import SwiftSyntax
   case function(argumentCount: Int)
   case tuple(labels: [Identifier?])
   case memberResults([Result])
+
+  func mapMembers<NewResult>(_ transform: (Result) -> NewResult) -> MemberLookupResult<NewResult> {
+    switch self {
+    case .function(let argumentCount):
+      return .function(argumentCount: argumentCount)
+    case .tuple(let labels):
+      return .tuple(labels: labels)
+    case .memberResults(let results):
+      return .memberResults(results.map(transform))
+    }
+  }
 }
 
 // extension MemberLookupResult where Result == ValueDeclSyntax {
