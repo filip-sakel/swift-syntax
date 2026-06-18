@@ -111,30 +111,7 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     if let typeAlias = foundType.as(TypeAliasDeclSyntax.self) {
       baseLookupResult = resolveSyntax(typeSyntax: typeAlias.initializer.value)
     } else if let nominalDecl = foundType.as(NominalTypeDeclSyntax2.self) {
-      // Get the type chain
-      let typeChain: ChainResult
-      switch nominalDecl.findTypeChain(module: nil) {
-      case .success(let result):
-        typeChain = result
-      case .failure(let failure):
-        return .failure(.other(failure))
-      }
-
-      switch typeChain {
-      case .resolved(let qualifiedTypeName):
-        baseLookupResult = Result.success(
-          MemberLookupResult.memberResults([(mainDecl: nominalDecl, name: qualifiedTypeName)])
-        )
-      case .partiallyResolved(let partiallyResolvedName):
-        let qualifiedBaseResults = resolveSyntax(typeSyntax: partiallyResolvedName.base)
-        let module: Identifier? = nil // TODO: Find the actual module
-        // TODO: Keep track of the main decl
-        baseLookupResult = qualifiedBaseResults.map({ qualifiedBaseResult in
-          qualifiedBaseResult.mapMembers({ qualifiedBase in
-            partiallyResolvedName.resolve(resolvedBase: qualifiedBase, module: module)
-          })
-        })
-      }
+      baseLookupResult = resolveNominalDecl(nominalDecl: nominalDecl).map({ MemberLookupResult.memberResults([$0]) })
     } else {
       // No members for generic parameters and associated types
       return .success(MemberLookupResult.memberResults([]))
@@ -170,6 +147,34 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
       )
       let typeDecls: [TypeDeclSyntax] = nominalType.declGroups.flatMap({ declGroup in
         declGroup.findDirectTypes(matching: firstTypeMember)
+      })
+      // TODO: Call resolveNominalDecl
+    }
+  }
+
+  mutating func resolveNominalDecl(nominalDecl: NominalTypeDeclSyntax2) -> Result<MinimalNominal, Failure> {
+    // Get the type chain
+    let typeChain: ChainResult
+    switch nominalDecl.findTypeChain(module: nil) {
+    case .success(let result):
+      typeChain = result
+    case .failure(let failure):
+      return .failure(.other(failure))
+    }
+
+    switch typeChain {
+    case .resolved(let qualifiedTypeName):
+      return Result.success(
+        MemberLookupResult.memberResults([(mainDecl: nominalDecl, name: qualifiedTypeName)])
+      )
+    case .partiallyResolved(let partiallyResolvedName):
+      let qualifiedBaseResults = resolveSyntax(typeSyntax: partiallyResolvedName.base)
+      let module: Identifier? = nil // TODO: Find the actual module
+      // TODO: Keep track of the main decl
+      return qualifiedBaseResults.map({ qualifiedBaseResult in
+        qualifiedBaseResult.mapMembers({ qualifiedBase in
+          partiallyResolvedName.resolve(resolvedBase: qualifiedBase, module: module)
+        })
       })
     }
   }
