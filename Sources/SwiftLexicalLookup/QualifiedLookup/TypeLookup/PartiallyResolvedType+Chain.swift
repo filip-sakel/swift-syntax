@@ -20,16 +20,24 @@ enum ChainResult {
 struct PartiallyResolvedNominalTypeChain {
   // Base and members should be in the same file
   let base: TypeSyntax
+  /// The names of the members.
+  ///
+  /// E.g., in `extension Int { struct A { struct B {} } }` the
+  /// members are "A" and "B"
   let memberNames: [Identifier]
+  /// The main declaration of the partially resolved type or `nil` if the
+  /// type is not yet resolved (``memberNames`` is empty).
+  let mainDecl: NominalTypeDeclSyntax2?
   let sourceFile: SourceFileSyntax
 
   // IMPORTANT: Base and members must share the same fileSyntax root.
-  init(base: TypeSyntax, members: [(decl: NominalTypeDeclSyntax2, name: Identifier)]) {
+  init(base: TypeSyntax, members: [(mainDecl: NominalTypeDeclSyntax2, name: Identifier)]) {
     // precondition(base.root == members.root, "Invalid root")
     guard let sourceFile = base.root.as(SourceFileSyntax.self) else {
       preconditionFailure("Invalid root, not source file")
     }
     // Map and check source file
+    // TODO: Wrap in some sort of SymbolTableSyntax<>§
     let memberNames = members.map({ (decl, name) in
       assert(decl.root == sourceFile.root, "Invalid decl root, not source file")
       return name
@@ -37,12 +45,21 @@ struct PartiallyResolvedNominalTypeChain {
 
     self.base = base
     self.memberNames = memberNames
+    self.mainDecl = members.last?.mainDecl
     self.sourceFile = sourceFile
   }
 
   // Resolve using now-qualified base. Module name or `nil` for this module (internal).
-  func resolve(resolvedBase: QualifiedTypeName, module: Identifier?) -> QualifiedTypeName {
-    switch resolvedBase {
+  func resolve(resolvedBase: MinimalNominal, module: Identifier?) -> MinimalNominal {
+    // Get the type's main declaration.
+    //
+    // If ``memberNames`` is empty, we didn't have a resolved main declaration so
+    // ``mainDecl`` is `nil`; if ``memberNames`` isn't an empty, ``mainDecl`` should
+    // have been set.
+    let resolvedMainDecl = mainDecl ?? resolvedBase.mainDecl
+
+    // Resolve the name
+    switch resolvedBase.name {
     case .topLevel(let globalType):
       let qualifier: QualifiedTypeNameGlobalType.Qualifier =
         if let module {
@@ -53,11 +70,17 @@ struct PartiallyResolvedNominalTypeChain {
       let memberComponents: [QualifiedTypeNameGlobalType.Component] = memberNames.map({ name in
         QualifiedTypeNameGlobalType.Component(qualifier: qualifier, name: name)
       })
-      return QualifiedTypeName.topLevel(
-        globalType.addingComponents(memberComponents)
+      return (
+        mainDecl: resolvedMainDecl,
+        name: QualifiedTypeName.topLevel(
+          globalType.addingComponents(memberComponents)
+        )
       )
     case .nestedScope(let scope, let type):
-      return QualifiedTypeName.nestedScope(scope: scope, type: type.addingComponents(memberNames))
+      return (
+        mainDecl: resolvedMainDecl,
+        name: QualifiedTypeName.nestedScope(scope: scope, type: type.addingComponents(memberNames))
+      )
     }
   }
 }
@@ -122,12 +145,12 @@ extension NominalTypeDeclSyntax2 {
 
       var ancestor: Syntax? = parent
       // All the members. Since we include `self`, `members.count>=1`
-      var members = [(decl: self, name: try parseName(self.name))]
+      var members = [(mainDecl: self, name: try parseName(self.name))]
 
       while let currentAncestor = ancestor {
         // Nominal types go to the "chain"
         if let nominalTypeDecl = currentAncestor.as(NominalTypeDeclSyntax2.self) {
-          try members.append((decl: nominalTypeDecl, name: parseName(nominalTypeDecl.name)))
+          try members.append((mainDecl: nominalTypeDecl, name: parseName(nominalTypeDecl.name)))
         }
         // Extensions can't be resolved right now.
         else if let extensionDecl = currentAncestor.as(ExtensionDeclSyntax.self) {

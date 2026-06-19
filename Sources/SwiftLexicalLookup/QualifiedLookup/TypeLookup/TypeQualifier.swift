@@ -13,6 +13,8 @@
 import SwiftIfConfig
 import SwiftSyntax
 
+/// The minimal defining components of a nominal type: the main declaration and the qualified name.
+/// Unlike ``NominalType``, doesn't include extensions.
 typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTypeName)
 
 /// Finds the main declaration and qualified name of the nominal types
@@ -41,13 +43,14 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     _ result: Result<MemberLookupResult<MinimalNominal>, Failure>,
     to collectiveResult: inout MemberLookupResult<MinimalNominal>?
   ) -> Failure? {
-    // Simply log failures  as other type results might succeed
+    // Simply log failures as other type results might succeed
     let lookupResult: MemberLookupResult<MinimalNominal>
     switch result {
     case .success(let result):
       lookupResult = result
     case .failure(let failure):
       self.failures.append(.other(failure))
+      return nil
     }
 
     switch (collectiveResult, lookupResult) {
@@ -169,7 +172,6 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
       // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
       // requester: Requester,
   ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
-    var results = [MemberLookupResult<QualifiedTypeName>]()
     // Get the base type
     let (optionalModule, typeName) = typeReference.base
 
@@ -215,7 +217,11 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
         // An array with the selectMember, or empty if not provided
         let memberChainPrefix = selectMember.map({ [$0] }) ?? []
 
-        return resolveTypeDecl(typeDecl: typeDecl, memberChain: memberChainPrefix + typeReference.memberChain)
+        return resolveTypeDecl(
+          typeDecl: typeDecl,
+          memberChain: memberChainPrefix + typeReference.memberChain,
+          originatingSyntax: originatingSyntax
+        )
       case .lookInsideExtension(let extensionDecl, let selectMember):
         // We might have to look inside an extension
         // For instance:
@@ -245,7 +251,9 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
 
         return resolveTypeDecl(
           typeDecl: TypeDeclSyntax(enclosingType.mainDecl),
-          memberChain: memberChainPrefix + typeReference.memberChain
+          memberChain: memberChainPrefix + typeReference.memberChain,
+          // Resolve from the location of the extension declaration
+          originatingSyntax: extensionDecl.extendedType
         )
       case .lookForGenericParameters(let extensionDecl):
         // Resolve extended type
@@ -261,7 +269,11 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
         // TODO: Should we diagnose
         guard let genericParameter = baseType.mainDecl.findGenericParameters(withName: typeName).first else { continue }
         // Forward to the type-declaration resolver
-        return resolveTypeDecl(typeDecl: TypeDeclSyntax(genericParameter), memberChain: typeReference.memberChain)
+        return resolveTypeDecl(
+          typeDecl: TypeDeclSyntax(genericParameter),
+          memberChain: typeReference.memberChain,
+          originatingSyntax: originatingSyntax
+        )
       case .lookInModule:
         // TODO: Handle
         break
@@ -277,7 +289,8 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
 
   mutating func resolveTypeDecl(
     typeDecl: TypeDeclSyntax,
-    memberChain: [PartiallyResolvedTypeIdentifier.Component]
+    memberChain: [PartiallyResolvedTypeIdentifier.Component],
+    originatingSyntax: TypeSyntax
   ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
     // We only handle type aliases and nominal types (we skip associated types and generic parameters)
     let baseLookupResult: Result<MemberLookupResult<MinimalNominal>, Failure>
@@ -299,7 +312,6 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
       case .partiallyResolved(let partiallyResolvedName):
         let qualifiedBaseResults = resolveSyntax(typeSyntax: partiallyResolvedName.base)
         let module: Identifier? = nil  // TODO: Find the actual module
-        // TODO: Keep track of the main decl
         baseLookupResult = qualifiedBaseResults.map({ qualifiedBaseResult in
           qualifiedBaseResult.mapMembers({ qualifiedBase in
             partiallyResolvedName.resolve(resolvedBase: qualifiedBase, module: module)
@@ -336,16 +348,20 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     // Perform qualified type lookup
     var result: MemberLookupResult<MinimalNominal>? = nil
     for (mainDecl, name) in baseTypes {
-      let extensions = bindExtensions(matchingForName: name)
+      let extensions = bindExtensions(matchingForName: name, resolvedFrom: originatingSyntax)
       let nominalType = NominalType(
         qualifiedName: name,
         mainDecl: mainDecl,
         redeclarations: [],
         extensions: extensions
       )
-      // TODO: Find lookup position
       // TODO: Figure out imported modules
-      let lookupPosition: (file: SourceFileSyntax, position: AbsolutePosition)
+      guard let file = originatingSyntax.root.as(SourceFileSyntax.self) else {
+        fatalError(
+          "[SwiftLexicalLookup] Internal error: Unexpectedly had to resolve type syntax whose root isn't a source file."
+        )
+      }
+      let lookupPosition = (file: file, position: originatingSyntax.position)
       let typeDeclsResult = nominalType.findMemberTypes(
         component: firstTypeMember,
         lookupPosition: lookupPosition,
@@ -373,7 +389,11 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
 
       // Resolve this type declaration and add it to the results
       if let criticalFailure = addResult(
-        resolveTypeDecl(typeDecl: memberTypeDecl, memberChain: remainingMemberChain),
+        resolveTypeDecl(
+          typeDecl: memberTypeDecl,
+          memberChain: remainingMemberChain,
+          originatingSyntax: originatingSyntax
+        ),
         to: &result
       ) {
         return .failure(criticalFailure)
@@ -410,7 +430,16 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
   //   }
   // }
 
-  mutating func bindExtensions(matchingForName nameQuery: QualifiedTypeName) -> [ExtensionDeclSyntax] {
+  mutating func bindExtensions(
+    matchingForName nameQuery: QualifiedTypeName,
+    resolvedFrom originatingSyntax: TypeSyntax
+  ) -> [ExtensionDeclSyntax] {
+    // TODO: Wrap the type syntax in a SymbolTableSyntax<TypeSyntax> that guarantees this
+    guard let file = originatingSyntax.root.as(SourceFileSyntax.self) else {
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Unexpectedly had to resolve type syntax whose root isn't a source file."
+      )
+    }
     let extensionDecls: [ExtensionDeclSyntax] = symbolTable.findAllExtensions(
       accessibleFrom: file,
       configuredRegions: configuredRegions
@@ -433,6 +462,7 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
           extendedType = type
         case .success(.function), .success(.tuple):
           failures.append(.cannotExtendNonNominal(extensionDecl))
+          continue
         case .failure(let failure):
           failures.append(failure)
           continue
@@ -441,5 +471,7 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
 
       if extendedType.name == nameQuery { matches.append(extensionDecl) }
     }
+
+    return matches
   }
 }
