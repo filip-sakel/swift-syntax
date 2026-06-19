@@ -13,14 +13,17 @@
 import SwiftSyntax
 
 // A global type name, `Swift::Int._(MyFileA.swift)::MyType`.
-public struct QualifiedTypeNameGlobalType: CustomDebugStringConvertible {
-  public enum Qualifier {
+public struct QualifiedTypeNameGlobalType: Hashable, CustomDebugStringConvertible {
+  public enum Qualifier: Hashable {
     case `internal`(fileID: SyntaxIdentifier)
     case external(moduleName: Identifier)
   }
   /// A component of a qualified type name, external or internal. For instance,
   /// `Swift::Int` (external) and `_(FileA.swift)::MyType` (internal).
-  public typealias Component = (qualifier: Qualifier, name: Identifier)
+  public struct Component: Hashable {
+    let qualifier: Qualifier
+    let name: Identifier
+  }
 
   /// The types components. Guaranteed to be non-empty
   public let components: [Component]
@@ -64,7 +67,7 @@ public struct QualifiedTypeNameGlobalType: CustomDebugStringConvertible {
 }
 
 // Array of identifiers, e.g., `A.B.C`
-public indirect enum QualifiedTypeNameNestedType: CustomDebugStringConvertible {
+public indirect enum QualifiedTypeNameNestedType: Hashable, CustomDebugStringConvertible {
   case base(Identifier)
   case member(base: QualifiedTypeNameNestedType, name: Identifier)
 
@@ -99,7 +102,7 @@ public indirect enum QualifiedTypeNameNestedType: CustomDebugStringConvertible {
 }
 
 // TODO: Copy relevant comments from `ResolvedScope` and `ResolvedTypeName`
-@_spi(_QualifiedName) public enum QualifiedTypeName {
+@_spi(_QualifiedName) public enum QualifiedTypeName: Hashable {
   /// Specifies top-level type: a collection of internal and external components
   case topLevel(QualifiedTypeNameGlobalType)
   // Specifies an (internal) nested-level scope and a dot-separated sequence of identifiers.

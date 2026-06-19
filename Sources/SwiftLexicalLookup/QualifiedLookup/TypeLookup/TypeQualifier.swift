@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-import SwiftSyntax
 import SwiftIfConfig
+import SwiftSyntax
 
 typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTypeName)
 
@@ -30,7 +30,7 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
   var failures = [Failure]()
   var boundExtensions = [ExtensionDeclSyntax: MinimalNominal]()
 
-  let moduleMap: [SourceFileSyntax: Identifier]
+  let symbolTable: SymbolTable3
   let configuredRegions: ConfiguredRegions
 
   /// Adds the given result to a collective result.
@@ -145,7 +145,11 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
       //   extension Int {
       //     func f() { MyModule::f() } // ❌ Member `f` not imported through `MyModule`
       //   }
-      foundType = findExternalTopLevelUnqualifiedType(module: module, topLevelName: typeName, fromFileWithID: position.fileID)
+      foundType = findExternalTopLevelUnqualifiedType(
+        module: module,
+        topLevelName: typeName,
+        fromFileWithID: position.fileID
+      )
     } else {
       // Scoped unqualified lookup in this module
       foundType = findUnqualifiedType(name: typeName, at: position)
@@ -178,7 +182,7 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
         )
       case .partiallyResolved(let partiallyResolvedName):
         let qualifiedBaseResults = resolveSyntax(typeSyntax: partiallyResolvedName.base)
-        let module: Identifier? = nil // TODO: Find the actual module
+        let module: Identifier? = nil  // TODO: Find the actual module
         // TODO: Keep track of the main decl
         baseLookupResult = qualifiedBaseResults.map({ qualifiedBaseResult in
           qualifiedBaseResult.mapMembers({ qualifiedBase in
@@ -230,7 +234,7 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
         component: firstTypeMember,
         lookupPosition: lookupPosition,
         importedModules: [],
-        moduleMap: moduleMap,
+        moduleMap: symbolTable.moduleMap,
         configuredRegions: configuredRegions
       )
       let memberTypeDecl: TypeDeclSyntax
@@ -252,7 +256,10 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
       }
 
       // Resolve this type declaration and add it to the results
-      if let criticalFailure = addResult(resolveTypeDecl(typeDecl: memberTypeDecl, memberChain: remainingMemberChain), to: &result) {
+      if let criticalFailure = addResult(
+        resolveTypeDecl(typeDecl: memberTypeDecl, memberChain: remainingMemberChain),
+        to: &result
+      ) {
         return .failure(criticalFailure)
       }
     }
@@ -288,7 +295,10 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
   // }
 
   mutating func bindExtensions(matchingForName nameQuery: QualifiedTypeName) -> [ExtensionDeclSyntax] {
-    let extensionDecls: [ExtensionDeclSyntax] = symbolTable.extensions(for: file)
+    let extensionDecls: [ExtensionDeclSyntax] = symbolTable.findAllExtensions(
+      accessibleFrom: file,
+      configuredRegions: configuredRegions
+    )
     var matches = [ExtensionDeclSyntax]()
     for extensionDecl in extensionDecls {
       let extendedType: MinimalNominal
@@ -324,51 +334,5 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
   ) -> Result<MemberLookupResult<Void>, VisitMembersFailure> {
     // Find (extended) nominal type
 
-  }
-
-  fileprivate mutating resolveRequester(_ requester: Requester, types: [NominalType]) {
-    switch requester {
-    case .originalRequest:
-      // Return types
-    case .toBindExtensions(lookForType: QualifiedTypeName, requester: Requester):
-      // TODO: How do we resolve a `bindExtensions`; this is supposed to find qualified types;
-      // how do we supply it with nominal types?
-    }
-  }
-
-  /// Visit type members from this source location
-  func visitMembers<Value>(
-    of typeSyntax: TypeSyntax,
-    at position: (fileID: SourceFileSyntax, position: AbsolutePosition),
-    failures: inout [TypeResolutionFailure],
-    map: (_ member: ValueDeclSyntax) -> (Value?, continue: Bool)
-  ) -> Result<MemberLookupResult<Value>, VisitMembersFailure> {
-
-    // Check types
-    // TODO: Make non-recursive
-    var requests = [Request]()
-
-    // Resolve type chain for this source location
-
-  }
-
-
-  func getTypeMembers() {
-    visitMembers(
-      of: partiallyResolvedName.base,
-      at: (partiallyResolvedName.sourceFile, AbsolutePosition(utf8Offset: 0)),
-      failures: &failures,
-      map: { member -> (TypeDeclSyntax?, continue: Bool) in
-        // Only look at type declarations
-        guard let typeDecl = member.as(TypeDeclSyntax.self) else { return (nil, true) }
-        // If we're looking for a specific type member, check it matches
-        if let memberTypeName = partiallyResolvedName.members.first,
-          memberTypeName != Identifier(validating: typeDecl.name)
-        {
-          return (nil, true)
-        }
-        return (typeDecl, continue: true)
-      }
-    )
   }
 }
