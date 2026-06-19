@@ -135,6 +135,19 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     let (optionalModule, typeName) = typeReference.base
 
     // Perfom unqualified lookup up to find the base type's declaration
+    // FIXME: We may get .lookForMembers->resolve parent->type-member lookup,
+    // or .lookForGenericParameters->resolve extended syntax->find generic params!!
+    // TODO: Think about whether we should have the base resolved (do we split cases for extended
+    // types and plain lookForMembers if we still need to qualify both?) and if we do,
+    // how do we connect it back to the original request
+    //
+    // e.g.
+    //   extension String.UTF8View { <- Resolve
+    //     struct A { // <- Resolve
+    //       struct B {} // <- Look up here
+    //     }
+    //   }
+    // how do we connect these resolves back?
     let foundType: TypeDeclSyntax
     if let module = optionalModule {
       // Top-level unqualified lookup in external module
