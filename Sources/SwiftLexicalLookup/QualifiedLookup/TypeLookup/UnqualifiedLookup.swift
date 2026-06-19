@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+import SwiftIfConfig
 import SwiftSyntax
 
 // TODO: Every parent type needs to be resolved because even if we look for `A`
@@ -18,73 +19,71 @@ import SwiftSyntax
 // I.e. Even if we find a matching type decl (and we know we can exit early),
 //      qualifying the type means qualifying all parent scopes, which necessitates
 //      resolving parent scopes.
-enum TypeResultLookup {
-  case nominal(NominalTypeDeclSyntax2)
-  case `extension`(ExtensionDeclSyntax)
-  case lookInside(DeclGroupSyntaxType)
-  case lookForGenericParameters(GenericParameterListSyntax)
+enum UnqualifiedTypeLookupResult {
+  /// Resolve the given type decl and look for the members in the given
+  /// member chain (if not empty).
+  /// E.g.
+  /// ```swift
+  /// struct A {
+  ///   func f(_: A) {} // Look up `A` here
+  /// }
+  /// ```
+  /// We'll generate two `lookInside(type:memberChain:)` requests.
+  /// 1. One will be to resolve `struct A` selecting the member named
+  ///    `.A` to see if `A` has any member types named `Self`.
+  /// 2. The second request will be to resolve `struct A` with no selected member
+  ///    (i.e. type `A` itself)
+  case lookInsideType(TypeDeclSyntax, selectMember: PartiallyResolvedTypeIdentifier.Component?)
 
-  enum Resolution {
-
-  }
-  enum Failure: Error {
-  }
-  func resolve() -> Result<TypeNameRef, Failure> {
-    switch self {
-    case .declGroup(let declGroup):
-
-    }
-  }
+  /// Resolve the extension's extended type and look for the members in the given
+  /// member chain (if not empty).
+  ///
+  /// E.g.
+  /// ```swift
+  /// extension A {
+  ///   func f(_: Self) {} // Look up `Self` here
+  /// }
+  /// ```
+  /// We'll generate two `lookInside(extension:memberChain:)` requests.
+  /// 1. One will be to resolve `extension A` selecting the member named
+  ///    `.Self` to see if `A` has any member types named `Self`.
+  /// 2. The second request will be to resolve `extension A` with no selected member
+  ///    (i.e. the extended type `A` itself)
+  case lookInsideExtension(ExtensionDeclSyntax, selectMember: PartiallyResolvedTypeIdentifier.Component?)
+  /// E.g.
+  /// ```swift
+  /// extension Array {
+  ///   func f(_: Element) {} // <- Element refers to a generic parameter
+  /// }
+  /// ```
+  case lookForGenericParameters(extensionDecl: ExtensionDeclSyntax)
+  case lookInModule
+  case lookInImports([Identifier])
 }
 
-@_spi(_QualifiedLookup) public enum UnqualifiedResult {
-  case lookIn(PartiallyResolvedType, includeGenericParams: Bool)
-}
-
-func findUnqualifiedType(name: Identifier, at position: (fileID: SourceFileSyntax, position: AbsolutePosition)) -> TypeDeclSyntax {
-
-}
+// @_spi(_QualifiedLookup) public enum UnqualifiedResult {
+//   case lookIn(PartiallyResolvedType, includeGenericParams: Bool)
+// }
 
 extension SyntaxProtocol {
-  func findUnqualifiedType1(identifier: Identifier?, name: Identifier?) -> TypeDeclSyntax? {
-    // Get next parent
-    var genericOrAssociated = [GenericParameterSyntax]()
-    var parentNames = [TypeDeclSyntax]()
+  // func findUnqualifiedType1(identifier: Identifier?, name: Identifier?) -> TypeDeclSyntax? {
+  //   // Get next parent
+  //   var genericOrAssociated = [GenericParameterSyntax]()
+  //   var parentNames = [TypeDeclSyntax]()
+  //
+  // }
 
-  }
-
-
-  func findUnqualifiedType2(
-    _ typeName: TokenSyntax
-  ) -> [DeclSyntax] {
-    // Find first nominal-type parent. Note that we can cross declaration-scope boundaries, e.g.
-    //   struct A {
-    //     func f() { // <- declaration-scope boundary
-    //       var a: Self = A() // `Self` -> `A`
-    //     }
-    //   }
-    // if typeID.tokenKind == .keyword(.Self) {
-    //
-    // }
-
-    // Convert to identifier
-    guard let typeID = Identifier(validating: typeName) else { return [] }
-
-    // TODO: Handle generic type decls (show up as a .fromScope(GenericParameterSyntax))
-    func handleDecl(_ decl: DeclSyntax) -> Bool {
-      return switch decl.kind {
-      case .structDecl, .enumDecl, .classDecl, .actorDecl, .protocolDecl,
-        .typeAliasDecl, .associatedTypeDecl:
-        self[scope:]
-      default:
-        false
-      }
-    }
-
-    let results = typeName.lookup(typeID, with: LookupConfig(_lookupTopScope: true))
-    results.flatMap({ result -> [TypeSyntax] in
+  func findUnqualifiedType(
+    _ typeName: Identifier,
+    configuredRegions: ConfiguredRegions?
+  ) -> [UnqualifiedTypeLookupResult] {
+    let results: [LookupResult] = self.lookup(
+      typeName,
+      with: LookupConfig(configuredRegions: configuredRegions, _lookupTopScope: true)
+    )
+    let filteredResults = results.flatMap({ result -> [UnqualifiedTypeLookupResult] in
       switch result {
-      case .fromScope(let scope, let names):
+      case .fromScope(_, let names):
         // Note that we skip non-type declarations, even if they have the same name.
         // For instance:
         //   struct A {
@@ -94,47 +93,59 @@ extension SyntaxProtocol {
         //       var hey: A  = self
         //     }
         //   }
-        names.compactMap({ name -> TypeSyntax? in
+        return names.compactMap({ name -> UnqualifiedTypeLookupResult? in
           switch name {
           case .implicit(.`Self`(let decl)):
             // TODO: Should probably be DeclGroupSyntax to begin with
-            guard let groupDecl = decl.as(DeclGroupSyntaxType.self) else { return nil }
-            return groupDecl.type
+            guard let declGroup = decl.as(DeclGroupSyntaxType.self) else { return nil }
+            if let nominalDecl = declGroup.as(NominalTypeDeclSyntax2.self) {
+              return UnqualifiedTypeLookupResult.lookInsideType(TypeDeclSyntax(nominalDecl), selectMember: nil)
+            } else if let extensionDecl = declGroup.as(ExtensionDeclSyntax.self) {
+              return UnqualifiedTypeLookupResult.lookInsideExtension(extensionDecl, selectMember: nil)
+            } else {
+              assertionFailure(
+                "[SwiftLexicalLookup] Internal error: Expected declaration group to either be a nominal type or extension declaration."
+              )
+              return nil
+            }
           case .declaration(let decl):
-            // Skip non-type declarations
-            guard
-              let valueDecl = decl.as(ValueDeclSyntax.self),
-              let typeName = valueDecl.typeName
-            else { return nil }
+            // TODO: Should this be a ValueDeclSyntax?
 
-            return TypeSyntax(IdentifierTypeSyntax(name: typeName))
+            // Skip non-type declarations
+            //
+            // Note: We handle extensions above
+            guard let typeDecl = TypeDeclSyntax(decl) else { return nil }
+
+            return UnqualifiedTypeLookupResult.lookInsideType(typeDecl, selectMember: nil)
           // Identifiers, `self`, `newValue`, `error`, and `oldValue` can't be type decls.
-          case .identifier, .implicit(.`self`), .implicit(.newValue), .implicit(.oldValue), .implicit(.error):
+          // Also, equivalent names always refers to identifiers in switch cases
+          case .identifier, .implicit(.`self`), .implicit(.newValue), .implicit(.oldValue),
+            .implicit(.error), .equivalentNames:
             return nil
           }
         })
-      case .lookForMembers(let declGroup):
-        // let typeDecls = declGroup.findDirectMembers(
-        //   name: DeclNameRef(baseName: .identifier(identifier: typeID, args: nil)),
-        //   kind: .includeTypes
-        // )
-        // return typeDecls.compactMap({ typeDecl in
-        //   guard let typeName = typeDecl.typeName else {
-        //     assertionFailure("[SwiftLexicalLookup] Internal Error: Expected type-only lookup to yield only types.")
-        //   }
-        //   return TypeSyntax(IdentifierTypeSyntax(name: typeName))
-        // })
-        declGroup
-      case .lookForGenericParameters(let genericParams):
-        return TypeSyntax(
-          IdentifierTypeSyntax(
-            name: TokenSyntax.init(.identifier(typeID), presence: .present).with(\.position, genericParams.position)
+      case .lookForMembers(let decl):
+        // TODO: Should probably already be a `DeclGroupSyntaxType`
+        guard let declGroup = DeclGroupSyntaxType(decl) else { return [] }
+        let selectMember = PartiallyResolvedTypeIdentifier.Component(module: nil, name: typeName)
+        if let nominalDecl = declGroup.as(NominalTypeDeclSyntax2.self) {
+          return [UnqualifiedTypeLookupResult.lookInsideType(TypeDeclSyntax(nominalDecl), selectMember: selectMember)]
+        } else if let extensionDecl = declGroup.as(ExtensionDeclSyntax.self) {
+          return [UnqualifiedTypeLookupResult.lookInsideExtension(extensionDecl, selectMember: selectMember)]
+        } else {
+          assertionFailure(
+            "[SwiftLexicalLookup] Internal error: Expected declaration group to either be a nominal type or extension declaration."
           )
-        )
+          return []
+        }
+      case .lookForGenericParameters(let extensionDecl):
+        return [.lookForGenericParameters(extensionDecl: extensionDecl)]
       // Closure parameters can't be type declarations
       case .lookForImplicitClosureParameters(_):
         return []
       }
     })
+    // TODO: Expose imports
+    return filteredResults + [.lookInModule, .lookInImports([])]
   }
 }

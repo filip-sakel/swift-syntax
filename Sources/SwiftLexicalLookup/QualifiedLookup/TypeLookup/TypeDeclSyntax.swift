@@ -67,3 +67,23 @@ extension TypeDeclSyntax {
     }
   }
 }
+
+// MARK: Upcasts
+
+extension TypeDeclSyntax {
+  public init(_ nominalType: NominalTypeDeclSyntax2) {
+    self = Syntax(nominalType).cast(TypeDeclSyntax.self)
+  }
+
+  public init(_ typeAlias: TypeAliasDeclSyntax) {
+    self = Syntax(typeAlias).cast(TypeDeclSyntax.self)
+  }
+
+  public init(_ associatedType: AssociatedTypeDeclSyntax) {
+    self = Syntax(associatedType).cast(TypeDeclSyntax.self)
+  }
+
+  public init(_ genericParameter: GenericParameterSyntax) {
+    self = Syntax(genericParameter).cast(TypeDeclSyntax.self)
+  }
+}

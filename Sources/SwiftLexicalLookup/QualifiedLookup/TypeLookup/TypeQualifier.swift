@@ -68,6 +68,41 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     return nil
   }
 
+  /// Resolve the given type syntax from an extension declaration
+  /// to a single nominal type.
+  ///
+  /// Note that we only diagnose extending tuples/functions and compositions
+  /// (e.g. `Codable = Encodable & Decodable`). However, we don't diagnose
+  /// things like extending an existential (e.g. `extension any Collection`).
+  fileprivate mutating func resolveExtendedTypeSyntax(
+    extensionDecl: ExtensionDeclSyntax
+  ) -> Result<MinimalNominal, Failure> {
+    // Throw if syntax resolution fails
+    let lookupResult: MemberLookupResult<MinimalNominal>
+    switch resolveSyntax(typeSyntax: extensionDecl.extendedType) {
+    case .success(let result):
+      lookupResult = result
+    case .failure(let failure):
+      return .failure(failure)
+    }
+
+    // Extract nominal types (tuples/functions aren't nominal)
+    let memberResults: [MinimalNominal]
+    switch lookupResult {
+    case .memberResults(let results):
+      memberResults = results
+    case .function, .tuple:
+      return .failure(.cannotExtendNonNominal(extensionDecl))
+    }
+
+    // Extensions type syntax should resolve to exactly one nominal type
+    guard let nominalType = memberResults.first, memberResults.count == 1 else {
+      return .failure(.cannotExtendNonNominal(extensionDecl))
+    }
+
+    return .success(nominalType)
+  }
+
   fileprivate mutating func resolveSyntax(
     typeSyntax: TypeSyntax,
     // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
@@ -148,7 +183,7 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     //     }
     //   }
     // how do we connect these resolves back?
-    let foundType: TypeDeclSyntax
+    let baseLookupResults: [UnqualifiedTypeLookupResult]
     if let module = optionalModule {
       // Top-level unqualified lookup in external module
       //
@@ -158,18 +193,82 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
       //   extension Int {
       //     func f() { MyModule::f() } // ❌ Member `f` not imported through `MyModule`
       //   }
-      foundType = findExternalTopLevelUnqualifiedType(
+      baseLookupResults = findExternalTopLevelUnqualifiedType(
         module: module,
         topLevelName: typeName,
         fromFileWithID: position.fileID
       )
     } else {
       // Scoped unqualified lookup in this module
-      foundType = findUnqualifiedType(name: typeName, at: position)
+      let token: TokenSyntax
+      baseLookupResults = token.findUnqualifiedType(typeName, configuredRegions: configuredRegions)
     }
 
-    // Resolve the type declaration with the member chain
-    return resolveTypeDecl(typeDecl: foundType, memberChain: typeReference.memberChain)
+    // Find first matching type declaration
+    for lookupResult in baseLookupResults {
+      switch lookupResult {
+      case .lookInsideType(let typeDecl, let selectMember):
+        // An array with the selectMember, or empty if not provided
+        let memberChainPrefix = selectMember.map({ [$0] }) ?? []
+
+        return resolveTypeDecl(typeDecl: typeDecl, memberChain: memberChainPrefix + typeReference.memberChain)
+      case .lookInsideExtension(let extensionDecl, let selectMember):
+        // We might have to look inside an extension
+        // For instance:
+        //   extension Int {
+        //     struct A {
+        //       typealias B = String
+        //     }
+        //   }
+        //   extension Int {
+        //     func f(_: A.B) {} // Look up `A.B` here
+        //   }
+        // To find `A.B`, we first need to perform unqualified type lookup to find the base `A`
+        // and then look for the member chain `.B`.
+        // One of the lookup results will be to look for `A` in `extension Int`.
+        // The enclosing type is `Swift::Int.(MyFile.swift)::A`. Then, to find `A.B` we'll
+        // just append `.A` to the member chain. Hence, we look for `.A.B` in `Swift::Int`
+        let enclosingType: MinimalNominal
+        switch resolveExtendedTypeSyntax(extensionDecl: extensionDecl) {
+        case .success(let type):
+          enclosingType = type
+        case .failure(let failure):
+          return .failure(failure)
+        }
+
+        // An array with the selectMember, or empty if not provided
+        let memberChainPrefix = selectMember.map({ [$0] }) ?? []
+
+        return resolveTypeDecl(
+          typeDecl: TypeDeclSyntax(enclosingType.mainDecl),
+          memberChain: memberChainPrefix + typeReference.memberChain
+        )
+      case .lookForGenericParameters(let extensionDecl):
+        // Resolve extended type
+        let baseType: MinimalNominal
+        switch resolveExtendedTypeSyntax(extensionDecl: extensionDecl) {
+        case .success(let type):
+          baseType = type
+        case .failure(let failure):
+          return .failure(failure)
+        }
+
+        // Check for generic parameters
+        // TODO: Should we diagnose
+        guard let genericParameter = baseType.mainDecl.findGenericParameters(withName: typeName).first else { continue }
+        // Forward to the type-declaration resolver
+        return resolveTypeDecl(typeDecl: TypeDeclSyntax(genericParameter), memberChain: typeReference.memberChain)
+      case .lookInModule:
+        // TODO: Handle
+        break
+      case .lookInImports:
+        // TODO: Handle
+        break
+      }
+    }
+
+    // No type matched
+    return .success(.memberResults([]))
   }
 
   mutating func resolveTypeDecl(
