@@ -68,6 +68,66 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     return nil
   }
 
+  fileprivate mutating func resolveSyntax(
+    typeSyntax: TypeSyntax,
+    // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
+    // requester: Requester,
+  ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
+    // Resolve type; throw on failure
+    let resolutionResult: MemberLookupResult<PartiallyResolvedTypeIdentifier>
+    var failures = [TypeResolutionFailure]()
+    defer { self.failures.append(contentsOf: failures.map(Failure.other)) }
+    switch typeSyntax.resolve(failures: &failures) {
+    case .success(let result):
+      resolutionResult = result
+    case .failure(let failure):
+      return .failure(.other(failure))
+    }
+
+    switch resolutionResult {
+    // .function and .tuple are only valid without result types
+    case .function(let argumentCount):
+      return .success(.function(argumentCount: argumentCount))
+    case .tuple(let labels):
+      return .success(.tuple(labels: labels))
+    // Issue requests for the underlying type identifiers
+    case .memberResults(let typeResults):
+      var result: MemberLookupResult<MinimalNominal>? = nil
+      for typeIdentifier in typeResults {
+        if let criticalFailure = addResult(
+          resolveTypeReferences(typeIdentifier, originatingSyntax: typeSyntax),
+          to: &result
+        ) {
+          return .failure(criticalFailure)
+        }
+
+        // // Simply log failures  as other type results might succeed
+        // let lookupResult: MemberLookupResult<MinimalNominal>
+        // switch resolveTypeReferences(typeIdentifier) {
+        // case .success(let result):
+        //   lookupResult = result
+        // case .failure(let failure):
+        //   self.failures.append(.other(failure))
+        // }
+        //
+        // switch (result, lookupResult) {
+        // // Handle initial assignment
+        // case (nil, let lookupResult):
+        //   result = lookupResult
+        // // Cannot compose tuple/function types
+        // case (_, .function), (_, .tuple):
+        //   return .failure(Failure.cannotComposeTupleOrFunction)
+        // case (.function, _), (.tuple, _):
+        //   return .failure(Failure.cannotComposeTupleOrFunction)
+        // // Otherwise, combine members
+        // case (.memberResults(let currentTypes), .memberResults(let newTypes)):
+        //   result = MemberLookupResult.memberResults(currentTypes + newTypes)
+        // }
+      }
+      return Result.success(result ?? MemberLookupResult.memberResults([]))
+    }
+  }
+
   /// Resolve the given type syntax from an extension declaration
   /// to a single nominal type.
   ///
@@ -103,67 +163,11 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     return .success(nominalType)
   }
 
-  fileprivate mutating func resolveSyntax(
-    typeSyntax: TypeSyntax,
-    // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
-    // requester: Requester,
-  ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
-    // Resolve type; throw on failure
-    let resolutionResult: MemberLookupResult<PartiallyResolvedTypeIdentifier>
-    var failures = [TypeResolutionFailure]()
-    defer { self.failures.append(contentsOf: failures.map(Failure.other)) }
-    switch typeSyntax.resolve(failures: &failures) {
-    case .success(let result):
-      resolutionResult = result
-    case .failure(let failure):
-      return .failure(.other(failure))
-    }
-
-    switch resolutionResult {
-    // .function and .tuple are only valid without result types
-    case .function(let argumentCount):
-      return .success(.function(argumentCount: argumentCount))
-    case .tuple(let labels):
-      return .success(.tuple(labels: labels))
-    // Issue requests for the underlying type identifiers
-    case .memberResults(let typeResults):
-      var result: MemberLookupResult<MinimalNominal>? = nil
-      for typeIdentifier in typeResults {
-        if let criticalFailure = addResult(resolveTypeReferences(typeIdentifier), to: &result) {
-          return .failure(criticalFailure)
-        }
-
-        // // Simply log failures  as other type results might succeed
-        // let lookupResult: MemberLookupResult<MinimalNominal>
-        // switch resolveTypeReferences(typeIdentifier) {
-        // case .success(let result):
-        //   lookupResult = result
-        // case .failure(let failure):
-        //   self.failures.append(.other(failure))
-        // }
-        //
-        // switch (result, lookupResult) {
-        // // Handle initial assignment
-        // case (nil, let lookupResult):
-        //   result = lookupResult
-        // // Cannot compose tuple/function types
-        // case (_, .function), (_, .tuple):
-        //   return .failure(Failure.cannotComposeTupleOrFunction)
-        // case (.function, _), (.tuple, _):
-        //   return .failure(Failure.cannotComposeTupleOrFunction)
-        // // Otherwise, combine members
-        // case (.memberResults(let currentTypes), .memberResults(let newTypes)):
-        //   result = MemberLookupResult.memberResults(currentTypes + newTypes)
-        // }
-      }
-      return Result.success(result ?? MemberLookupResult.memberResults([]))
-    }
-  }
-
   fileprivate mutating func resolveTypeReferences(
     _ typeReference: PartiallyResolvedTypeIdentifier,
-    // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
-    // requester: Requester,
+    originatingSyntax: TypeSyntax
+      // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
+      // requester: Requester,
   ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
     var results = [MemberLookupResult<QualifiedTypeName>]()
     // Get the base type
@@ -193,15 +197,15 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
       //   extension Int {
       //     func f() { MyModule::f() } // ❌ Member `f` not imported through `MyModule`
       //   }
-      baseLookupResults = findExternalTopLevelUnqualifiedType(
-        module: module,
-        topLevelName: typeName,
-        fromFileWithID: position.fileID
-      )
+      fatalError("Top-level external-module not lookup (while looking up \(module.name))")
+      // baseLookupResults = findExternalTopLevelUnqualifiedType(
+      //   module: module,
+      //   topLevelName: typeName,
+      //   fromSyntax: originatingSyntax
+      // )
     } else {
       // Scoped unqualified lookup in this module
-      let token: TokenSyntax
-      baseLookupResults = token.findUnqualifiedType(typeName, configuredRegions: configuredRegions)
+      baseLookupResults = originatingSyntax.findUnqualifiedType(typeName, configuredRegions: configuredRegions)
     }
 
     // Find first matching type declaration
@@ -437,14 +441,5 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
 
       if extendedType.name == nameQuery { matches.append(extensionDecl) }
     }
-  }
-
-  fileprivate func resolveQualifiedType(
-    _ qualifiedType: QualifiedTypeName,
-    _ tailTypes: [PartiallyResolvedTypeIdentifier.Component],
-    queue: inout [Request]
-  ) -> Result<MemberLookupResult<Void>, VisitMembersFailure> {
-    // Find (extended) nominal type
-
   }
 }

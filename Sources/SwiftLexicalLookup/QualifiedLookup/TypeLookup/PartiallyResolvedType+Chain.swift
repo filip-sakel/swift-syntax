@@ -51,7 +51,7 @@ struct PartiallyResolvedNominalTypeChain {
           .internal(fileID: sourceFile.id)
         }
       let memberComponents: [QualifiedTypeNameGlobalType.Component] = memberNames.map({ name in
-        (qualifier: qualifier, name: name)
+        QualifiedTypeNameGlobalType.Component(qualifier: qualifier, name: name)
       })
       return QualifiedTypeName.topLevel(
         globalType.addingComponents(memberComponents)
@@ -143,7 +143,9 @@ extension NominalTypeDeclSyntax2 {
             } else {
               .internal(fileID: sourceFile.id)
             }
-          let components = members.map({ (qualifier: qualifier, name: $0.name) })
+          let components = members.map({
+            QualifiedTypeNameGlobalType.Component(qualifier: qualifier, name: $0.name)
+          })
           // Assert we have ennough members (we include `self` above)
           guard let globalType = QualifiedTypeNameGlobalType(components: components) else {
             fatalError(
@@ -161,7 +163,7 @@ extension NominalTypeDeclSyntax2 {
         else if let scope = currentAncestor.as(CodeBlockItemListSyntax.self) {
           let components = members.map(\.name)
 
-          // Assert we have ennough members (we include `self` above)
+          // Assert we have enough members (we include `self` above)
           guard let nestedType = QualifiedTypeNameNestedType(components: components) else {
             fatalError(
               "[SwiftLexicalLookup] Internal error: Unexpectedly got `nil` globalType, implying that `components` is empty, which shouldn't happen since `members` are always nonempty."
@@ -178,6 +180,11 @@ extension NominalTypeDeclSyntax2 {
 
         ancestor = currentAncestor.parent
       }
+
+      // Shouldn't happen because we checked there's a source-file root above.
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Unexpectedly got no result despite having verified source-file root."
+      )
     })
   }
 }
