@@ -17,7 +17,7 @@ import SwiftSyntax
   case tuple(labels: [Identifier?])
   case memberResults([Result])
 
-  func mapMembers<NewResult>(_ transform: (Result) -> NewResult) -> MemberLookupResult<NewResult> {
+  public func mapMembers<NewResult>(_ transform: (Result) -> NewResult) -> MemberLookupResult<NewResult> {
     switch self {
     case .function(let argumentCount):
       return .function(argumentCount: argumentCount)
@@ -28,6 +28,9 @@ import SwiftSyntax
     }
   }
 }
+
+extension MemberLookupResult: Equatable where Result: Equatable {}
+extension MemberLookupResult: Hashable where Result: Hashable {}
 
 // extension MemberLookupResult where Result == ValueDeclSyntax {
 //   var names: [DeclName] {

@@ -121,9 +121,15 @@ extension SymbolTable3 {
 
     guard let lookupModule = self.moduleMap[lookupFile] else {
       // TODO: Handle error
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Unexpectedly couldn't find lookup file in symbol table's module map."
+      )
     }
     guard let internalSources = moduleToSources[lookupModule] else {
       // TODO: Handle error
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Unexpectedly couldn't find lookup file for a given lookup module."
+      )
     }
 
     // Look in file
@@ -136,6 +142,9 @@ extension SymbolTable3 {
     for module in importedModules.reversed() {
       guard let moduleSources = moduleToSources[module] else {
         // Handle error
+        fatalError(
+          "[SwiftLexicalLookup] Internal error: Unexpectedly couldn't find lookup file in symbol table's module map."
+        )
       }
       for file in moduleSources {
         results.append(contentsOf: file.findExtensions(configuredRegions: configuredRegions))

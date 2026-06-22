@@ -15,12 +15,12 @@ import SwiftSyntax
 
 /// The minimal defining components of a nominal type: the main declaration and the qualified name.
 /// Unlike ``NominalType``, doesn't include extensions.
-typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTypeName)
+@_spi(_QualifiedLookup) public typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTypeName)
 
 /// Finds the main declaration and qualified name of the nominal types
 /// to which the the given type syntax refers.
 @_spi(_QualifiedLookup) public struct TypeQualifier {
-  enum Failure: Error {
+  public enum Failure: Error {
     case cannotComposeTupleOrFunction
     case noTupleOrFunctionTypeMembers
     case cannotExtendNonNominal(ExtensionDeclSyntax)
@@ -29,11 +29,16 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     // case noMemberType(PartiallyResolvedTypeIdentifier.Component, in: NominalType)
   }
 
-  var failures = [Failure]()
+  public private(set) var failures = [Failure]()
   var boundExtensions = [ExtensionDeclSyntax: MinimalNominal]()
 
   let symbolTable: SymbolTable3
-  let configuredRegions: ConfiguredRegions
+  let configuredRegions: ConfiguredRegions?
+
+  public init(symbolTable: SymbolTable3, configuredRegions: ConfiguredRegions?) {
+    self.symbolTable = symbolTable
+    self.configuredRegions = configuredRegions
+  }
 
   /// Adds the given result to a collective result.
   ///
@@ -71,7 +76,7 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     return nil
   }
 
-  fileprivate mutating func resolveSyntax(
+  public mutating func resolveSyntax(
     typeSyntax: TypeSyntax,
     // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
     // requester: Requester,
@@ -176,11 +181,6 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     let (optionalModule, typeName) = typeReference.base
 
     // Perfom unqualified lookup up to find the base type's declaration
-    // FIXME: We may get .lookForMembers->resolve parent->type-member lookup,
-    // or .lookForGenericParameters->resolve extended syntax->find generic params!!
-    // TODO: Think about whether we should have the base resolved (do we split cases for extended
-    // types and plain lookForMembers if we still need to qualify both?) and if we do,
-    // how do we connect it back to the original request
     //
     // e.g.
     //   extension String.UTF8View { <- Resolve
@@ -188,7 +188,6 @@ typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTyp
     //       struct B {} // <- Look up here
     //     }
     //   }
-    // how do we connect these resolves back?
     let baseLookupResults: [UnqualifiedTypeLookupResult]
     if let module = optionalModule {
       // Top-level unqualified lookup in external module

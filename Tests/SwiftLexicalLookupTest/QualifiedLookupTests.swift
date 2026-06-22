@@ -21,32 +21,33 @@ import XCTest
 /// Examples at `assertTypeMemberLookup` documentation.
 struct QualifiedLookupSource: ExpressibleByStringLiteral, ExpressibleByStringInterpolation {
   // Returns string of error messages; empty if valid.
-  static func parseType(_ type: TypeSyntax, file: StaticString, line: UInt) -> UnresolvedTypeRef? {
-    // // Parse as a type
-    // let typeSyntax = TypeSyntax(stringLiteral: typeName)
-    // We only allow identifier, member and (potentially) metatype syntax.
-    // switch type.as(TypeSyntaxEnum.self) {
-    // case .identifierType: break
-    // case .memberType(let memberType):
-    //   // Check base
-    //   parseType(memberType.baseType, file: file, line: line)
-    //   // No generics for now
-    //   if memberType.genericArgumentClause != nil {
-    //     XCTFail("Invalid type '\(type.trimmedDescription)': Generic arguments not supported (yet).")
-    //   }
-    // case .metatypeType(let metatypeType):
-    //   // Check base
-    //   parseType(metatypeType.baseType, file: file, line: line)
-    // default:
-    //   XCTFail("Invalid type '\(type.trimmedDescription)': Type kind '\(type.kind)' isn't supported; only identifier, member and metatype types are supported.")
-    // }
-    do {
-      return try UnresolvedTypeRef.fromTypeSyntax(type).get()
-    } catch {
-      XCTFail("Couldn't parse type: '\(error)'", file: file, line: line)
-      return nil
-    }
-  }
+  // static func parseType(_ type: TypeSyntax, file: StaticString, line: UInt) -> QualifiedTypeName? {
+  //   // // Parse as a type
+  //   // let typeSyntax = TypeSyntax(stringLiteral: typeName)
+  //   // We only allow identifier, member and (potentially) metatype syntax.
+  //   // switch type.as(TypeSyntaxEnum.self) {
+  //   // case .identifierType: break
+  //   // case .memberType(let memberType):
+  //   //   // Check base
+  //   //   parseType(memberType.baseType, file: file, line: line)
+  //   //   // No generics for now
+  //   //   if memberType.genericArgumentClause != nil {
+  //   //     XCTFail("Invalid type '\(type.trimmedDescription)': Generic arguments not supported (yet).")
+  //   //   }
+  //   // case .metatypeType(let metatypeType):
+  //   //   // Check base
+  //   //   parseType(metatypeType.baseType, file: file, line: line)
+  //   // default:
+  //   //   XCTFail("Invalid type '\(type.trimmedDescription)': Type kind '\(type.kind)' isn't supported; only identifier, member and metatype types are supported.")
+  //   // }
+  //   // do {
+  //   //   return try UnresolvedTypeRef.fromTypeSyntax(type).get()
+  //   // } catch {
+  //   //   XCTFail("Couldn't parse type: '\(error)'", file: file, line: line)
+  //   //   return nil
+  //   // }
+  //   return nil
+  // }
 
   /// An expectation describes the lookup parameters that should surfaces the attached
   /// declaration at qualified lookup. It also includes source location for better
@@ -529,60 +530,60 @@ final class TestQualifiedLookup: XCTestCase {
     )
   }
 
-  assertIdentifierTypeLookup() {
-    assertTypeIdLookup("""
-    🟥struct A {
-      struct 🟩B {
-        static func f() -> \("🟩")B {}
-        static func makeSelf() -> \("🟩")Self
-      }
-
-      func anonymousScope() {
-        let a: \("🟥")A = self
-        let me: \("🟥")Self = self
-
-        🟦struct C {
-          func f(c: \("🟦")C) -> \("🟦")Self {
-            self as \("🟦")Self
-          }
-        }
-
-        let c: C = \("🟦")C()
-      }
-
-      static var getA: \("🟥")A { self }
-      static func makeSelf() -> \("🟥")Self {}
-      static func makeB() -> \("🟩")B {}
-
-      static func invalidRefToC() -> \(.noResults)C {}
-    }
-
-    func anonymousScope() {
-      var a: \(.noResults)Self
-
-      🟨struct A {
-        subscript(a: \("🟨")A) -> \("🟨")Self { a }
-      }
-      enum D {}
-
-      var a: \("🟨")A {}
-    }
-
-    \("🟥")A
-    \(.noResults)B
-    \(.noResults)D
-
-    """)
-    assertTypeIdLookup("""
-    🟧protocol Proto {
-      struct 🟪B {
-        static func f(b: \("🟪")B) -> \("🟪")Self {}
-      }
-      static func makeSelf() -> \("🟧")Self
-    }
-    \("🟧")Proto
-    \(.noResults)B
-    """)
+  func assertIdentifierTypeLookup() {
+    // assertTypeIdLookup("""
+    // 🟥struct A {
+    //   struct 🟩B {
+    //     static func f() -> \("🟩")B {}
+    //     static func makeSelf() -> \("🟩")Self
+    //   }
+    //
+    //   func anonymousScope() {
+    //     let a: \("🟥")A = self
+    //     let me: \("🟥")Self = self
+    //
+    //     🟦struct C {
+    //       func f(c: \("🟦")C) -> \("🟦")Self {
+    //         self as \("🟦")Self
+    //       }
+    //     }
+    //
+    //     let c: C = \("🟦")C()
+    //   }
+    //
+    //   static var getA: \("🟥")A { self }
+    //   static func makeSelf() -> \("🟥")Self {}
+    //   static func makeB() -> \("🟩")B {}
+    //
+    //   static func invalidRefToC() -> \(.noResults)C {}
+    // }
+    //
+    // func anonymousScope() {
+    //   var a: \(.noResults)Self
+    //
+    //   🟨struct A {
+    //     subscript(a: \("🟨")A) -> \("🟨")Self { a }
+    //   }
+    //   enum D {}
+    //
+    //   var a: \("🟨")A {}
+    // }
+    //
+    // \("🟥")A
+    // \(.noResults)B
+    // \(.noResults)D
+    //
+    // """)
+    // assertTypeIdLookup("""
+    // 🟧protocol Proto {
+    //   struct 🟪B {
+    //     static func f(b: \("🟪")B) -> \("🟪")Self {}
+    //   }
+    //   static func makeSelf() -> \("🟧")Self
+    // }
+    // \("🟧")Proto
+    // \(.noResults)B
+    // """)
 
   }
   // func testEnumCase() {

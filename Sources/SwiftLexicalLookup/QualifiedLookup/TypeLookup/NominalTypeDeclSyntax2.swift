@@ -13,7 +13,7 @@
 import SwiftSyntax
 
 /// A nominal type declaration (struct, enum, class, actor, protocol).
-@_spi(_QualifiedLookup) public struct NominalTypeDeclSyntax2: SyntaxProtocol {
+@_spi(_QualifiedLookup) public struct NominalTypeDeclSyntax2: SyntaxProtocol, Hashable {
   public private(set) var _syntaxNode: Syntax
 
   public init?(_ node: __shared some SyntaxProtocol) {

@@ -388,7 +388,7 @@ extension SymbolTable {
   /// if provided. The `config` resolves if-configs, if provided.
   private func _lookUpTypeMember(
     type: TypeSyntax,
-    name: DeclNameRef?,
+    name: DeclNameReference?,
     kind memberKind: MemberKind,
     config: QualifiedTableLookupConfig,
     into results: inout [CanonicalType: [QualifiedLookupResult]]
@@ -416,7 +416,7 @@ extension SymbolTable {
 
   private func _visitSupertypes(
     of groupDecl: DeclGroupSyntax,
-    lookingFor name: DeclNameRef?,
+    lookingFor name: DeclNameReference?,
     kind memberKind: MemberKind,
     results: inout [CanonicalType: [QualifiedLookupResult]]
   ) {
@@ -439,7 +439,7 @@ extension SymbolTable {
   private func _lookUpGroupMembers(
     group: DeclGroupSyntaxType,
     type: CanonicalType,
-    name: DeclNameRef?,
+    name: DeclNameReference?,
     kind memberKind: MemberKind,
     config: QualifiedTableLookupConfig,
     into results: inout [CanonicalType: [QualifiedLookupResult]]
@@ -462,7 +462,7 @@ extension SymbolTable {
   // Finds decl groups nested in identifier types
   private func _lookUpGlobalTypeMember(
     type: IdentifierTypeSyntax,
-    name: DeclNameRef?,
+    name: DeclNameReference?,
     kind memberKind: MemberKind,
     config: QualifiedTableLookupConfig,
     into results: inout [CanonicalType: [QualifiedLookupResult]]
@@ -529,7 +529,7 @@ extension SymbolTable {
 
   func _lookUpNestedTypeMember(
     type: MemberTypeSyntax,
-    name: DeclNameRef?,
+    name: DeclNameReference?,
     kind memberKind: MemberKind,
     config: QualifiedTableLookupConfig,
     into results: inout [CanonicalType: [QualifiedLookupResult]]
@@ -566,7 +566,7 @@ extension SymbolTable {
     // Ensure identifier is valid (can't do lookup with invalid identifier)
     guard let typeIdentifier = Identifier(validating: type.name) else { return }
 
-    let typeName = DeclNameRef(baseName: .identifier(identifier: typeIdentifier))
+    let typeName = DeclNameReference(baseName: .identifier(identifier: typeIdentifier))
 
     // Two scopes can introduce members in nested types. The main declaration
     // and any top-level extensions (nested extensions are currently illegal).
@@ -844,11 +844,11 @@ extension SymbolTable {
   /// lookup.
   ///
   /// \returns true if anything was found.
-  // bool lookupQualified(Type type, DeclNameRef member,
+  // bool lookupQualified(Type type, DeclNameReference member,
   //                      SourceLoc loc, NLOptions options,
   //                      SmallVectorImpl<ValueDecl *> &decls) const;
   func lookupMember(
-    withName name: DeclNameRef,
+    withName name: DeclNameReference,
     inType type: TypeSyntax,
     fromLocation location: AbsolutePosition,
     options: LookupOptions
@@ -892,11 +892,11 @@ extension SymbolTable {
   /// lookup.
   ///
   /// \returns true if anything was found.
-  // bool lookupQualified(ArrayRef<NominalTypeDecl *> types, DeclNameRef member,
+  // bool lookupQualified(ArrayRef<NominalTypeDecl *> types, DeclNameReference member,
   //                      SourceLoc loc, NLOptions options,
   //                      SmallVectorImpl<ValueDecl *> &decls) const;
   func lookupMember(
-    withName name: DeclNameRef?,
+    withName name: DeclNameReference?,
     inDeclGroup declGroup: DeclGroupSyntaxType,
     fromLocation location: AbsolutePosition,
     memberKind: MemberKind = .default,

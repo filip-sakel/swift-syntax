@@ -102,9 +102,18 @@ public indirect enum QualifiedTypeNameNestedType: Hashable, CustomDebugStringCon
 }
 
 // TODO: Copy relevant comments from `ResolvedScope` and `ResolvedTypeName`
-@_spi(_QualifiedName) public enum QualifiedTypeName: Hashable {
+@_spi(_QualifiedLookup) public enum QualifiedTypeName: Hashable, CustomDebugStringConvertible {
   /// Specifies top-level type: a collection of internal and external components
   case topLevel(QualifiedTypeNameGlobalType)
   // Specifies an (internal) nested-level scope and a dot-separated sequence of identifiers.
   case nestedScope(scope: CodeBlockItemListSyntax, type: QualifiedTypeNameNestedType)
+
+  public var debugDescription: String {
+    switch self {
+    case .topLevel(let globalType):
+      return globalType.debugDescription
+    case .nestedScope(let scope, let nestedType):
+      return "\(scope.id)>\(nestedType.debugDescription)"
+    }
+  }
 }

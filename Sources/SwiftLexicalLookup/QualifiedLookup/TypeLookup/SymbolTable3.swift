@@ -14,17 +14,17 @@ import SwiftIfConfig
 import SwiftSyntax
 
 @_spi(_QualifiedLookup) public final class SymbolTable3 {
-  typealias Module = Identifier
-  let moduleToSources: [Module: [SourceFileSyntax]]
+  public typealias Module = Identifier
+  let moduleToSources: [Module: [String: SourceFileSyntax]]
 
-  init(moduleToSources: [Module: [SourceFileSyntax]]) {
+  public init(moduleToSources: [Module: [String: SourceFileSyntax]]) {
     self.moduleToSources = moduleToSources
   }
 
   private(set) lazy var moduleMap: [SourceFileSyntax: Module] = {
     var result = [SourceFileSyntax: Module]()
     for (module, sources) in moduleToSources {
-      for source in sources {
+      for source in sources.values {
         result[source] = module
       }
     }
