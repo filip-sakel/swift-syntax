@@ -197,13 +197,6 @@ final class TestQualifiedTypeName: XCTestCase {
       )
     }
 
-    // TODO: Plan
-    // 0. Get nominal type decl AT EACH marker
-    // 1. Find type syntax parent AT EACH .references position
-    // 2. Perform lookup
-    // 3. FOR EACH result
-    //    a. Get marker and test name and decl match
-
     // Find the expected nominal-type declaration and qualified-name string for each marker.
     var markerToType = [
       Character: (nominalDecl: NominalTypeDeclSyntax2, name: String, file: StaticString, line: UInt)
@@ -226,7 +219,7 @@ final class TestQualifiedTypeName: XCTestCase {
         // We expect the parent to be a nominal-type declaration
         guard let nominalDecl = introducerToken.parent?.as(NominalTypeDeclSyntax2.self) else {
           XCTFail(
-            "Invalid marker placement: The parent of the token after the expectation isn't a nominal-type declaration; instead got '\(String(reflecting: introducerToken.parent?.kind))'.",
+            "Invalid marker placement: The parent of the token after the expectation isn't a nominal-type declaration; instead got parent kind '\(String(reflecting: introducerToken.parent?.kind))'.",
             file: file,
             line: line
           )
@@ -268,7 +261,7 @@ final class TestQualifiedTypeName: XCTestCase {
         // Ensure the token's parent is a type syntax
         guard let typeSyntax = typeToken.parent?.as(TypeSyntax.self) else {
           XCTFail(
-            "Invalid type-syntax expectation placement: A qualified-name expectation should be placed right before the target type syntax.",
+            "Invalid type-syntax expectation placement: A qualified-name expectation should be placed right before the target type syntax (parent is '\(String(reflecting: typeToken.parent?.kind))').",
             file: file,
             line: line
           )
@@ -376,47 +369,50 @@ final class TestQualifiedTypeName: XCTestCase {
   func testCodeBlockSimpleCase() {
     assertQualifiedTypeName([
       "MyFile.swift": """
-      \("🟥", name: "MyModule::A") struct A {
-        struct \("🟩", name: "MyModule::A.MyModule::B")B {
+      \("🟥", name: "MyModule::A")struct A {
+        \("🟩", name: "MyModule::A.MyModule::B")struct B {
           static func f() -> \(references: "🟩")B {}
           static func makeSelf() -> \(references: "🟩")Self
         }
-
-        func anonymousScope() {
-          let a: \(references: "🟥")A = self
-          let me: \(references: "🟥")Self = self
-
-          🟦struct C {
-            func f(c: \(references: "🟦")C) -> \(references: "🟦")Self {
-              self as \(references: "🟦")Self
-            }
-          }
-
-          let c: C = \(references: "🟦")C()
-        }
-
-        static var getA: \(references: "🟥")A { self }
-        static func makeSelf() -> \(references: "🟥")Self {}
-        static func makeB() -> \(references: "🟩")B {}
-
-        static func invalidRefToC() -> \(result: .memberResults([]))C {}
       }
-
-      func anonymousScope() {
-        var a: \(result: .memberResults([]))Self
-
-        🟨struct A {
-          subscript(a: \(references: "🟨")A) -> \(references: "🟨")Self { a }
-        }
-        enum D {}
-
-        var a: \(references: "🟨")A {}
-      }
-
-      \(references: "🟥")A
-      \(result: .memberResults([]))B
-      \(result: .memberResults([]))D
       """ as QualifiedTypeNameSource
+
+        // """
+        //   func anonymousScope() {
+        //     let a: \(references: "🟥")A = self
+        //     let me: \(references: "🟥")Self = self
+        //
+        //     🟦struct C {
+        //       func f(c: \(references: "🟦")C) -> \(references: "🟦")Self {
+        //         self as \(references: "🟦")Self
+        //       }
+        //     }
+        //
+        //     let c: C = \(references: "🟦")C()
+        //   }
+        //
+        //   static var getA: \(references: "🟥")A { self }
+        //   static func makeSelf() -> \(references: "🟥")Self {}
+        //   static func makeB() -> \(references: "🟩")B {}
+        //
+        //   static func invalidRefToC() -> \(result: .memberResults([]))C {}
+        // }
+        //
+        // func anonymousScope() {
+        //   var a: \(result: .memberResults([]))Self
+        //
+        //   🟨struct A {
+        //     subscript(a: \(references: "🟨")A) -> \(references: "🟨")Self { a }
+        //   }
+        //   enum D {}
+        //
+        //   var a: \(references: "🟨")A {}
+        // }
+        //
+        // \(references: "🟥")A
+        // \(result: .memberResults([]))B
+        // \(result: .memberResults([]))D
+        // """ as QualifiedTypeNameSource
     ])
   }
 

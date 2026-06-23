@@ -24,12 +24,26 @@ import SwiftSyntax
   // All extensions organized by the module in which they were declared.
   // Only the modules included in this query are included
   // let moduleToExtensions: [Identifier: [ExtensionDeclSyntax]]
-  let extensions: [ExtensionDeclSyntax]
+  //
+  // Note that a fully instantiated nominal type may lack extensions to
+  // non-imported files or have have more extensions than are available
+  // through a specific file's imports.
+  let extensions: [SourceFileSyntax: [ExtensionDeclSyntax]]
 }
 
 extension NominalType {
-  fileprivate var _declGroups: [DeclGroupSyntaxType] {
-    [DeclGroupSyntaxType(exactly: mainDecl)] + extensions.map(DeclGroupSyntaxType.init(exactly:))
+  fileprivate var _declGroups: [SourceFileSyntax: [DeclGroupSyntaxType]] {
+    // TODO: Throw actual error
+    guard let mainDeclFile = mainDecl.root.as(SourceFileSyntax.self) else {
+      fatalError("[SwiftLexicalLookup] Internal error: mainDecl is not attached to a SourceFileSyntax")
+    }
+    var results = [mainDeclFile: [DeclGroupSyntaxType(exactly: mainDecl)]]
+    for (file, extensionDecls) in extensions {
+      results[file, default: []].append(
+        contentsOf: extensionDecls.map(DeclGroupSyntaxType.init(exactly:))
+      )
+    }
+    return results
   }
 
   enum MemberLookupFailure: Error {
@@ -57,20 +71,22 @@ extension NominalType {
     var otherInternalFiles = [DeclGroupSyntaxType]()
     var externalModules = [Identifier: [DeclGroupSyntaxType]]()
 
-    for declGroup in _declGroups {
-      guard let declFile = declGroup.root.as(SourceFileSyntax.self) else {
-        return .failure(.declNotAttachedToSourceFile(declGroup))
-      }
-      guard let declModule = moduleMap[declFile] else {
-        return .failure(.fileNotInModuleMap(declFile))
-      }
+    for (declFile, declGroups) in _declGroups {
+      for declGroup in declGroups {
+        // guard let declFile = declGroup.root.as(SourceFileSyntax.self) else {
+        //   return .failure(.declNotAttachedToSourceFile(declGroup))
+        // }
+        guard let declModule = moduleMap[declFile] else {
+          return .failure(.fileNotInModuleMap(declFile))
+        }
 
-      if declFile == lookupPosition.file {
-        thisFile.append(declGroup)
-      } else if declModule == lookupModule {
-        otherInternalFiles.append(declGroup)
-      } else {
-        externalModules[declModule, default: []].append(declGroup)
+        if declFile == lookupPosition.file {
+          thisFile.append(declGroup)
+        } else if declModule == lookupModule {
+          otherInternalFiles.append(declGroup)
+        } else {
+          externalModules[declModule, default: []].append(declGroup)
+        }
       }
     }
 

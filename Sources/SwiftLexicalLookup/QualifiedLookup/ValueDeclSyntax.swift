@@ -566,55 +566,55 @@ extension ValueDeclSyntax {
 
 // MARK: `as` Casts
 
-extension ValueDeclSyntax {
-  public func `as`(_ syntaxType: StructDeclSyntax.Type) -> StructDeclSyntax? {
-    return StructDeclSyntax(_syntaxNode)
-  }
-  public func `as`(_ syntaxType: EnumDeclSyntax.Type) -> EnumDeclSyntax? {
-    return EnumDeclSyntax(_syntaxNode)
-  }
-  public func `as`(_ syntaxType: ClassDeclSyntax.Type) -> ClassDeclSyntax? {
-    return ClassDeclSyntax(_syntaxNode)
-  }
-  public func `as`(_ syntaxType: ActorDeclSyntax.Type) -> ActorDeclSyntax? {
-    return ActorDeclSyntax(_syntaxNode)
-  }
-  public func `as`(_ syntaxType: ProtocolDeclSyntax.Type) -> ProtocolDeclSyntax? {
-    return ProtocolDeclSyntax(_syntaxNode)
-  }
-  public func `as`(_ syntaxType: TypeAliasDeclSyntax.Type) -> TypeAliasDeclSyntax? {
-    return TypeAliasDeclSyntax(_syntaxNode)
-  }
-  public func `as`(_ syntaxType: AssociatedTypeDeclSyntax.Type) -> AssociatedTypeDeclSyntax? {
-    return AssociatedTypeDeclSyntax(_syntaxNode)
-  }
-  public func `as`(_ syntaxType: FunctionDeclSyntax.Type) -> FunctionDeclSyntax? {
-    return FunctionDeclSyntax(_syntaxNode)
-  }
-  public func `as`(_ syntaxType: InitializerDeclSyntax.Type) -> InitializerDeclSyntax? {
-    return InitializerDeclSyntax(_syntaxNode)
-  }
-  public func `as`(_ syntaxType: DeinitializerDeclSyntax.Type) -> DeinitializerDeclSyntax? {
-    return DeinitializerDeclSyntax(_syntaxNode)
-  }
-  public func `as`(_ syntaxType: IdentifierPatternSyntax.Type) -> IdentifierPatternSyntax? {
-    return IdentifierPatternSyntax(_syntaxNode)
-  }
-  public func `as`(_ syntaxType: SubscriptDeclSyntax.Type) -> SubscriptDeclSyntax? {
-    return SubscriptDeclSyntax(_syntaxNode)
-  }
-  public func `as`(_ syntaxType: MacroDeclSyntax.Type) -> MacroDeclSyntax? {
-    return MacroDeclSyntax(_syntaxNode)
-  }
-  public func `as`(_ syntaxType: EnumCaseElementSyntax.Type) -> EnumCaseElementSyntax? {
-    return EnumCaseElementSyntax(_syntaxNode)
-  }
-
-  @available(*, deprecated, message: "This cast will always fail")
-  public func `as`<S: SyntaxProtocol>(_ syntaxType: S.Type) -> S? {
-    return nil
-  }
-}
+// extension ValueDeclSyntax {
+//   public func `as`(_ syntaxType: StructDeclSyntax.Type) -> StructDeclSyntax? {
+//     return StructDeclSyntax(_syntaxNode)
+//   }
+//   public func `as`(_ syntaxType: EnumDeclSyntax.Type) -> EnumDeclSyntax? {
+//     return EnumDeclSyntax(_syntaxNode)
+//   }
+//   public func `as`(_ syntaxType: ClassDeclSyntax.Type) -> ClassDeclSyntax? {
+//     return ClassDeclSyntax(_syntaxNode)
+//   }
+//   public func `as`(_ syntaxType: ActorDeclSyntax.Type) -> ActorDeclSyntax? {
+//     return ActorDeclSyntax(_syntaxNode)
+//   }
+//   public func `as`(_ syntaxType: ProtocolDeclSyntax.Type) -> ProtocolDeclSyntax? {
+//     return ProtocolDeclSyntax(_syntaxNode)
+//   }
+//   public func `as`(_ syntaxType: TypeAliasDeclSyntax.Type) -> TypeAliasDeclSyntax? {
+//     return TypeAliasDeclSyntax(_syntaxNode)
+//   }
+//   public func `as`(_ syntaxType: AssociatedTypeDeclSyntax.Type) -> AssociatedTypeDeclSyntax? {
+//     return AssociatedTypeDeclSyntax(_syntaxNode)
+//   }
+//   public func `as`(_ syntaxType: FunctionDeclSyntax.Type) -> FunctionDeclSyntax? {
+//     return FunctionDeclSyntax(_syntaxNode)
+//   }
+//   public func `as`(_ syntaxType: InitializerDeclSyntax.Type) -> InitializerDeclSyntax? {
+//     return InitializerDeclSyntax(_syntaxNode)
+//   }
+//   public func `as`(_ syntaxType: DeinitializerDeclSyntax.Type) -> DeinitializerDeclSyntax? {
+//     return DeinitializerDeclSyntax(_syntaxNode)
+//   }
+//   public func `as`(_ syntaxType: IdentifierPatternSyntax.Type) -> IdentifierPatternSyntax? {
+//     return IdentifierPatternSyntax(_syntaxNode)
+//   }
+//   public func `as`(_ syntaxType: SubscriptDeclSyntax.Type) -> SubscriptDeclSyntax? {
+//     return SubscriptDeclSyntax(_syntaxNode)
+//   }
+//   public func `as`(_ syntaxType: MacroDeclSyntax.Type) -> MacroDeclSyntax? {
+//     return MacroDeclSyntax(_syntaxNode)
+//   }
+//   public func `as`(_ syntaxType: EnumCaseElementSyntax.Type) -> EnumCaseElementSyntax? {
+//     return EnumCaseElementSyntax(_syntaxNode)
+//   }
+//
+//   @available(*, deprecated, message: "This cast will always fail")
+//   public func `as`<S: SyntaxProtocol>(_ syntaxType: S.Type) -> S? {
+//     return nil
+//   }
+// }
 
 // MARK: DeclSyntaxProtocol Conversions
 

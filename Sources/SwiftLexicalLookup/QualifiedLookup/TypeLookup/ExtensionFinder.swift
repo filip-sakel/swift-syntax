@@ -114,7 +114,7 @@ extension SymbolTable3 {
   func findAllExtensions(
     accessibleFrom lookupFile: SourceFileSyntax,
     configuredRegions: ConfiguredRegions?
-  ) -> [ExtensionDeclSyntax] {
+  ) -> [SourceFileSyntax: [ExtensionDeclSyntax]] {
     // TODO: This should be imported *decls*, e.g., import struct Swift.Int
     let imports = lookupFile.findImportDecls(using: configuredRegions)
     let importedModules = imports.flatMap({ $0.path.compactMap({ Identifier(validating: $0.name) }) })
@@ -133,10 +133,10 @@ extension SymbolTable3 {
     }
 
     // Look in file
-    var results = lookupFile.findExtensions(configuredRegions: configuredRegions)
+    var results = [lookupFile: lookupFile.findExtensions(configuredRegions: configuredRegions)]
     // Look in this module
-    for file in internalSources where file != lookupFile {
-      results.append(contentsOf: file.findExtensions(configuredRegions: configuredRegions))
+    for file in internalSources.values where file != lookupFile {
+      results[file, default: []].append(contentsOf: file.findExtensions(configuredRegions: configuredRegions))
     }
     // Look for imported modules (reversed order to account for shadowing)
     for module in importedModules.reversed() {
@@ -146,8 +146,8 @@ extension SymbolTable3 {
           "[SwiftLexicalLookup] Internal error: Unexpectedly couldn't find lookup file in symbol table's module map."
         )
       }
-      for file in moduleSources {
-        results.append(contentsOf: file.findExtensions(configuredRegions: configuredRegions))
+      for file in moduleSources.values {
+        results[file, default: []].append(contentsOf: file.findExtensions(configuredRegions: configuredRegions))
       }
     }
 

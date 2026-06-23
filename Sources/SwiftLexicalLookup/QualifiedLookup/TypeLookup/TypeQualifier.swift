@@ -81,6 +81,8 @@ import SwiftSyntax
     // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
     // requester: Requester,
   ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
+    print("Resolving syntax: \(typeSyntax.trimmedDescription)")
+
     // Resolve type; throw on failure
     let resolutionResult: MemberLookupResult<PartiallyResolvedTypeIdentifier>
     var failures = [TypeResolutionFailure]()
@@ -95,11 +97,15 @@ import SwiftSyntax
     switch resolutionResult {
     // .function and .tuple are only valid without result types
     case .function(let argumentCount):
+      print("Resolved \(typeSyntax.trimmedDescription) to .function")
       return .success(.function(argumentCount: argumentCount))
     case .tuple(let labels):
+      print("Resolved \(typeSyntax.trimmedDescription) to .tuple")
       return .success(.tuple(labels: labels))
     // Issue requests for the underlying type identifiers
     case .memberResults(let typeResults):
+      print("Partially resolved \(typeSyntax.trimmedDescription) to .memberResults(\(typeResults))")
+
       var result: MemberLookupResult<MinimalNominal>? = nil
       for typeIdentifier in typeResults {
         if let criticalFailure = addResult(
@@ -177,6 +183,8 @@ import SwiftSyntax
       // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
       // requester: Requester,
   ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
+    print("[For syntax \(originatingSyntax.trimmedDescription)] Resolving ref '\(typeReference)'")
+
     // Get the base type
     let (optionalModule, typeName) = typeReference.base
 
@@ -208,6 +216,9 @@ import SwiftSyntax
       // Scoped unqualified lookup in this module
       baseLookupResults = originatingSyntax.findUnqualifiedType(typeName, configuredRegions: configuredRegions)
     }
+    print(
+      "[For syntax \(originatingSyntax.trimmedDescription)] Partially resolved base '\(typeName)' to  `\(baseLookupResults)`"
+    )
 
     // Find first matching type declaration
     for lookupResult in baseLookupResults {
@@ -291,6 +302,10 @@ import SwiftSyntax
     memberChain: [PartiallyResolvedTypeIdentifier.Component],
     originatingSyntax: TypeSyntax
   ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
+    print(
+      "[For syntax \(originatingSyntax)] Resolving decl kind \(typeDecl.kind) `\(typeDecl.trimmedDescription)` with chain \(memberChain)"
+    )
+
     // We only handle type aliases and nominal types (we skip associated types and generic parameters)
     let baseLookupResult: Result<MemberLookupResult<MinimalNominal>, Failure>
     if let nominalDecl = typeDecl.as(NominalTypeDeclSyntax2.self) {
@@ -305,10 +320,18 @@ import SwiftSyntax
 
       switch typeChain {
       case .resolved(let qualifiedTypeName):
+        print(
+          "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)'] Resolved to type chain \(qualifiedTypeName)."
+        )
+
         baseLookupResult = Result.success(
           MemberLookupResult.memberResults([(mainDecl: nominalDecl, name: qualifiedTypeName)])
         )
       case .partiallyResolved(let partiallyResolvedName):
+        print(
+          "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)'] Partially resolved to type chain \(partiallyResolvedName)."
+        )
+
         let qualifiedBaseResults = resolveSyntax(typeSyntax: partiallyResolvedName.base)
         let module: Identifier? = nil  // TODO: Find the actual module
         baseLookupResult = qualifiedBaseResults.map({ qualifiedBaseResult in
@@ -318,17 +341,29 @@ import SwiftSyntax
         })
       }
     } else if let typeAlias = typeDecl.as(TypeAliasDeclSyntax.self) {
+      print(
+        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)'] Partially resolved to type alias with syntax \(typeAlias.initializer.value)."
+      )
       baseLookupResult = resolveSyntax(typeSyntax: typeAlias.initializer.value)
     } else {
+      print(
+        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)'] Declaration type doesn't have members."
+      )
       // No members for generic parameters and associated types
       return .success(MemberLookupResult.memberResults([]))
     }
 
     // Return if we don't have type members
     guard let firstTypeMember = memberChain.first else {
+      print(
+        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)'] Resolved to \(baseLookupResult)."
+      )
       return baseLookupResult
     }
     let remainingMemberChain = Array(memberChain.dropFirst())
+    print(
+      "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)'] Partially resolved base to \(baseLookupResult) with next base \(firstTypeMember) with chain \(remainingMemberChain)."
+    )
 
     // Recursively find type members
     //
@@ -347,6 +382,9 @@ import SwiftSyntax
     // Perform qualified type lookup
     var result: MemberLookupResult<MinimalNominal>? = nil
     for (mainDecl, name) in baseTypes {
+      print(
+        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)' & qualified '\(name)'] Requesting extension binding."
+      )
       let extensions = bindExtensions(matchingForName: name, resolvedFrom: originatingSyntax)
       let nominalType = NominalType(
         qualifiedName: name,
@@ -354,6 +392,10 @@ import SwiftSyntax
         redeclarations: [],
         extensions: extensions
       )
+      print(
+        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)' & qualified '\(name)'] Bound extensions \(extensions)."
+      )
+
       // TODO: Figure out imported modules
       guard let file = originatingSyntax.root.as(SourceFileSyntax.self) else {
         fatalError(
@@ -385,6 +427,9 @@ import SwiftSyntax
         failures.append(.other(failure))
         continue
       }
+      print(
+        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)' & qualified '\(name)'] Resolved type member \(firstTypeMember) to \(memberTypeDecl.trimmedDescription)."
+      )
 
       // Resolve this type declaration and add it to the results
       if let criticalFailure = addResult(
@@ -432,43 +477,45 @@ import SwiftSyntax
   mutating func bindExtensions(
     matchingForName nameQuery: QualifiedTypeName,
     resolvedFrom originatingSyntax: TypeSyntax
-  ) -> [ExtensionDeclSyntax] {
+  ) -> [SourceFileSyntax: [ExtensionDeclSyntax]] {
     // TODO: Wrap the type syntax in a SymbolTableSyntax<TypeSyntax> that guarantees this
     guard let file = originatingSyntax.root.as(SourceFileSyntax.self) else {
       fatalError(
         "[SwiftLexicalLookup] Internal error: Unexpectedly had to resolve type syntax whose root isn't a source file."
       )
     }
-    let extensionDecls: [ExtensionDeclSyntax] = symbolTable.findAllExtensions(
+    let allExtensionDecls: [SourceFileSyntax: [ExtensionDeclSyntax]] = symbolTable.findAllExtensions(
       accessibleFrom: file,
       configuredRegions: configuredRegions
     )
-    var matches = [ExtensionDeclSyntax]()
-    for extensionDecl in extensionDecls {
-      let extendedType: MinimalNominal
+    var matches = [SourceFileSyntax: [ExtensionDeclSyntax]]()
+    for (file, extensionDecls) in allExtensionDecls {
+      for extensionDecl in extensionDecls {
+        let extendedType: MinimalNominal
 
-      // Check cache
-      if let type = boundExtensions[extensionDecl] {
-        extendedType = type
-      } else {
-        // Cache miss; resolve type
-        switch resolveSyntax(typeSyntax: extensionDecl.extendedType) {
-        case .success(.memberResults(let extendedTypes)):
-          guard let type = extendedTypes.first, extendedTypes.count == 1 else {
+        // Check cache
+        if let type = boundExtensions[extensionDecl] {
+          extendedType = type
+        } else {
+          // Cache miss; resolve type
+          switch resolveSyntax(typeSyntax: extensionDecl.extendedType) {
+          case .success(.memberResults(let extendedTypes)):
+            guard let type = extendedTypes.first, extendedTypes.count == 1 else {
+              failures.append(.cannotExtendNonNominal(extensionDecl))
+              continue
+            }
+            extendedType = type
+          case .success(.function), .success(.tuple):
             failures.append(.cannotExtendNonNominal(extensionDecl))
             continue
+          case .failure(let failure):
+            failures.append(failure)
+            continue
           }
-          extendedType = type
-        case .success(.function), .success(.tuple):
-          failures.append(.cannotExtendNonNominal(extensionDecl))
-          continue
-        case .failure(let failure):
-          failures.append(failure)
-          continue
         }
-      }
 
-      if extendedType.name == nameQuery { matches.append(extensionDecl) }
+        if extendedType.name == nameQuery { matches[file, default: []].append(extensionDecl) }
+      }
     }
 
     return matches
