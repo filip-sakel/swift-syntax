@@ -14,15 +14,28 @@ import SwiftSyntax
 
 // A global type name, `Swift::Int._(MyFileA.swift)::MyType`.
 public struct QualifiedTypeNameGlobalType: Hashable, CustomDebugStringConvertible {
-  public enum Qualifier: Hashable {
+  public enum Qualifier: Hashable, CustomDebugStringConvertible {
     case `internal`(fileID: SyntaxIdentifier)
     case external(moduleName: Identifier)
+
+    public var debugDescription: String {
+      switch self {
+      case .internal(let fileID):
+        "_(\(fileID.hashValue))"
+      case .external(let moduleName):
+        "\(moduleName.name)"
+      }
+    }
   }
   /// A component of a qualified type name, external or internal. For instance,
   /// `Swift::Int` (external) and `_(FileA.swift)::MyType` (internal).
-  public struct Component: Hashable {
+  public struct Component: Hashable, CustomDebugStringConvertible {
     let qualifier: Qualifier
     let name: Identifier
+
+    public var debugDescription: String {
+      return "\(qualifier.debugDescription)::\(name.name)"
+    }
   }
 
   /// The types components. Guaranteed to be non-empty
@@ -50,19 +63,7 @@ public struct QualifiedTypeNameGlobalType: Hashable, CustomDebugStringConvertibl
   }
 
   public var debugDescription: String {
-    func describeQualifier(_ qualifier: Qualifier) -> String {
-      switch qualifier {
-      case .internal(let fileID):
-        return "_(\(fileID))"
-      case .external(let moduleName):
-        return moduleName.name
-      }
-    }
-    func describeComponent(_ component: Component) -> String {
-      "\(describeQualifier(component.qualifier))::\(component.name.name)"
-    }
-
-    return components.map(describeComponent).joined(separator: ".")
+    return components.map(\.debugDescription).joined(separator: ".")
   }
 }
 
@@ -113,7 +114,7 @@ public indirect enum QualifiedTypeNameNestedType: Hashable, CustomDebugStringCon
     case .topLevel(let globalType):
       return globalType.debugDescription
     case .nestedScope(let scope, let nestedType):
-      return "\(scope.id)>\(nestedType.debugDescription)"
+      return "\(scope.id.hashValue)>\(nestedType.debugDescription)"
     }
   }
 }

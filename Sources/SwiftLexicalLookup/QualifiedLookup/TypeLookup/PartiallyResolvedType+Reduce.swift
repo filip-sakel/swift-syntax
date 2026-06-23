@@ -12,8 +12,16 @@
 
 import SwiftSyntax
 
-struct PartiallyResolvedTypeIdentifier {
-  typealias Component = (module: Identifier?, name: Identifier)
+struct PartiallyResolvedTypeIdentifier: CustomDebugStringConvertible {
+  struct Component: CustomDebugStringConvertible {
+    let module: Identifier?
+    let name: Identifier
+
+    var debugDescription: String {
+      let modulePrefix = if let module { "\(module.name)::" } else { "" }
+      return "\(modulePrefix)\(name.name)"
+    }
+  }
   let base: Component
   private(set) var memberChain: [Component] = []
 
@@ -30,6 +38,9 @@ struct PartiallyResolvedTypeIdentifier {
     )
   }
 
+  var debugDescription: String {
+    "\(base.debugDescription)\(memberChain.map({ ".\($0.debugDescription)" }).joined())"
+  }
 }
 
 enum ReducingTypeResolutionFailure: Error {
@@ -97,7 +108,11 @@ extension [PartiallyResolvedType] {
         // Only valid case for functions/tuples handled above.
         return .failure(ReducingTypeResolutionFailure.invalidComposition(nonNominal: type))
       case .nominalIdentifier(let module, let name):
-        members.append(PartiallyResolvedTypeIdentifier(base: (module, name)))
+        members.append(
+          PartiallyResolvedTypeIdentifier(
+            base: PartiallyResolvedTypeIdentifier.Component(module: module, name: name)
+          )
+        )
       case .nominalMember(let bases, let module, let name):
         // Throw if the base is invalid (we can't do anything smart)
         let lookupResult: MemberLookupResult<PartiallyResolvedTypeIdentifier>
@@ -116,7 +131,11 @@ extension [PartiallyResolvedType] {
           return .failure(ReducingTypeResolutionFailure.noTupleTypeMembers)
         case .memberResults(let baseMembers) where !baseMembers.isEmpty:
           for baseMember in baseMembers {
-            members.append(baseMember.addingComponents([(module, name)]))
+            members.append(
+              baseMember.addingComponents([
+                PartiallyResolvedTypeIdentifier.Component(module: module, name: name)
+              ])
+            )
           }
         case .memberResults:  // where results.isEmpty
           return .failure(ReducingTypeResolutionFailure.noTypeMembers(in: bases))

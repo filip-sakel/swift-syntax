@@ -13,13 +13,35 @@
 import SwiftIfConfig
 import SwiftSyntax
 
+extension Result where Success: CustomDebugStringConvertible {
+  fileprivate var _debugDescription: String {
+    switch self {
+    case .success(let success):
+      return ".success(\(success.debugDescription))"
+    case .failure(let error):
+      return ".error(\(String(reflecting: error)))"
+    }
+  }
+}
+
 /// The minimal defining components of a nominal type: the main declaration and the qualified name.
 /// Unlike ``NominalType``, doesn't include extensions.
-@_spi(_QualifiedLookup) public typealias MinimalNominal = (mainDecl: NominalTypeDeclSyntax2, name: QualifiedTypeName)
+@_spi(_QualifiedLookup) public struct MinimalNominal: CustomDebugStringConvertible {
+  public let mainDecl: NominalTypeDeclSyntax2
+  public let name: QualifiedTypeName
+
+  public var debugDescription: String {
+    "\(name) (\(mainDecl.kind))"
+  }
+}
 
 /// Finds the main declaration and qualified name of the nominal types
 /// to which the the given type syntax refers.
 @_spi(_QualifiedLookup) public struct TypeQualifier {
+  func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
+    print("\(file):\(line)", component)
+  }
+
   public enum Failure: Error {
     case cannotComposeTupleOrFunction
     case noTupleOrFunctionTypeMembers
@@ -81,7 +103,7 @@ import SwiftSyntax
     // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
     // requester: Requester,
   ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
-    print("Resolving syntax: \(typeSyntax.trimmedDescription)")
+    log("Resolving syntax: \(typeSyntax.trimmedDescription)")
 
     // Resolve type; throw on failure
     let resolutionResult: MemberLookupResult<PartiallyResolvedTypeIdentifier>
@@ -97,14 +119,14 @@ import SwiftSyntax
     switch resolutionResult {
     // .function and .tuple are only valid without result types
     case .function(let argumentCount):
-      print("Resolved \(typeSyntax.trimmedDescription) to .function")
+      log("Resolved \(typeSyntax.trimmedDescription) to .function")
       return .success(.function(argumentCount: argumentCount))
     case .tuple(let labels):
-      print("Resolved \(typeSyntax.trimmedDescription) to .tuple")
+      log("Resolved \(typeSyntax.trimmedDescription) to .tuple")
       return .success(.tuple(labels: labels))
     // Issue requests for the underlying type identifiers
     case .memberResults(let typeResults):
-      print("Partially resolved \(typeSyntax.trimmedDescription) to .memberResults(\(typeResults))")
+      log("Partially resolved \(typeSyntax.trimmedDescription) to .memberResults(\(typeResults))")
 
       var result: MemberLookupResult<MinimalNominal>? = nil
       for typeIdentifier in typeResults {
@@ -183,10 +205,10 @@ import SwiftSyntax
       // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
       // requester: Requester,
   ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
-    print("[For syntax \(originatingSyntax.trimmedDescription)] Resolving ref '\(typeReference)'")
+    log("[For syntax \(originatingSyntax.trimmedDescription)] Resolving ref '\(typeReference)'")
 
     // Get the base type
-    let (optionalModule, typeName) = typeReference.base
+    let (optionalModule, typeName) = (typeReference.base.module, typeReference.base.name)
 
     // Perfom unqualified lookup up to find the base type's declaration
     //
@@ -216,8 +238,8 @@ import SwiftSyntax
       // Scoped unqualified lookup in this module
       baseLookupResults = originatingSyntax.findUnqualifiedType(typeName, configuredRegions: configuredRegions)
     }
-    print(
-      "[For syntax \(originatingSyntax.trimmedDescription)] Partially resolved base '\(typeName)' to  `\(baseLookupResults)`"
+    log(
+      "[For syntax \(originatingSyntax.trimmedDescription)] Partially resolved base '\(typeName.name)' to  `\(baseLookupResults)`"
     )
 
     // Find first matching type declaration
@@ -302,7 +324,7 @@ import SwiftSyntax
     memberChain: [PartiallyResolvedTypeIdentifier.Component],
     originatingSyntax: TypeSyntax
   ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
-    print(
+    log(
       "[For syntax \(originatingSyntax)] Resolving decl kind \(typeDecl.kind) `\(typeDecl.trimmedDescription)` with chain \(memberChain)"
     )
 
@@ -320,16 +342,16 @@ import SwiftSyntax
 
       switch typeChain {
       case .resolved(let qualifiedTypeName):
-        print(
-          "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)'] Resolved to type chain \(qualifiedTypeName)."
+        log(
+          "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name.trimmedDescription)'] Resolved to type chain \(qualifiedTypeName.debugDescription)"
         )
 
         baseLookupResult = Result.success(
-          MemberLookupResult.memberResults([(mainDecl: nominalDecl, name: qualifiedTypeName)])
+          MemberLookupResult.memberResults([MinimalNominal(mainDecl: nominalDecl, name: qualifiedTypeName)])
         )
       case .partiallyResolved(let partiallyResolvedName):
-        print(
-          "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)'] Partially resolved to type chain \(partiallyResolvedName)."
+        log(
+          "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name.trimmedDescription)'] Partially resolved to type chain \(partiallyResolvedName.debugDescription)."
         )
 
         let qualifiedBaseResults = resolveSyntax(typeSyntax: partiallyResolvedName.base)
@@ -341,13 +363,13 @@ import SwiftSyntax
         })
       }
     } else if let typeAlias = typeDecl.as(TypeAliasDeclSyntax.self) {
-      print(
-        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)'] Partially resolved to type alias with syntax \(typeAlias.initializer.value)."
+      log(
+        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name.trimmedDescription)'] Partially resolved to type alias with syntax \(typeAlias.initializer.value)."
       )
       baseLookupResult = resolveSyntax(typeSyntax: typeAlias.initializer.value)
     } else {
-      print(
-        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)'] Declaration type doesn't have members."
+      log(
+        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name.trimmedDescription)'] Declaration type doesn't have members."
       )
       // No members for generic parameters and associated types
       return .success(MemberLookupResult.memberResults([]))
@@ -355,14 +377,14 @@ import SwiftSyntax
 
     // Return if we don't have type members
     guard let firstTypeMember = memberChain.first else {
-      print(
-        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)'] Resolved to \(baseLookupResult)."
+      log(
+        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name.trimmedDescription)'] Resolved to \(baseLookupResult)."
       )
       return baseLookupResult
     }
     let remainingMemberChain = Array(memberChain.dropFirst())
-    print(
-      "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)'] Partially resolved base to \(baseLookupResult) with next base \(firstTypeMember) with chain \(remainingMemberChain)."
+    log(
+      "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name.trimmedDescription)'] Partially resolved base to \(baseLookupResult._debugDescription) with next base \(firstTypeMember) with chain \(remainingMemberChain)."
     )
 
     // Recursively find type members
@@ -381,9 +403,10 @@ import SwiftSyntax
     }
     // Perform qualified type lookup
     var result: MemberLookupResult<MinimalNominal>? = nil
-    for (mainDecl, name) in baseTypes {
-      print(
-        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)' & qualified '\(name)'] Requesting extension binding."
+    for baseType in baseTypes {
+      let (mainDecl, name) = (baseType.mainDecl, baseType.name)
+      log(
+        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)' & qualified '\(name.debugDescription)'] Requesting extension binding."
       )
       let extensions = bindExtensions(matchingForName: name, resolvedFrom: originatingSyntax)
       let nominalType = NominalType(
@@ -392,8 +415,8 @@ import SwiftSyntax
         redeclarations: [],
         extensions: extensions
       )
-      print(
-        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)' & qualified '\(name)'] Bound extensions \(extensions)."
+      log(
+        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)' & qualified '\(name.debugDescription)'] Bound extensions \(extensions)."
       )
 
       // TODO: Figure out imported modules
@@ -409,6 +432,9 @@ import SwiftSyntax
         importedModules: [],
         moduleMap: symbolTable.moduleMap,
         configuredRegions: configuredRegions
+      )
+      log(
+        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)' & qualified '\(name.debugDescription) & extensions: \(extensions)'] Direct lookup yielded: \(typeDeclsResult)."
       )
       let memberTypeDecl: TypeDeclSyntax
       switch typeDeclsResult {
@@ -427,7 +453,7 @@ import SwiftSyntax
         failures.append(.other(failure))
         continue
       }
-      print(
+      log(
         "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)' & qualified '\(name)'] Resolved type member \(firstTypeMember) to \(memberTypeDecl.trimmedDescription)."
       )
 

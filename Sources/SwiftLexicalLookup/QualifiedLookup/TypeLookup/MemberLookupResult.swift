@@ -32,6 +32,34 @@ import SwiftSyntax
 extension MemberLookupResult: Equatable where Result: Equatable {}
 extension MemberLookupResult: Hashable where Result: Hashable {}
 
+extension MemberLookupResult {
+  fileprivate func _description(describeMembers: ([Result]) -> String) -> String {
+    switch self {
+    case .function(let argumentCount):
+      return ".function(argumentCount: \(argumentCount))"
+    case .tuple(let labels):
+      return ".tuple(\(labels.map({ $0?.name ?? "_"}))"
+    case .memberResults(let members):
+      return ".memberResults([\(describeMembers(members))])"
+    }
+  }
+}
+
+extension MemberLookupResult: CustomDebugStringConvertible where Result: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    _description(describeMembers: { members in
+      members.map({ "```\($0.debugDescription)```" }).joined(separator: "\n")
+    })
+  }
+}
+// extension MemberLookupResult: CustomDebugStringConvertible where Result: SyntaxProtocol {
+//   public var debugDescription: String {
+//     _description(describeMembers: { members in
+//       members.map({ "```\($0.trimmedDescription)```" }).joined(separator: "\n")
+//     })
+//   }
+// }
+
 // extension MemberLookupResult where Result == ValueDeclSyntax {
 //   var names: [DeclName] {
 //     switch self {

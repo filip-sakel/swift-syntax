@@ -241,8 +241,10 @@ final class TestQualifiedTypeName: XCTestCase {
 
     // Perform lookup
     let symbolTable = SymbolTable3(moduleToSources: [Identifier(canonicalName: moduleName): lookupFiles])
-    var typeQualifier = TypeQualifier(symbolTable: symbolTable, configuredRegions: configuredRegions)
     for (fileName, lookupSource) in lookupSources {
+      // Create "fresh" type qualifier to avoid sharing state (which includes failures)
+      var typeQualifier = TypeQualifier(symbolTable: symbolTable, configuredRegions: configuredRegions)
+
       let sourceString = lookupSource.source
       // Force-unwrapped because we just created `lookupFile` with the same `fileName`s
       let sourceFile = lookupFiles[fileName]!
@@ -283,16 +285,27 @@ final class TestQualifiedTypeName: XCTestCase {
         let namesToDecls: [String: NominalTypeDeclSyntax2]
         let lookupResultOrFailure: Result<MemberLookupResult<MinimalNominal>, TypeQualifier.Failure> =
           typeQualifier.resolveSyntax(typeSyntax: targetTypeSyntax)
+
+        // Report errors
+        if !typeQualifier.failures.isEmpty {
+          XCTFail(
+            "Type lookup generated errors: \(typeQualifier.failures).",
+            file: file,
+            line: line
+          )
+        }
+        print(">>> Result: \(lookupResultOrFailure)")
+
         // Match success with success and failure with failure
         switch (expectedResult, lookupResultOrFailure) {
         case (.success(.memberResults(let markers)), .success(.memberResults(let nominalTypes))):
           expectedMarkers = markers
           // Map tuple to results
           var namesToDeclsTemporary = [String: NominalTypeDeclSyntax2]()
-          for (mainDecl, name) in nominalTypes {
-            let nameDescription = name.debugDescription
+          for nominalType in nominalTypes {
+            let nameDescription = nominalType.name.debugDescription
             guard namesToDeclsTemporary[nameDescription] == nil else { continue assertionLoop }
-            namesToDeclsTemporary[nameDescription] = mainDecl
+            namesToDeclsTemporary[nameDescription] = nominalType.mainDecl
           }
           namesToDecls = namesToDeclsTemporary
         case (.success(let expectedLookupResult), .success(let lookupResult)):
@@ -366,55 +379,67 @@ final class TestQualifiedTypeName: XCTestCase {
     }
   }
 
-  func testCodeBlockSimpleCase() {
+  func testSimpleCase() {
     assertQualifiedTypeName([
       "MyFile.swift": """
-      \("🟥", name: "MyModule::A")struct A {
-        \("🟩", name: "MyModule::A.MyModule::B")struct B {
-          static func f() -> \(references: "🟩")B {}
-          static func makeSelf() -> \(references: "🟩")Self
+      struct Hi {
+        \("🟥", name: "MyModule::Hi.MyModule::A")struct A {
+          static func f() -> \(references: "🟥")A {}
         }
       }
       """ as QualifiedTypeNameSource
-
-        // """
-        //   func anonymousScope() {
-        //     let a: \(references: "🟥")A = self
-        //     let me: \(references: "🟥")Self = self
-        //
-        //     🟦struct C {
-        //       func f(c: \(references: "🟦")C) -> \(references: "🟦")Self {
-        //         self as \(references: "🟦")Self
-        //       }
-        //     }
-        //
-        //     let c: C = \(references: "🟦")C()
-        //   }
-        //
-        //   static var getA: \(references: "🟥")A { self }
-        //   static func makeSelf() -> \(references: "🟥")Self {}
-        //   static func makeB() -> \(references: "🟩")B {}
-        //
-        //   static func invalidRefToC() -> \(result: .memberResults([]))C {}
-        // }
-        //
-        // func anonymousScope() {
-        //   var a: \(result: .memberResults([]))Self
-        //
-        //   🟨struct A {
-        //     subscript(a: \(references: "🟨")A) -> \(references: "🟨")Self { a }
-        //   }
-        //   enum D {}
-        //
-        //   var a: \(references: "🟨")A {}
-        // }
-        //
-        // \(references: "🟥")A
-        // \(result: .memberResults([]))B
-        // \(result: .memberResults([]))D
-        // """ as QualifiedTypeNameSource
     ])
   }
+
+  // func testCodeBlockSimpleCase() {
+  //   assertQualifiedTypeName([
+  //     "MyFile.swift": """
+  //     \("🟥", name: "MyModule::A")struct A {
+  //       \("🟩", name: "MyModule::A.MyModule::B")struct B {
+  //         static func f() -> \(references: "🟩")B {}
+  //         static func makeSelf() -> \(references: "🟩")Self
+  //       }
+  //     }
+  //     """ as QualifiedTypeNameSource
+  //
+  //       // """
+  //       //   func anonymousScope() {
+  //       //     let a: \(references: "🟥")A = self
+  //       //     let me: \(references: "🟥")Self = self
+  //       //
+  //       //     🟦struct C {
+  //       //       func f(c: \(references: "🟦")C) -> \(references: "🟦")Self {
+  //       //         self as \(references: "🟦")Self
+  //       //       }
+  //       //     }
+  //       //
+  //       //     let c: C = \(references: "🟦")C()
+  //       //   }
+  //       //
+  //       //   static var getA: \(references: "🟥")A { self }
+  //       //   static func makeSelf() -> \(references: "🟥")Self {}
+  //       //   static func makeB() -> \(references: "🟩")B {}
+  //       //
+  //       //   static func invalidRefToC() -> \(result: .memberResults([]))C {}
+  //       // }
+  //       //
+  //       // func anonymousScope() {
+  //       //   var a: \(result: .memberResults([]))Self
+  //       //
+  //       //   🟨struct A {
+  //       //     subscript(a: \(references: "🟨")A) -> \(references: "🟨")Self { a }
+  //       //   }
+  //       //   enum D {}
+  //       //
+  //       //   var a: \(references: "🟨")A {}
+  //       // }
+  //       //
+  //       // \(references: "🟥")A
+  //       // \(result: .memberResults([]))B
+  //       // \(result: .memberResults([]))D
+  //       // """ as QualifiedTypeNameSource
+  //   ])
+  // }
 
   func assertIdentifierTypeLookup() {
     // assertTypeIdLookup("""

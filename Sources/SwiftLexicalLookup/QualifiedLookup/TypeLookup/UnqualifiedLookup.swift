@@ -19,7 +19,7 @@ import SwiftSyntax
 // I.e. Even if we find a matching type decl (and we know we can exit early),
 //      qualifying the type means qualifying all parent scopes, which necessitates
 //      resolving parent scopes.
-enum UnqualifiedTypeLookupResult {
+enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
   /// Resolve the given type decl and look for the members in the given
   /// member chain (if not empty).
   /// E.g.
@@ -59,6 +59,22 @@ enum UnqualifiedTypeLookupResult {
   case lookForGenericParameters(extensionDecl: ExtensionDeclSyntax)
   case lookInModule
   case lookInImports([Identifier])
+
+  var debugDescription: String {
+    switch self {
+    case .lookForGenericParameters(let extensionDecl):
+      return ".lookForGenericParameters(in: \(extensionDecl.trimmedDescription))"
+    case .lookInImports(let imports):
+      return ".lookInImports(\(imports.map(\.name)))"
+    case .lookInModule:
+      return "lookInModule"
+    case .lookInsideExtension(let extensionDecl, let selectMember):
+      return
+        ".lookInsideExtension(\(extensionDecl.trimmedDescription), for: \(selectMember?.debugDescription ?? "nil"))"
+    case .lookInsideType(let type, let selectMember):
+      return ".lookInsideType(\(type.trimmedDescription), for: \(selectMember?.debugDescription ?? "nil")))"
+    }
+  }
 }
 
 // @_spi(_QualifiedLookup) public enum UnqualifiedResult {

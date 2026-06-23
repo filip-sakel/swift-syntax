@@ -12,12 +12,21 @@
 
 import SwiftSyntax
 
-enum ChainResult {
+enum ChainResult: CustomDebugStringConvertible {
   case resolved(QualifiedTypeName)
   case partiallyResolved(PartiallyResolvedNominalTypeChain)
+
+  var debugDescription: String {
+    switch self {
+    case .resolved(let qualifiedName):
+      return ".resolved(\(qualifiedName.debugDescription))"
+    case .partiallyResolved(let partiallyResolvedName):
+      return ".partiallyResolved(\(partiallyResolvedName.debugDescription))"
+    }
+  }
 }
 
-struct PartiallyResolvedNominalTypeChain {
+struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
   // Base and members should be in the same file
   let base: TypeSyntax
   /// The names of the members.
@@ -49,6 +58,11 @@ struct PartiallyResolvedNominalTypeChain {
     self.sourceFile = sourceFile
   }
 
+  var debugDescription: String {
+    let memberChain = memberNames.map(\.name).joined(separator: ".")
+    return "<\(base.trimmedDescription)>.\(memberChain) (mainDecl: \(String(reflecting: mainDecl?.kind)))"
+  }
+
   // Resolve using now-qualified base. Module name or `nil` for this module (internal).
   func resolve(resolvedBase: MinimalNominal, module: Identifier?) -> MinimalNominal {
     // Get the type's main declaration.
@@ -70,14 +84,14 @@ struct PartiallyResolvedNominalTypeChain {
       let memberComponents: [QualifiedTypeNameGlobalType.Component] = memberNames.map({ name in
         QualifiedTypeNameGlobalType.Component(qualifier: qualifier, name: name)
       })
-      return (
+      return MinimalNominal(
         mainDecl: resolvedMainDecl,
         name: QualifiedTypeName.topLevel(
           globalType.addingComponents(memberComponents)
         )
       )
     case .nestedScope(let scope, let type):
-      return (
+      return MinimalNominal(
         mainDecl: resolvedMainDecl,
         name: QualifiedTypeName.nestedScope(scope: scope, type: type.addingComponents(memberNames))
       )
@@ -148,9 +162,9 @@ extension NominalTypeDeclSyntax2 {
       var members = [(mainDecl: self, name: try parseName(self.name))]
 
       while let currentAncestor = ancestor {
-        // Nominal types go to the "chain"
+        // Nominal types go to the front of the "chain"
         if let nominalTypeDecl = currentAncestor.as(NominalTypeDeclSyntax2.self) {
-          try members.append((mainDecl: nominalTypeDecl, name: parseName(nominalTypeDecl.name)))
+          try members.insert((mainDecl: nominalTypeDecl, name: parseName(nominalTypeDecl.name)), at: 0)
         }
         // Extensions can't be resolved right now.
         else if let extensionDecl = currentAncestor.as(ExtensionDeclSyntax.self) {

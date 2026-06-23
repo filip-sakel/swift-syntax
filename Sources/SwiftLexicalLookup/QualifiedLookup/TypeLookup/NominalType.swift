@@ -151,6 +151,7 @@ extension NominalType {
       moduleMap: moduleMap,
       configuredRegions: configuredRegions,
       visit: { decl in
+        print("[Direct lookup on \(qualifiedName)] Visiting decl: \(decl.trimmedDescription)")
         // Get only types with matching names
         guard
           let typeDecl = decl.as(TypeDeclSyntax.self),
