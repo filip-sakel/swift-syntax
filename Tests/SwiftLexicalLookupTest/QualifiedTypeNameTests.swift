@@ -91,6 +91,13 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
       components.append(.references(result: resultOrFailure, file: file, line: line))
     }
     mutating func appendInterpolation(
+      failure: TypeQualifier.Failure,
+      file: StaticString = #file,
+      line: UInt = #line
+    ) {
+      components.append(.references(result: .failure(failure), file: file, line: line))
+    }
+    mutating func appendInterpolation(
       result: MemberLookupResult<Character>,
       file: StaticString = #file,
       line: UInt = #line
@@ -505,6 +512,31 @@ final class TestQualifiedTypeName: XCTestCase {
       """ as QualifiedTypeNameSource
     ])
   }
+
+  func testNonnominalComposition() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      // Cannot compose non nominal types
+      typealias A = \(failure: .cannotComposeTupleOrFunction)(UnknownTypeA, UnknownTypeB) -> Int & Int
+      typealias B = \(failure: .cannotComposeTupleOrFunction)Int & ((UnknownTypeA) -> UnknownTypeB)
+      // Non-nominal types don't have type members
+      typealias C = \(failure: .noTupleOrFunctionTypeMembers)(Int, Bool).MyType
+      typealias D = \(failure: .noTupleOrFunctionTypeMembers)((Int) -> Bool).MyType
+      // Ensure errors propagate
+      struct MyStruct {}
+      typealias E = \(failure: .cannotComposeTupleOrFunction)A.MyType
+      typealias F = \(failure: .noTupleOrFunctionTypeMembers)A & MyStruct
+      """ as QualifiedTypeNameSource
+    ])
+  }
+  func testTupleComposition() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      func f(_: \(result: .tuple(labels: [Identifier(canonicalName: "a"), nil]))(a: Int, Bool))
+      """ as QualifiedTypeNameSource
+    ])
+  }
+
   // func testSimpleExtension() {
   //   assertQualifiedTypeName([
   //     "MyFile.swift": """
