@@ -388,8 +388,17 @@ final class TestQualifiedTypeName: XCTestCase {
   func testSimpleCase() {
     assertQualifiedTypeName([
       "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::A")struct A {
+        static func f() -> \(references: "🟥")A {}
+      }
+      """ as QualifiedTypeNameSource
+    ])
+  }
+  func testSimpleNestedCase() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
       struct Hi {
-        \("🟥", name: "_(MyFile.swift)::Hi._(MyFilee.swift)::A")struct A {
+        \("🟥", name: "_(MyFile.swift)::Hi._(MyFile.swift)::A")struct A {
           static func f() -> \(references: "🟥")A {}
         }
       }
