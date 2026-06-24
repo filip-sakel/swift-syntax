@@ -18,13 +18,17 @@ public struct QualifiedTypeNameGlobalType: Hashable, CustomDebugStringConvertibl
     case `internal`(fileID: SyntaxIdentifier)
     case external(moduleName: Identifier)
 
-    public var debugDescription: String {
+    public func describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
       switch self {
       case .internal(let fileID):
-        "_(\(fileID.hashValue))"
+        "_(\(describeFileID(fileID)))"
       case .external(let moduleName):
         "\(moduleName.name)"
       }
+    }
+
+    public var debugDescription: String {
+      describe(describeFileID: \.hashValue.description)
     }
   }
   /// A component of a qualified type name, external or internal. For instance,
@@ -33,8 +37,12 @@ public struct QualifiedTypeNameGlobalType: Hashable, CustomDebugStringConvertibl
     let qualifier: Qualifier
     let name: Identifier
 
+    public func describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
+      return "\(qualifier.describe(describeFileID: describeFileID))::\(name.name)"
+    }
+
     public var debugDescription: String {
-      return "\(qualifier.debugDescription)::\(name.name)"
+      describe(describeFileID: \.hashValue.description)
     }
   }
 
@@ -62,8 +70,12 @@ public struct QualifiedTypeNameGlobalType: Hashable, CustomDebugStringConvertibl
     return newType
   }
 
+  public func describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
+    return components.map({ $0.describe(describeFileID: describeFileID) }).joined(separator: ".")
+  }
+
   public var debugDescription: String {
-    return components.map(\.debugDescription).joined(separator: ".")
+    describe(describeFileID: \.hashValue.description)
   }
 }
 
@@ -109,12 +121,16 @@ public indirect enum QualifiedTypeNameNestedType: Hashable, CustomDebugStringCon
   // Specifies an (internal) nested-level scope and a dot-separated sequence of identifiers.
   case nestedScope(scope: CodeBlockItemListSyntax, type: QualifiedTypeNameNestedType)
 
-  public var debugDescription: String {
+  public func describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
     switch self {
     case .topLevel(let globalType):
-      return globalType.debugDescription
+      return globalType.describe(describeFileID: describeFileID)
     case .nestedScope(let scope, let nestedType):
       return "\(scope.id.hashValue)>\(nestedType.debugDescription)"
     }
+  }
+
+  public var debugDescription: String {
+    describe(describeFileID: \.hashValue.description)
   }
 }

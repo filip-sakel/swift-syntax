@@ -23,10 +23,30 @@ extension Result where Success: CustomDebugStringConvertible {
     }
   }
 }
+extension Result where Success: SyntaxProtocol {
+  fileprivate var _debugSyntaxDescription: String {
+    switch self {
+    case .success(let success):
+      return ".success(\(success.trimmedDescription))"
+    case .failure(let error):
+      return ".error(\(String(reflecting: error)))"
+    }
+  }
+}
+extension Result where Success == [TypeDeclSyntax] {
+  fileprivate var _debugSyntaxDescription: String {
+    switch self {
+    case .success(let success):
+      return ".success(\(success.map(\.trimmedDescription)))"
+    case .failure(let error):
+      return ".error(\(String(reflecting: error)))"
+    }
+  }
+}
 
 /// The minimal defining components of a nominal type: the main declaration and the qualified name.
 /// Unlike ``NominalType``, doesn't include extensions.
-@_spi(_QualifiedLookup) public struct MinimalNominal: CustomDebugStringConvertible {
+@_spi(_QualifiedLookup) public struct MinimalNominal: Hashable, CustomDebugStringConvertible {
   public let mainDecl: NominalTypeDeclSyntax2
   public let name: QualifiedTypeName
 
@@ -243,17 +263,25 @@ extension Result where Success: CustomDebugStringConvertible {
     )
 
     // Find first matching type declaration
+    // TODO: Merge lookup/skip logic if possible
     for lookupResult in baseLookupResults {
       switch lookupResult {
       case .lookInsideType(let typeDecl, let selectMember):
         // An array with the selectMember, or empty if not provided
         let memberChainPrefix = selectMember.map({ [$0] }) ?? []
 
-        return resolveTypeDecl(
+        let typeLookupResult = resolveTypeDecl(
           typeDecl: typeDecl,
           memberChain: memberChainPrefix + typeReference.memberChain,
           originatingSyntax: originatingSyntax
         )
+        // We skip only if the lookup succeeded but found no matching types
+        // (i.e. we didn't find any types not because the underlying type declaration has an error
+        // but because this type has no such member)
+        if case Result.success(MemberLookupResult.memberResults([])) = typeLookupResult {
+          continue
+        }
+        return typeLookupResult
       case .lookInsideExtension(let extensionDecl, let selectMember):
         // We might have to look inside an extension
         // For instance:
@@ -281,12 +309,17 @@ extension Result where Success: CustomDebugStringConvertible {
         // An array with the selectMember, or empty if not provided
         let memberChainPrefix = selectMember.map({ [$0] }) ?? []
 
-        return resolveTypeDecl(
+        let typeLookupResult = resolveTypeDecl(
           typeDecl: TypeDeclSyntax(enclosingType.mainDecl),
           memberChain: memberChainPrefix + typeReference.memberChain,
           // Resolve from the location of the extension declaration
           originatingSyntax: extensionDecl.extendedType
         )
+        // Skip logic like above
+        if case Result.success(MemberLookupResult.memberResults([])) = typeLookupResult {
+          continue
+        }
+        return typeLookupResult
       case .lookForGenericParameters(let extensionDecl):
         // Resolve extended type
         let baseType: MinimalNominal
@@ -301,11 +334,16 @@ extension Result where Success: CustomDebugStringConvertible {
         // TODO: Should we diagnose
         guard let genericParameter = baseType.mainDecl.findGenericParameters(withName: typeName).first else { continue }
         // Forward to the type-declaration resolver
-        return resolveTypeDecl(
+        let typeLookupResult = resolveTypeDecl(
           typeDecl: TypeDeclSyntax(genericParameter),
           memberChain: typeReference.memberChain,
           originatingSyntax: originatingSyntax
         )
+        // Skip logic like above
+        if case Result.success(MemberLookupResult.memberResults([])) = typeLookupResult {
+          continue
+        }
+        return typeLookupResult
       case .lookInModule:
         // TODO: Handle
         break
@@ -434,7 +472,7 @@ extension Result where Success: CustomDebugStringConvertible {
         configuredRegions: configuredRegions
       )
       log(
-        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)' & qualified '\(name.debugDescription) & extensions: \(extensions)'] Direct lookup yielded: \(typeDeclsResult)."
+        "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)' & qualified '\(name.debugDescription) & extensions: \(extensions)'] Direct lookup yielded: \(typeDeclsResult._debugSyntaxDescription)."
       )
       let memberTypeDecl: TypeDeclSyntax
       switch typeDeclsResult {

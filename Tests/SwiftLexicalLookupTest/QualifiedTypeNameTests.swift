@@ -303,7 +303,13 @@ final class TestQualifiedTypeName: XCTestCase {
           // Map tuple to results
           var namesToDeclsTemporary = [String: NominalTypeDeclSyntax2]()
           for nominalType in nominalTypes {
-            let nameDescription = nominalType.name.debugDescription
+            let nameDescription = nominalType.name.describe(describeFileID: { fileID in
+              // Get name of first matching id
+              for (fileName, file) in lookupFiles where file.id == fileID {
+                return fileName
+              }
+              return fileID.hashValue.description
+            })
             guard namesToDeclsTemporary[nameDescription] == nil else { continue assertionLoop }
             namesToDeclsTemporary[nameDescription] = nominalType.mainDecl
           }
@@ -383,7 +389,7 @@ final class TestQualifiedTypeName: XCTestCase {
     assertQualifiedTypeName([
       "MyFile.swift": """
       struct Hi {
-        \("🟥", name: "MyModule::Hi.MyModule::A")struct A {
+        \("🟥", name: "_(MyFile.swift)::Hi._(MyFile.swift)::A")struct A {
           static func f() -> \(references: "🟥")A {}
         }
       }
