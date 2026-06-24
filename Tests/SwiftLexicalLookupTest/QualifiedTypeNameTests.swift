@@ -282,7 +282,7 @@ final class TestQualifiedTypeName: XCTestCase {
 
         // Find the minimal-nominal type
         let expectedMarkers: [Character]
-        let namesToDecls: [String: NominalTypeDeclSyntax2]
+        let declsToNames: [NominalTypeDeclSyntax2: String]
         let lookupResultOrFailure: Result<MemberLookupResult<MinimalNominal>, TypeQualifier.Failure> =
           typeQualifier.resolveSyntax(typeSyntax: targetTypeSyntax)
 
@@ -301,7 +301,7 @@ final class TestQualifiedTypeName: XCTestCase {
         case (.success(.memberResults(let markers)), .success(.memberResults(let nominalTypes))):
           expectedMarkers = markers
           // Map tuple to results
-          var namesToDeclsTemporary = [String: NominalTypeDeclSyntax2]()
+          var namesToDeclsTemporary = [NominalTypeDeclSyntax2: String]()
           for nominalType in nominalTypes {
             let nameDescription = nominalType.name.describe(describeFileID: { fileID in
               // Get name of first matching id
@@ -310,10 +310,10 @@ final class TestQualifiedTypeName: XCTestCase {
               }
               return fileID.hashValue.description
             })
-            guard namesToDeclsTemporary[nameDescription] == nil else { continue assertionLoop }
-            namesToDeclsTemporary[nameDescription] = nominalType.mainDecl
+            guard namesToDeclsTemporary[nominalType.mainDecl] == nil else { continue assertionLoop }
+            namesToDeclsTemporary[nominalType.mainDecl] = nameDescription
           }
-          namesToDecls = namesToDeclsTemporary
+          declsToNames = namesToDeclsTemporary
         case (.success(let expectedLookupResult), .success(let lookupResult)):
           XCTAssertEqual(
             // We handled members above, so map to `Bool` to facilitate comparison.
@@ -344,7 +344,7 @@ final class TestQualifiedTypeName: XCTestCase {
         }
 
         // Cross off matched markers
-        var unmatchedResults = namesToDecls
+        var unmatchedResults = declsToNames
         for marker in expectedMarkers {
           // Get the expected nominal type and name
           guard let expected = markerToType[marker] else {
@@ -357,17 +357,17 @@ final class TestQualifiedTypeName: XCTestCase {
           }
 
           // Cross off matched result
-          guard let resultDecl = unmatchedResults[expected.name] else {
-            XCTFail("Lookup didn't return expected nominal type named '\(expected.name)' at marker '\(marker)'.")
+          guard let resultDeclName = unmatchedResults[expected.nominalDecl] else {
+            XCTFail("Lookup didn't return expected nominal type at marker '\(marker)'.")
             continue
           }
-          unmatchedResults[expected.name] = nil
+          unmatchedResults[expected.nominalDecl] = nil
 
-          // Check decls match
+          // Check decl names match
           XCTAssertEqual(
-            expected.nominalDecl,
-            resultDecl,
-            "Lookup matched qualified type name but not the main declaration.",
+            expected.name,
+            resultDeclName,
+            "Type lookup matched main declaration but gave invalid name '\(resultDeclName)'.",
             file: file,
             line: line
           )
@@ -389,7 +389,7 @@ final class TestQualifiedTypeName: XCTestCase {
     assertQualifiedTypeName([
       "MyFile.swift": """
       struct Hi {
-        \("🟥", name: "_(MyFile.swift)::Hi._(MyFile.swift)::A")struct A {
+        \("🟥", name: "_(MyFile.swift)::Hi._(MyFilee.swift)::A")struct A {
           static func f() -> \(references: "🟥")A {}
         }
       }
