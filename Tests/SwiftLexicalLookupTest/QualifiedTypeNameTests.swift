@@ -98,11 +98,18 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
       components.append(.references(result: .success(result), file: file, line: line))
     }
     mutating func appendInterpolation(
-      references markers: Character...,
+      references markers: [Character],
       file: StaticString = #file,
       line: UInt = #line
     ) {
       appendInterpolation(result: .memberResults(markers), file: file, line: line)
+    }
+    mutating func appendInterpolation(
+      reference marker: Character,
+      file: StaticString = #file,
+      line: UInt = #line
+    ) {
+      appendInterpolation(references: [marker], file: file, line: line)
     }
   }
 
@@ -164,14 +171,19 @@ final class TestQualifiedTypeName: XCTestCase {
   // override func setUp() {
   //   self.executionTimeAllowance = 1
   // }
+  //
+  static let verbose = false
 
   func assertQualifiedTypeName(
     _ lookupSources: [String: QualifiedTypeNameSource],
     moduleName: StaticString = "MyModule",
     configuredRegions: ConfiguredRegions? = nil,
     file: StaticString = #file,
-    line: UInt = #line
+    line: UInt = #line,
+    verbose localVerbose: Bool = false
   ) {
+    let verbose = Self.verbose || localVerbose
+
     // Parse each source file
     let lookupFiles: [String: SourceFileSyntax] = lookupSources.mapValues({ lookupSource in
       var parser = Parser(lookupSource.source)
@@ -243,7 +255,11 @@ final class TestQualifiedTypeName: XCTestCase {
     let symbolTable = SymbolTable3(moduleToSources: [Identifier(canonicalName: moduleName): lookupFiles])
     for (fileName, lookupSource) in lookupSources {
       // Create "fresh" type qualifier to avoid sharing state (which includes failures)
-      var typeQualifier = TypeQualifier(symbolTable: symbolTable, configuredRegions: configuredRegions)
+      var typeQualifier = TypeQualifier(
+        symbolTable: symbolTable,
+        configuredRegions: configuredRegions,
+        _verbose: verbose
+      )
 
       let sourceString = lookupSource.source
       // Force-unwrapped because we just created `lookupFile` with the same `fileName`s
@@ -274,6 +290,14 @@ final class TestQualifiedTypeName: XCTestCase {
         /// contains the `Encodable & Decodable` nested type syntax)
         func findHeadTypeSyntax(of typeSyntax: TypeSyntax) -> TypeSyntax {
           // Cast the parent to type syntax, or return current type syntax
+          //
+          // Check for special-cases first (e.g., compositions)
+          if typeSyntax.parent?.is(CompositionTypeElementSyntax.self) == true,
+            let compositionSyntax = typeSyntax.parent?.parent?.parent?.as(CompositionTypeSyntax.self)
+          {
+            return findHeadTypeSyntax(of: TypeSyntax(compositionSyntax))
+          }
+          // General case
           guard let parentTypeSyntax = typeSyntax.parent?.as(TypeSyntax.self) else { return typeSyntax }
           // Find parent's head type syntax
           return findHeadTypeSyntax(of: parentTypeSyntax)
@@ -289,12 +313,14 @@ final class TestQualifiedTypeName: XCTestCase {
         // Report errors
         if !typeQualifier.failures.isEmpty {
           XCTFail(
-            "Type lookup generated errors: \(typeQualifier.failures).",
+            "Lookup of `\(targetTypeSyntax.trimmedDescription)` generated errors: \(typeQualifier.failures).",
             file: file,
             line: line
           )
         }
-        print(">>> Result: \(lookupResultOrFailure)")
+        if verbose {
+          print(">>> Result of `\(targetTypeSyntax.trimmedDescription)` lookup: \(lookupResultOrFailure)")
+        }
 
         // Match success with success and failure with failure
         switch (expectedResult, lookupResultOrFailure) {
@@ -319,7 +345,7 @@ final class TestQualifiedTypeName: XCTestCase {
             // We handled members above, so map to `Bool` to facilitate comparison.
             expectedLookupResult.mapMembers({ _ in false }),
             lookupResult.mapMembers({ _ in false }),
-            "Mismatch in expetced type-qualifier lookup result and actual result.",
+            "Mismatch in expetced type-qualifier lookup result of `\(targetTypeSyntax.trimmedDescription)` and actual result.",
             file: file,
             line: line
           )
@@ -336,7 +362,7 @@ final class TestQualifiedTypeName: XCTestCase {
           continue
         default:
           XCTFail(
-            "Type-qualifier lookup didn't succeed/fail as expected. Expected '\(expectedResult)'; got: '\(lookupResultOrFailure)'",
+            "Lookup of `\(targetTypeSyntax.trimmedDescription)` didn't succeed/fail as expected. Expected '\(expectedResult)'; got: '\(lookupResultOrFailure)'",
             file: file,
             line: line
           )
@@ -358,7 +384,11 @@ final class TestQualifiedTypeName: XCTestCase {
 
           // Cross off matched result
           guard let resultDeclName = unmatchedResults[expected.nominalDecl] else {
-            XCTFail("Lookup didn't return expected nominal type at marker '\(marker)'.")
+            XCTFail(
+              "Lookup of `\(targetTypeSyntax.trimmedDescription)` didn't return expected nominal type at marker '\(marker)'.",
+              file: file,
+              line: line
+            )
             continue
           }
           unmatchedResults[expected.nominalDecl] = nil
@@ -367,7 +397,7 @@ final class TestQualifiedTypeName: XCTestCase {
           XCTAssertEqual(
             expected.name,
             resultDeclName,
-            "Type lookup matched main declaration but gave invalid name '\(resultDeclName)'.",
+            "Lookup of `\(targetTypeSyntax.trimmedDescription)` matched main declaration but gave invalid name '\(resultDeclName)'.",
             file: file,
             line: line
           )
@@ -376,7 +406,7 @@ final class TestQualifiedTypeName: XCTestCase {
         // Diagnose unmatched
         for (name, nominalDecl) in unmatchedResults {
           XCTFail(
-            "[Lookup Failure] Lookup `\(targetTypeSyntax.trimmedDescription)` found unexpected declaration named '\(name)' (main decl: ```\(nominalDecl)```)",
+            "[Lookup Failure] Lookup of `\(targetTypeSyntax.trimmedDescription)` found unexpected declaration named '\(name)' (main decl: ```\(nominalDecl)```)",
             file: file,
             line: line
           )
@@ -388,8 +418,9 @@ final class TestQualifiedTypeName: XCTestCase {
   func testSimpleCase() {
     assertQualifiedTypeName([
       "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::A")struct A {
-        static func f() -> \(references: "🟥")A {}
+      \("🟥", name: "_(MyFile.swift)::A")
+      struct A {
+        static func f() -> \(reference: "🟥")A {}
       }
       """ as QualifiedTypeNameSource
     ])
@@ -397,14 +428,100 @@ final class TestQualifiedTypeName: XCTestCase {
   func testSimpleNestedCase() {
     assertQualifiedTypeName([
       "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::Hi")
       struct Hi {
-        \("🟥", name: "_(MyFile.swift)::Hi._(MyFile.swift)::A")struct A {
-          static func f() -> \(references: "🟥")A {}
+
+        \("🟩", name: "_(MyFile.swift)::Hi._(MyFile.swift)::A")
+        struct A {
+          static func f() -> \(reference: "🟩")A {}
         }
+
       }
+      func g(_: \(reference: "🟩")Hi.A)
+      func h(_: \(reference: "🟥")Hi)
       """ as QualifiedTypeNameSource
     ])
   }
+  func testSimpleAlias() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      typealias A = \(reference: "🟥")B
+
+      \("🟥", name: "_(MyFile.swift)::B")
+      struct B {
+        static func f() -> \(reference: "🟥")A {}
+        static func g() -> \(reference: "🟥")B {}
+      }
+      func f() -> \(reference: "🟥")A {}
+      func g() -> \(reference: "🟥")B {}
+      """ as QualifiedTypeNameSource
+    ])
+  }
+
+  func testNestedAlias() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::Outer")
+      struct Outer {
+        typealias B = \(reference: "🟩")A
+
+        \("🟩", name: "_(MyFile.swift)::Outer._(MyFile.swift)::A")
+        struct A {
+          static func f() -> \(reference: "🟩")B {}
+          static func g() -> \(reference: "🟩")B {}
+        }
+      }
+      func f(_: \(reference: "🟩")Outer.A)
+      func g(_: \(reference: "🟩")Outer.B)
+      """ as QualifiedTypeNameSource
+    ])
+  }
+
+  func testSimpleComposition() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::A")
+      protocol A {}
+
+      typealias C = \(references: ["🟥", "🟩"])A & B
+
+      \("🟩", name: "_(MyFile.swift)::B")
+      protocol B {}
+      """ as QualifiedTypeNameSource
+    ])
+  }
+
+  func testSimpleFunction() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      typealias A = \(result: .function(argumentCount: 2))(_ a: Int, _ b: Int) -> Int
+      """ as QualifiedTypeNameSource
+    ])
+  }
+  func testSimpleTuple() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      func f(_: \(result: .tuple(labels: [Identifier(canonicalName: "a"), nil]))(a: Int, Bool))
+      """ as QualifiedTypeNameSource
+    ])
+  }
+  // func testSimpleExtension() {
+  //   assertQualifiedTypeName([
+  //     "MyFile.swift": """
+  //     \("🟥", name: "_(MyFile.swift)::A")
+  //     struct A {}
+  //
+  //     extension A {
+  //       \("🟥", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
+  //       struct B {
+  //         func f(_: \(references: "🟥")B)
+  //       }
+  //       func g(_: \(references: "🟥")B)
+  //     }
+  //     func h(_: \(references: "🟥")A.B)
+  //     """ as QualifiedTypeNameSource
+  //   ])
+  // }
 
   // func testCodeBlockSimpleCase() {
   //   assertQualifiedTypeName([

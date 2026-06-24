@@ -140,7 +140,8 @@ extension NominalType {
     lookupPosition: (file: SourceFileSyntax, position: AbsolutePosition),
     importedModules: [Identifier],
     moduleMap: [SourceFileSyntax: Identifier],
-    configuredRegions: ConfiguredRegions?
+    configuredRegions: ConfiguredRegions?,
+    _verbose: Bool = false
   ) -> Result<[TypeDeclSyntax], MemberLookupFailure> {
     var typeDecls = [TypeDeclSyntax]()
 
@@ -151,7 +152,9 @@ extension NominalType {
       moduleMap: moduleMap,
       configuredRegions: configuredRegions,
       visit: { decl in
-        print("[Direct lookup on \(qualifiedName)] Visiting decl: \(decl.trimmedDescription)")
+        if _verbose {
+          print("[Direct lookup on \(qualifiedName)] Visiting decl: \(decl.trimmedDescription)")
+        }
         // Get only types with matching names
         guard
           let typeDecl = decl.as(TypeDeclSyntax.self),

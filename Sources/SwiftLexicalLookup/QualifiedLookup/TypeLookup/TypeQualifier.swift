@@ -59,6 +59,7 @@ extension Result where Success == [TypeDeclSyntax] {
 /// to which the the given type syntax refers.
 @_spi(_QualifiedLookup) public struct TypeQualifier {
   func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
+    guard _verbose else { return }
     print("\(file):\(line)", component)
   }
 
@@ -76,10 +77,12 @@ extension Result where Success == [TypeDeclSyntax] {
 
   let symbolTable: SymbolTable3
   let configuredRegions: ConfiguredRegions?
+  let _verbose: Bool
 
-  public init(symbolTable: SymbolTable3, configuredRegions: ConfiguredRegions?) {
+  public init(symbolTable: SymbolTable3, configuredRegions: ConfiguredRegions?, _verbose: Bool) {
     self.symbolTable = symbolTable
     self.configuredRegions = configuredRegions
+    self._verbose = _verbose
   }
 
   /// Adds the given result to a collective result.
@@ -469,7 +472,8 @@ extension Result where Success == [TypeDeclSyntax] {
         lookupPosition: lookupPosition,
         importedModules: [],
         moduleMap: symbolTable.moduleMap,
-        configuredRegions: configuredRegions
+        configuredRegions: configuredRegions,
+        _verbose: _verbose
       )
       log(
         "[For syntax \(originatingSyntax) & \(typeDecl.kind) '\(typeDecl.name)' & qualified '\(name.debugDescription) & extensions: \(extensions)'] Direct lookup yielded: \(typeDeclsResult._debugSyntaxDescription)."
