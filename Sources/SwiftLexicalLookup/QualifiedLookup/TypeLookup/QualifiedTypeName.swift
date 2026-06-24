@@ -13,8 +13,8 @@
 import SwiftSyntax
 
 // A global type name, `Swift::Int._(MyFileA.swift)::MyType`.
-public struct QualifiedTypeNameGlobalType: Hashable, CustomDebugStringConvertible {
-  public enum Qualifier: Hashable, CustomDebugStringConvertible {
+public struct QualifiedTypeNameGlobalType: Sendable, Hashable, CustomDebugStringConvertible {
+  public enum Qualifier: Sendable, Hashable, CustomDebugStringConvertible {
     case `internal`(fileID: SyntaxIdentifier)
     case external(moduleName: Identifier)
 
@@ -33,7 +33,7 @@ public struct QualifiedTypeNameGlobalType: Hashable, CustomDebugStringConvertibl
   }
   /// A component of a qualified type name, external or internal. For instance,
   /// `Swift::Int` (external) and `_(FileA.swift)::MyType` (internal).
-  public struct Component: Hashable, CustomDebugStringConvertible {
+  public struct Component: Sendable, Hashable, CustomDebugStringConvertible {
     let qualifier: Qualifier
     let name: Identifier
 
@@ -80,7 +80,7 @@ public struct QualifiedTypeNameGlobalType: Hashable, CustomDebugStringConvertibl
 }
 
 // Array of identifiers, e.g., `A.B.C`
-public indirect enum QualifiedTypeNameNestedType: Hashable, CustomDebugStringConvertible {
+public indirect enum QualifiedTypeNameNestedType: Sendable, Hashable, CustomDebugStringConvertible {
   case base(Identifier)
   case member(base: QualifiedTypeNameNestedType, name: Identifier)
 
@@ -115,7 +115,7 @@ public indirect enum QualifiedTypeNameNestedType: Hashable, CustomDebugStringCon
 }
 
 // TODO: Copy relevant comments from `ResolvedScope` and `ResolvedTypeName`
-@_spi(_QualifiedLookup) public enum QualifiedTypeName: Hashable, CustomDebugStringConvertible {
+@_spi(_QualifiedLookup) public enum QualifiedTypeName: Sendable, Hashable, CustomDebugStringConvertible {
   /// Specifies top-level type: a collection of internal and external components
   case topLevel(QualifiedTypeNameGlobalType)
   // Specifies an (internal) nested-level scope and a dot-separated sequence of identifiers.

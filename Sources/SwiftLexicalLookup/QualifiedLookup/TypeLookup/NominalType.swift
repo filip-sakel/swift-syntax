@@ -14,7 +14,7 @@ import SwiftIfConfig
 import SwiftSyntax
 
 // TODO: Assert each decl has a source-file parent
-@_spi(_QualifiedName) public struct NominalType {
+@_spi(_QualifiedName) public struct NominalType: Sendable {
   // Globally unique name
   let qualifiedName: QualifiedTypeName
   // The main declaration of this type

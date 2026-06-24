@@ -29,6 +29,7 @@ import SwiftSyntax
   }
 }
 
+extension MemberLookupResult: Sendable where Result: Sendable {}
 extension MemberLookupResult: Equatable where Result: Equatable {}
 extension MemberLookupResult: Hashable where Result: Hashable {}
 

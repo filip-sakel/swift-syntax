@@ -53,18 +53,45 @@ import SwiftSyntax
 
 @_spi(_QualifiedLoookup) public enum TypeResolutionFailure: Error {
   /// Missing types produce errors
-  case missingType(MissingTypeSyntax)
+  case missingType
   /// Invalid identifiers produce errors
-  case invalidIdentifier(TokenSyntax)
+  case invalidName(invalidModuleName: TokenSyntax?, invalidName: TokenSyntax?)
+  /// We defer wildcard types to the type checker (e.g., `_`, `_.MyType`, `any _`).
+  case wildcardType
   /// We report unknown supressed types, e.g., `~CustomStringConvertible`
-  case unknownSuppressedType(TypeSyntax)
+  case unknownSuppressedType
 }
 
 extension TypeSyntaxProtocol {
+  fileprivate func _parseModuleAndIdentifier(
+    moduleNameToken: TokenSyntax?,
+    nameToken: TokenSyntax
+  ) -> Result<(moduleName: Identifier?, name: Identifier), TypeResolutionFailure> {
+    switch (moduleNameToken.map({ Identifier(validating: $0) }), Identifier(validating: nameToken)) {
+    // Valid cases are:
+    // (a) no module, valid name
+    case (nil, let name?):
+      return .success((moduleName: nil, name: name))
+    // (b) valid module, valid name
+    case (let moduleName??, let name?):
+      return .success((moduleName: moduleName, name: name))
+    // Invalid cases are:
+    // (a) no module/valid module,  invalid name
+    case (nil, nil), (_??, nil):
+      return .failure(.invalidName(invalidModuleName: nil, invalidName: nameToken))
+    // (b) invalid module, valid name
+    case (.some(nil), _?):
+      return .failure(.invalidName(invalidModuleName: moduleNameToken, invalidName: nil))
+    // (c) invalid module, invalid name
+    case (.some(nil), nil):
+      return .failure(.invalidName(invalidModuleName: moduleNameToken, invalidName: nameToken))
+    }
+  }
+
   // TODO: Handle `.Self`, `.Type`, `.Protocol`, etc. (check compiler)
   @_spi(_QualifiedLoookup) public func partiallyResolve(
     types: inout [PartiallyResolvedType],
-    failures: inout [TypeResolutionFailure]
+    failures: inout [TypeSyntax: TypeResolutionFailure]
   ) {
     switch TypeSyntax(self).as(TypeSyntaxEnum.self) {
     // Non-nominal base cases
@@ -75,14 +102,16 @@ extension TypeSyntaxProtocol {
     // Valid tuples (we treat single-element tuples as their only contained type below)
     case .tupleType(let tupleType) where tupleType.elements.count >= 1:
       // Get labels and collect identifier errors
-      let labels: [Identifier?] = tupleType.elements.map({
-        // Tuple elements might not have labels
-        guard let labelToken = $0.firstName else { return nil }
-        // Ensure label is valid (if not, report error and skip label)
-        guard let label = Identifier(validating: labelToken) else {
-          failures.append(.invalidIdentifier(labelToken))
-          return nil
-        }
+      let labels: [Identifier?] = tupleType.elements.map({ label -> Identifier? in
+        // Tuple elements get their labels from the first name.
+        //
+        // According to the ``TupleTypeSyntax`` docs, the first name is `nil` (implicitly no label),
+        // `_` (explicitly no label), or an identifier (the label). So if the first name isn't a
+        // valid identifier, the tuple has no label or the parser already diagnosed that.
+        guard
+          let labelToken = label.firstName,
+          let label = Identifier(validating: labelToken)
+        else { return nil }
         return label
       })
       // Add tuple type
@@ -90,28 +119,86 @@ extension TypeSyntaxProtocol {
 
     // Nominal base cases
     case .identifierType(let identifierType):
-      // Parse module name if provided; fail if invalid.
-      //
-      // We give up if the module is invalid because we'll likely find bad types.
-      let moduleName: Identifier?
-      if let moduleSelector = identifierType.moduleSelector {
-        guard let moduleIdentifier = Identifier(validating: moduleSelector.moduleName) else {
-          failures.append(.invalidIdentifier(moduleSelector.moduleName))
-          return
-        }
-        moduleName = moduleIdentifier
-      } else {
-        moduleName = nil
-      }
-
-      // Parse type name; fail if invalid
-      guard let typeName = Identifier(validating: identifierType.name) else {
-        failures.append(.invalidIdentifier(identifierType.name))
+      // According to the docs, `moduleSelector.moduleName` should be an identifier
+      // and `name` is an identifier, `Self`, `Any` or `_`. Here's how we handle each:
+      let moduleNameToken = identifierType.moduleSelector?.moduleName
+      let nameToken: TokenSyntax
+      switch (identifierType.moduleSelector, identifierType.name.tokenKind) {
+      // === Wildcard `_` ===
+      // We can't do anything smart, so we defer to the type checker.
+      case (_, .wildcard):
+        failures[TypeSyntax(identifierType)] = .wildcardType
         return
+      // === `Any` ===
+      // Without a module selector, the keyword "Any" and the backtick-escaped
+      // identifier "`Any`" are completely different in terms of lookup. Hence,
+      // we treat the keyword "Any" like we do metatypes below by returning no
+      // nominal results.
+      //
+      // However, if a module selector is specified, we treat it just like an
+      // identifier.
+      //
+      // Here's an example where unqualified "`Any`" doesn't shadow `Any`:
+      //   typealias `Any` = Int
+      //   func g(a: Any) -> Int {
+      //     a + 1 // ❌ cannot convert value of type 'Any' to expected argument type 'Int'
+      //   }
+      // And here's an example where unqualified "`Any`" doesn't resolve to `Any`:
+      //   func g(a: `Any`) -> Int { // ❌ cannot find type 'Any' in scope
+      //     a + 1
+      //   }
+      //
+      // Here's an example where `MyModule::Any` acts like an identifier:
+      //   func g(a: output::Any) -> Int {} // ❌ cannot find type 'output::Any' in scope
+      case (nil, .keyword(.Any)):
+        return
+      case (_?, .keyword(.Any)):
+        // TODO: Is this safe?
+        nameToken = identifierType.name.with(\.tokenKind, .identifier("Any"))
+      // === `Self` ===
+      // Basically the opposite of `Any`: Whether with or without a module
+      // selector, we treat "Self" like the backtick-escaped identifier
+      // "`Self`", because it participates in normal lookup. Hence, we
+      // convert the "Self" keyword to an identifier.
+      //
+      // Here's an example where "`Self`" shadows
+      // implicit "Self":
+      //  typealias `Self` = Int
+      //  func f(a: Self) -> Int { // This is the keyword "Self" not the backtick-escaped "`Self`"
+      //    a + 1 // ✅
+      //  }
+      // And here's an example where "`Self`" resolves to implicit "Self":
+      //  struct A {
+      //    func f(x: inout `Self`) {
+      //      x = A() // ✅
+      //    }
+      //  }
+      //
+      // Example with module selector:
+      //   struct A {
+      //     func f(_: MyModule::Self) {} // ✅
+      //     func g(_: MyModule::`Self`) {} // ✅
+      //   }
+      // Note that `Self` has different module-selector lookup behavior than
+      // other identifiers because typically `MyModule::MyType` issues a
+      // top-level lookup so writing:
+      //   struct A { struct B {}; func f(_: MyModule::B) }
+      //  fails because `B` is nested within `A`.
+      case (_, .keyword(.Self)):
+        nameToken = identifierType.name.with(\.tokenKind, .identifier("Self"))
+      default:
+        nameToken = identifierType.name
       }
 
-      // Add nominal type
-      types.append(.nominalIdentifier(module: moduleName, name: typeName))
+      // Parse the module name (if provided), and the type name
+      switch _parseModuleAndIdentifier(moduleNameToken: moduleNameToken, nameToken: nameToken) {
+      case .success((let moduleName, let name)):
+        // Add nominal type
+        types.append(.nominalIdentifier(module: moduleName, name: name))
+      case .failure(let failure):
+        // Report failures
+        failures[TypeSyntax(identifierType)] = failure
+      }
     case .memberType(let memberType):
       // Resolve base type
       //
@@ -125,30 +212,38 @@ extension TypeSyntaxProtocol {
       var baseTypes = [PartiallyResolvedType]()
       memberType.baseType.partiallyResolve(types: &baseTypes, failures: &failures)
 
-      // Parse module name if provided; fail if invalid.
+      // According to the ``MemberTypeSyntax`` docs, `name` is either an identifier
+      // or the `self` keyword.
       //
-      // We give up if the module is invalid because we'll likely find bad types.
-      let moduleName: Identifier?
-      if let moduleSelector = memberType.moduleSelector {
-        // Fail if invalid.
-        guard let moduleIdentifier = Identifier(validating: moduleSelector.moduleName) else {
-          failures.append(.invalidIdentifier(moduleSelector.moduleName))
-          return
-        }
-        moduleName = moduleIdentifier
+      // Here's an example where "`self`" shadows implicit "self":
+      //   struct A {
+      //     typealias `self` = Int
+      //
+      //     func f(a: A.self) -> Int {
+      //       a + 1 // ✅
+      //     }
+      //   }
+      // And an example for "`self`" and "self" give identical results when
+      // type lookup fails:
+      //   let _: Int.`self` // ❌ error: 'self' is not a member type of struct 'output.A'
+      //   let _: Int.self   // ❌ error: (same exact error)
+      // TODO: Handle implicit `.self` lookup. E.g. 'Int.self' vs 'Int.`self`' are different.
+      let moduleNameToken = memberType.moduleSelector?.moduleName
+      let nameToken: TokenSyntax
+      if memberType.name.tokenKind == .keyword(.`self`) {
+        nameToken = memberType.name.with(\.tokenKind, .identifier("self"))
       } else {
-        moduleName = nil
+        nameToken = memberType.name
       }
 
-      // Parse type name; fail if invalid
-      guard let typeName = Identifier(validating: memberType.name) else {
-        failures.append(.invalidIdentifier(memberType.name))
-        return
+      // Parse the module name (if provided), and member-type name
+      switch _parseModuleAndIdentifier(moduleNameToken: moduleNameToken, nameToken: nameToken) {
+      case .success((let moduleName, let name)):
+        // Add nominal type
+        types.append(.nominalMember(bases: baseTypes, module: moduleName, name: name))
+      case .failure(let failure):
+        failures[TypeSyntax(memberType)] = failure
       }
-
-      // Add nominal type
-      types.append(.nominalMember(bases: baseTypes, module: moduleName, name: typeName))
-
     // Base cases that don't produce types
     case .metatypeType, .namedOpaqueReturnType:
       break
@@ -159,13 +254,14 @@ extension TypeSyntaxProtocol {
         let typeName = Identifier(validating: identifierType.name),
         PartiallyResolvedType._knownSuppressibleTypes.contains(typeName)
       else {
-        failures.append(.unknownSuppressedType(suppressedType.type))
+        failures[TypeSyntax(suppressedType)] = .unknownSuppressedType
         return
       }
+      break
 
     // Invalid base case
     case .missingType(let missingType):
-      failures.append(.missingType(missingType))
+      failures[TypeSyntax(missingType)] = .missingType
 
     // Type-sugar is a nominal-type base case
     case .optionalType, .implicitlyUnwrappedOptionalType:

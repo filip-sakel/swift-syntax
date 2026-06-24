@@ -46,7 +46,7 @@ extension Result where Success == [TypeDeclSyntax] {
 
 /// The minimal defining components of a nominal type: the main declaration and the qualified name.
 /// Unlike ``NominalType``, doesn't include extensions.
-@_spi(_QualifiedLookup) public struct MinimalNominal: Hashable, CustomDebugStringConvertible {
+@_spi(_QualifiedLookup) public struct MinimalNominal: Sendable, Hashable, CustomDebugStringConvertible {
   public let mainDecl: NominalTypeDeclSyntax2
   public let name: QualifiedTypeName
 
@@ -64,15 +64,23 @@ extension Result where Success == [TypeDeclSyntax] {
   }
 
   public enum Failure: Error {
-    case cannotComposeTupleOrFunction
-    case noTupleOrFunctionTypeMembers
-    case cannotExtendNonNominal(ExtensionDeclSyntax)
+    /// Only protocol, class and composition types can form compositions.
+    ///
+    /// I.e. We don't allow structs/enums/actors, functions, tuples.
+    case cannotComposeNonClassOrProtocol(resolved: MemberLookupResult<MinimalNominal>)
+    case noTypeMember(member: Identifier, in: MemberLookupResult<NominalType>)
+    // TODO: Can we simplify to a single failure?
+    case invalidChildren([TypeSyntax: [Failure]])
+    /// We can only extend structs/enums/classes/actors/protocols
+    ///
+    /// I.e. We can't extend tuples, functions, protocol compositions, metatypes, etc.
+    case cannotExtendNonNominal(ExtensionDeclSyntax, nonnominal: MemberLookupResult<NominalType>)
     case other(any Error)
 
     // case noMemberType(PartiallyResolvedTypeIdentifier.Component, in: NominalType)
   }
 
-  public private(set) var failures = [Failure]()
+  public private(set) var failures = [TypeSyntax: [Failure]]()
   var boundExtensions = [ExtensionDeclSyntax: MinimalNominal]()
 
   let symbolTable: SymbolTable3
@@ -85,40 +93,86 @@ extension Result where Success == [TypeDeclSyntax] {
     self._verbose = _verbose
   }
 
-  /// Adds the given result to a collective result.
-  ///
-  /// Returns critical error if one occurs. These occur when we can't compose with tuples/functions.
-  // TODO: Consider returning a Bool and having callers throw
-  fileprivate mutating func addResult(
-    _ result: Result<MemberLookupResult<MinimalNominal>, Failure>,
-    to collectiveResult: inout MemberLookupResult<MinimalNominal>?
-  ) -> Failure? {
-    // Simply log failures as other type results might succeed
-    let lookupResult: MemberLookupResult<MinimalNominal>
-    switch result {
-    case .success(let result):
-      lookupResult = result
-    case .failure(let failure):
-      self.failures.append(.other(failure))
-      return nil
+  // /// Adds the given result to a collective result.
+  // ///
+  // /// Returns critical error if one occurs. These occur when we can't compose with tuples/functions.
+  // // TODO: Consider returning a Bool and having callers throw
+  // fileprivate mutating func addResult(
+  //   _ result: Result<MemberLookupResult<MinimalNominal>, Failure>,
+  //   to collectiveResult: inout MemberLookupResult<MinimalNominal>?
+  // ) -> Failure? {
+  //   // Simply log failures as other type results might succeed
+  //   let lookupResult: MemberLookupResult<MinimalNominal>
+  //   switch result {
+  //   case .success(let result):
+  //     lookupResult = result
+  //   case .failure(let failure):
+  //     self.failures.append(.other(failure))
+  //     return nil
+  //   }
+  //
+  //   switch (collectiveResult, lookupResult) {
+  //   // Initial assignment
+  //   case (nil, let lookupResult):
+  //     collectiveResult = lookupResult
+  //   // Cannot compose tuple/function types
+  //   case (_, .function), (_, .tuple):
+  //     return Failure.cannotComposeNonClassOrProtocol(syntax: TypeSyntax)
+  //   case (.function, _), (.tuple, _):
+  //     return Failure.cannotComposeTupleOrFunction
+  //   // Otherwise, combine members
+  //   case (.memberResults(let currentTypes), .memberResults(let newTypes)):
+  //     collectiveResult = MemberLookupResult.memberResults(currentTypes + newTypes)
+  //   }
+  //
+  //   // No failures
+  //   return nil
+  // }
+  fileprivate mutating func _reduceResults(
+    _ results: [TypeSyntax: Result<MemberLookupResult<MinimalNominal>, Failure>]
+  ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
+    if results.isEmpty {}
+    // Forward empty results
+    guard let (_, firstResult) = results.first else {
+      return Result.success(MemberLookupResult.memberResults([]))
+    }
+    // Forward single result (the rest of the functions handles compositions)
+    guard results.count == 1 else {
+      return firstResult
     }
 
-    switch (collectiveResult, lookupResult) {
-    // Initial assignment
-    case (nil, let lookupResult):
-      collectiveResult = lookupResult
-    // Cannot compose tuple/function types
-    case (_, .function), (_, .tuple):
-      return Failure.cannotComposeTupleOrFunction
-    case (.function, _), (.tuple, _):
-      return Failure.cannotComposeTupleOrFunction
-    // Otherwise, combine members
-    case (.memberResults(let currentTypes), .memberResults(let newTypes)):
-      collectiveResult = MemberLookupResult.memberResults(currentTypes + newTypes)
+    // Handle compositions
+    //
+    // We handled tuples/functions above. Now, we assume we have a list of nominals.
+    var nominalTypes = [MinimalNominal]()
+    var invalidTypes = [TypeSyntax: [Failure]]()
+
+    for (typeSyntax, result) in results {
+      // Simply log failures as other type results might succeed
+      let lookupResult: MemberLookupResult<MinimalNominal>
+      switch result {
+      case .success(let result):
+        lookupResult = result
+      case .failure(let failure):
+        self.failures[typeSyntax, default: []].append(.other(failure))
+        continue
+      }
+
+      switch lookupResult {
+      // Cannot compose tuple/function types
+      case .function, .tuple:
+        invalidTypes[typeSyntax, default: []].append(Failure.cannotComposeNonClassOrProtocol(resolved: lookupResult))
+      // Otherwise, combine members
+      case .memberResults(let newTypes):
+        nominalTypes.append(contentsOf: newTypes)
+      }
     }
 
-    // No failures
-    return nil
+    guard invalidTypes.isEmpty else {
+      return Result.failure(.invalidChildren(invalidTypes))
+    }
+
+    return Result.success(MemberLookupResult.memberResults(nominalTypes))
   }
 
   public mutating func resolveSyntax(
@@ -131,7 +185,7 @@ extension Result where Success == [TypeDeclSyntax] {
     // Resolve type; throw on failure
     let resolutionResult: MemberLookupResult<PartiallyResolvedTypeIdentifier>
     var failures = [TypeResolutionFailure]()
-    defer { self.failures.append(contentsOf: failures.map(Failure.other)) }
+    defer { self.failures[typeSyntax, default: []].append(contentsOf: failures.map(Failure.other)) }
     switch typeSyntax.resolve(failures: &failures) {
     case .success(let result):
       resolutionResult = result
