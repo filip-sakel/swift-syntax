@@ -74,7 +74,7 @@ extension Result where Success == [TypeDeclSyntax] {
     /// We can only extend structs/enums/classes/actors/protocols
     ///
     /// I.e. We can't extend tuples, functions, protocol compositions, metatypes, etc.
-    case cannotExtendNonNominal(ExtensionDeclSyntax, nonnominal: MemberLookupResult<NominalType>)
+    case cannotExtendNonNominal(nonnominal: MemberLookupResult<MinimalNominal>)
     /// Child has error, so we can't qualify this type but we can't offer a useful diagnostic either.
     ///
     /// E.g.
@@ -191,7 +191,6 @@ extension Result where Success == [TypeDeclSyntax] {
     log("Resolving syntax: \(typeSyntax.trimmedDescription)")
 
     // Resolve type references (or return tuple/function)
-    let isComposition: Bool
     let typeReferenceResults: [Result<PartiallyResolvedTypeIdentifier, LocalizedTypeResolutionFailure>]
     switch typeSyntax.partiallyResolve() {
     case .function(let argumentCount):
@@ -276,9 +275,11 @@ extension Result where Success == [TypeDeclSyntax] {
 
     // Stop even if we only have one failure
     guard failures.isEmpty else {
-      log("Resolved \(typeSyntax.trimmedDescription) to failures \(failures.mapValues(\.trimmedDescription))")
+      log("Resolved \(typeSyntax.trimmedDescription) to failures \(failures)")
       return Result.failure(Failure.invalidComposition(failures))
     }
+
+    log("Resolved \(typeSyntax.trimmedDescription) to types \(types))")
     return Result.success(MemberLookupResult.memberResults(types))
   }
 
@@ -300,21 +301,20 @@ extension Result where Success == [TypeDeclSyntax] {
       return .failure(failure)
     }
 
-    // Extract nominal types (tuples/functions aren't nominal)
-    let memberResults: [MinimalNominal]
+    // Extract a nominal type
     switch lookupResult {
     case .memberResults(let results):
-      memberResults = results
+      // We're expecting exactly one nominal type.
+      // No types means non-nominal, e.g., `Int.Type` and compositions are
+      // also not extensible, e.g., `Encodable & Decodable`.
+      guard let firstNominalType = results.first, results.count == 1 else {
+        return .failure(.cannotExtendNonNominal(nonnominal: lookupResult))
+      }
+      return .success(firstNominalType)
+    // Functions/tuples aren't nominal
     case .function, .tuple:
-      return .failure(.cannotExtendNonNominal(extensionDecl))
+      return .failure(.cannotExtendNonNominal(nonnominal: lookupResult))
     }
-
-    // Extensions type syntax should resolve to exactly one nominal type
-    guard let nominalType = memberResults.first, memberResults.count == 1 else {
-      return .failure(.cannotExtendNonNominal(extensionDecl))
-    }
-
-    return .success(nominalType)
   }
 
   fileprivate mutating func resolveTypeReferences(
