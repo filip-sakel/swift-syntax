@@ -24,6 +24,9 @@ import SwiftSyntax
   }
   let base: Component
   private(set) var memberChain: [Component] = []
+  /// The `TypeSyntax` from which we derived this type reference; used
+  /// for targeted diagnostics.
+  let typeSyntax: TypeSyntax
 
   // func addingComponent(_ newComponent: Component) -> PartiallyResolvedTypeIdentifier {
   //   PartiallyResolvedTypeIdentifier(
@@ -31,10 +34,11 @@ import SwiftSyntax
   //     memberChain: self.memberChain + [newComponent]
   //   )
   // }
-  func addingComponents(_ newComponents: [Component]) -> PartiallyResolvedTypeIdentifier {
+  func addingComponents(_ newComponents: [Component], newTypeSyntax: TypeSyntax) -> PartiallyResolvedTypeIdentifier {
     PartiallyResolvedTypeIdentifier(
       base: base,
-      memberChain: self.memberChain + newComponents
+      memberChain: self.memberChain + newComponents,
+      typeSyntax: newTypeSyntax
     )
   }
 

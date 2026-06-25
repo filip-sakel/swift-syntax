@@ -52,33 +52,46 @@ import SwiftSyntax
 }
 
 extension PartiallyResolvedTypeIdentifier {
-  fileprivate static let _optionalType = PartiallyResolvedTypeIdentifier(
-    base: PartiallyResolvedTypeIdentifier.Component(
-      module: Identifier(canonicalName: "Swift"),
-      name: Identifier(canonicalName: "Optional")
+  // E.g., `Int?` or `Int!` -> `Optional<Int>`
+  fileprivate static func _optionalType(type: TypeSyntax) -> PartiallyResolvedTypeIdentifier {
+    PartiallyResolvedTypeIdentifier(
+      base: Component(
+        module: Identifier(canonicalName: "Swift"),
+        name: Identifier(canonicalName: "Optional")
+      ),
+      typeSyntax: type
     )
-  )
+  }
   /// E.g., `[Int]` -> `Array<Int>`
-  fileprivate static let _arrayType = PartiallyResolvedTypeIdentifier(
-    base: PartiallyResolvedTypeIdentifier.Component(
-      module: Identifier(canonicalName: "Swift"),
-      name: Identifier(canonicalName: "Array")
+  fileprivate static func _arrayType(type: TypeSyntax) -> PartiallyResolvedTypeIdentifier {
+    PartiallyResolvedTypeIdentifier(
+      base: Component(
+        module: Identifier(canonicalName: "Swift"),
+        name: Identifier(canonicalName: "Array")
+      ),
+      typeSyntax: type
     )
-  )
+  }
   // E.g., `[5 of Int]` -> `InlineArray<5, Int>`
-  fileprivate static let _inlineArrayType = PartiallyResolvedTypeIdentifier(
-    base: PartiallyResolvedTypeIdentifier.Component(
-      module: Identifier(canonicalName: "Swift"),
-      name: Identifier(canonicalName: "InlineArray")
+  fileprivate static func _inlineArrayType(type: TypeSyntax) -> PartiallyResolvedTypeIdentifier {
+    PartiallyResolvedTypeIdentifier(
+      base: Component(
+        module: Identifier(canonicalName: "Swift"),
+        name: Identifier(canonicalName: "InlineArray")
+      ),
+      typeSyntax: type
     )
-  )
+  }
   // E.g., `[String: Int]` -> `Dictionary<String, Int>`
-  fileprivate static let _dictionaryType = PartiallyResolvedTypeIdentifier(
-    base: PartiallyResolvedTypeIdentifier.Component(
-      module: Identifier(canonicalName: "Swift"),
-      name: Identifier(canonicalName: "Dictionary")
+  fileprivate static func _dictionaryType(type: TypeSyntax) -> PartiallyResolvedTypeIdentifier {
+    PartiallyResolvedTypeIdentifier(
+      base: Component(
+        module: Identifier(canonicalName: "Swift"),
+        name: Identifier(canonicalName: "Dictionary")
+      ),
+      typeSyntax: type
     )
-  )
+  }
 }
 
 @_spi(_QualifiedLoookup) public enum MemberLookupResultMergeFailure: Error {
@@ -457,7 +470,7 @@ extension TypeSyntaxProtocol {
         // Add nominal type
         return .memberResults([
           Result.success(
-            PartiallyResolvedTypeIdentifier(base: newComponent)
+            PartiallyResolvedTypeIdentifier(base: newComponent, typeSyntax: TypeSyntax(identifierType))
           )
         ])
       case .failure(let failure):
@@ -532,7 +545,9 @@ extension TypeSyntaxProtocol {
         case .memberResults(let baseTypeResults):
           return .memberResults(
             baseTypeResults.map({ baseTypeResult in
-              baseTypeResult.map({ baseType in baseType.addingComponents([newComponent]) })
+              baseTypeResult.map({ baseType in
+                baseType.addingComponents([newComponent], newTypeSyntax: TypeSyntax(memberType))
+              })
             })
           )
         }
@@ -583,14 +598,18 @@ extension TypeSyntaxProtocol {
       ])
 
     // Type-sugar is a nominal-type base case
-    case .optionalType, .implicitlyUnwrappedOptionalType:
-      return MemberLookupResult.memberResults([Result.success(._optionalType)])
-    case .arrayType:
-      return MemberLookupResult.memberResults([Result.success(._arrayType)])
-    case .inlineArrayType:
-      return MemberLookupResult.memberResults([Result.success(._inlineArrayType)])
-    case .dictionaryType:
-      return MemberLookupResult.memberResults([Result.success(._dictionaryType)])
+    case .optionalType(let optionalType):
+      return MemberLookupResult.memberResults([Result.success(._optionalType(type: TypeSyntax(optionalType)))])
+    case .implicitlyUnwrappedOptionalType(let implicitlyUnwrappedOptionalType):
+      return MemberLookupResult.memberResults([
+        Result.success(._optionalType(type: TypeSyntax(implicitlyUnwrappedOptionalType)))
+      ])
+    case .arrayType(let arrayType):
+      return MemberLookupResult.memberResults([Result.success(._arrayType(type: TypeSyntax(arrayType)))])
+    case .inlineArrayType(let inlineArrayType):
+      return MemberLookupResult.memberResults([Result.success(._inlineArrayType(type: TypeSyntax(inlineArrayType)))])
+    case .dictionaryType(let dictionaryType):
+      return MemberLookupResult.memberResults([Result.success(._dictionaryType(type: TypeSyntax(dictionaryType)))])
 
     // Recursive cases
     case .attributedType(let attributedType):

@@ -63,7 +63,7 @@ extension Result where Success == [TypeDeclSyntax] {
     print("\(file):\(line)", component)
   }
 
-  public enum Failure: Error {
+  public indirect enum Failure: Error {
     /// Only protocol, class and composition types can form compositions.
     ///
     /// I.e. We don't allow structs/enums/actors, functions, tuples.
@@ -75,6 +75,13 @@ extension Result where Success == [TypeDeclSyntax] {
     ///
     /// I.e. We can't extend tuples, functions, protocol compositions, metatypes, etc.
     case cannotExtendNonNominal(ExtensionDeclSyntax, nonnominal: MemberLookupResult<NominalType>)
+    /// Child has error, so we can't qualify this type but we can't offer a useful diagnostic either.
+    ///
+    /// E.g.
+    ///   typealias A = Encodable & Int.Type // ❌ error: non-protocol, non-class type 'Int.Type' cannot be used within a protocol-constrained type
+    ///   func f(_: A) {} // No diagnostic here
+    case invalidChild(Failure)
+    case invalidComposition([TypeSyntax: Failure])
     case other(any Error)
 
     // case noMemberType(PartiallyResolvedTypeIdentifier.Component, in: NominalType)
@@ -86,6 +93,7 @@ extension Result where Success == [TypeDeclSyntax] {
   let symbolTable: SymbolTable3
   let configuredRegions: ConfiguredRegions?
   let _verbose: Bool
+  let _checkNominalInCompositionIsClassOrProtocol = true
 
   public init(symbolTable: SymbolTable3, configuredRegions: ConfiguredRegions?, _verbose: Bool) {
     self.symbolTable = symbolTable
@@ -182,63 +190,96 @@ extension Result where Success == [TypeDeclSyntax] {
   ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
     log("Resolving syntax: \(typeSyntax.trimmedDescription)")
 
-    // Resolve type; throw on failure
-    let resolutionResult: MemberLookupResult<PartiallyResolvedTypeIdentifier>
-    var failures = [TypeResolutionFailure]()
-    defer { self.failures[typeSyntax, default: []].append(contentsOf: failures.map(Failure.other)) }
-    switch typeSyntax.resolve(failures: &failures) {
-    case .success(let result):
-      resolutionResult = result
-    case .failure(let failure):
-      return .failure(.other(failure))
-    }
-
-    switch resolutionResult {
-    // .function and .tuple are only valid without result types
+    // Resolve type references (or return tuple/function)
+    let isComposition: Bool
+    let typeReferenceResults: [Result<PartiallyResolvedTypeIdentifier, LocalizedTypeResolutionFailure>]
+    switch typeSyntax.partiallyResolve() {
     case .function(let argumentCount):
       log("Resolved \(typeSyntax.trimmedDescription) to .function")
-      return .success(.function(argumentCount: argumentCount))
+      return Result.success(.function(argumentCount: argumentCount))
     case .tuple(let labels):
       log("Resolved \(typeSyntax.trimmedDescription) to .tuple")
-      return .success(.tuple(labels: labels))
-    // Issue requests for the underlying type identifiers
-    case .memberResults(let typeResults):
-      log("Partially resolved \(typeSyntax.trimmedDescription) to .memberResults(\(typeResults))")
-
-      var result: MemberLookupResult<MinimalNominal>? = nil
-      for typeIdentifier in typeResults {
-        if let criticalFailure = addResult(
-          resolveTypeReferences(typeIdentifier, originatingSyntax: typeSyntax),
-          to: &result
-        ) {
-          return .failure(criticalFailure)
-        }
-
-        // // Simply log failures  as other type results might succeed
-        // let lookupResult: MemberLookupResult<MinimalNominal>
-        // switch resolveTypeReferences(typeIdentifier) {
-        // case .success(let result):
-        //   lookupResult = result
-        // case .failure(let failure):
-        //   self.failures.append(.other(failure))
-        // }
-        //
-        // switch (result, lookupResult) {
-        // // Handle initial assignment
-        // case (nil, let lookupResult):
-        //   result = lookupResult
-        // // Cannot compose tuple/function types
-        // case (_, .function), (_, .tuple):
-        //   return .failure(Failure.cannotComposeTupleOrFunction)
-        // case (.function, _), (.tuple, _):
-        //   return .failure(Failure.cannotComposeTupleOrFunction)
-        // // Otherwise, combine members
-        // case (.memberResults(let currentTypes), .memberResults(let newTypes)):
-        //   result = MemberLookupResult.memberResults(currentTypes + newTypes)
-        // }
-      }
-      return Result.success(result ?? MemberLookupResult.memberResults([]))
+      return Result.success(.tuple(labels: labels))
+    case .memberResults(let typeReferences):
+      typeReferenceResults = typeReferences
     }
+
+    // Empty type case
+    guard let firstTypeReferenceResult = typeReferenceResults.first else {
+      log("Resolved \(typeSyntax.trimmedDescription) to empty type")
+      return Result.success(.memberResults([]))
+    }
+
+    // Single-type case
+    guard typeReferenceResults.count > 1 else {
+      log("Partially resolved \(typeSyntax.trimmedDescription) to type reference \(firstTypeReferenceResult)")
+      switch firstTypeReferenceResult {
+      case .success(let typeReference):
+        return resolveTypeReferences(typeReference, originatingSyntax: typeSyntax)
+      case .failure(let resolutionFailure):
+        return .failure(Failure.other(resolutionFailure))
+      }
+    }
+
+    // Composition case
+
+    // Look up the found type references
+    log("Partially resolved \(typeSyntax.trimmedDescription) to type references \(typeReferenceResults)")
+
+    // Collect valid types and failures
+    var types = [MinimalNominal]()
+    var failures = [TypeSyntax: Failure]()
+    for typeReferenceResult in typeReferenceResults {
+      // Extract the type reference or log error
+      let typeReference: PartiallyResolvedTypeIdentifier
+      switch typeReferenceResult {
+      case .success(let success):
+        typeReference = success
+      case .failure(let localizedFailure):
+        // Log failure but continue in case others succeed
+        failures[typeSyntax] = Failure.other(localizedFailure)
+        continue
+      }
+
+      let childTypeSyntax = typeReference.typeSyntax
+      switch resolveTypeReferences(typeReference, originatingSyntax: typeSyntax) {
+      // Only nominals are valid in compositions
+      case .success(.memberResults(let nominals)):
+        if _checkNominalInCompositionIsClassOrProtocol {
+          switch (nominals.count, nominals.first?.mainDecl.kind) {
+          // If we have one nominal, check it's a protocol or class.
+          // If we have multiple, i.e., a composition, we've already  checked it recursively.
+          case (1, .protocolDecl), (1, .classDecl), (2..., _):
+            break
+          // If we have no nominals, e.g., `Int.Type`, or a single nominal that's not
+          // a struct/enum/actor, we throw an error
+          default:
+            failures[childTypeSyntax] = Failure.cannotComposeNonClassOrProtocol(
+              resolved: .memberResults(nominals)
+            )
+          }
+        }
+        types.append(contentsOf: nominals)
+      // Tuples/function
+      case .success(.function(let argumentCount)):
+        failures[childTypeSyntax] = Failure.cannotComposeNonClassOrProtocol(
+          resolved: .function(argumentCount: argumentCount)
+        )
+      case .success(.tuple(let labels)):
+        failures[childTypeSyntax] = Failure.cannotComposeNonClassOrProtocol(
+          resolved: .tuple(labels: labels)
+        )
+      case .failure(let resolutionFailure):
+        failures[childTypeSyntax] = Failure.invalidChild(resolutionFailure)
+      }
+    }
+
+    // Stop even if we only have one failure
+    guard failures.isEmpty else {
+      log("Resolved \(typeSyntax.trimmedDescription) to failures \(failures.mapValues(\.trimmedDescription))")
+      return Result.failure(Failure.invalidComposition(failures))
+    }
+    return Result.success(MemberLookupResult.memberResults(types))
   }
 
   /// Resolve the given type syntax from an extension declaration
