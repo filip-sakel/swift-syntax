@@ -28,19 +28,20 @@ enum ChainResult: CustomDebugStringConvertible {
 
 struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
   // Base and members should be in the same file
-  let base: TypeSyntax
+  let base: ExtensionDeclSyntax
   /// The names of the members.
   ///
   /// E.g., in `extension Int { struct A { struct B {} } }` the
   /// members are "A" and "B"
   let memberNames: [Identifier]
+  // let members: [(mainDecl: NominalTypeDeclSyntax2, name: Identifier)]
   /// The main declaration of the partially resolved type or `nil` if the
   /// type is not yet resolved (``memberNames`` is empty).
   let mainDecl: NominalTypeDeclSyntax2?
   let sourceFile: SourceFileSyntax
 
   // IMPORTANT: Base and members must share the same fileSyntax root.
-  init(base: TypeSyntax, members: [(mainDecl: NominalTypeDeclSyntax2, name: Identifier)]) {
+  init(base: ExtensionDeclSyntax, members: [(mainDecl: NominalTypeDeclSyntax2, name: Identifier)]) {
     // precondition(base.root == members.root, "Invalid root")
     guard let sourceFile = base.root.as(SourceFileSyntax.self) else {
       preconditionFailure("Invalid root, not source file")
@@ -53,6 +54,7 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
     })
 
     self.base = base
+    // self.members = members
     self.memberNames = memberNames
     self.mainDecl = members.last?.mainDecl
     self.sourceFile = sourceFile
@@ -60,11 +62,20 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
 
   var debugDescription: String {
     let memberChain = memberNames.map(\.name).joined(separator: ".")
+    // let memberChain = members.map(\.name.name).joined(separator: ".")
     return "<\(base.trimmedDescription)>.\(memberChain) (mainDecl: \(String(reflecting: mainDecl?.kind)))"
   }
 
-  // Resolve using now-qualified base. Module name or `nil` for this module (internal).
-  func resolve(resolvedBase: MinimalNominal, module: Identifier?) -> MinimalNominal {
+  /// Resolve using now-qualified base.
+  ///
+  /// Parameters:
+  /// - originatingSyntax: The syntax which we're resolving with this request.
+  /// - module: Module name or `nil` for this module (internal).
+  func resolve(
+    resolvedBase: ResolvedNominalTypeReference,
+    originatingSyntax: TypeLikeSyntax,
+    module: Identifier?
+  ) -> ResolvedNominalTypeReference {
     // Get the type's main declaration.
     //
     // If ``memberNames`` is empty, we didn't have a resolved main declaration so
@@ -82,18 +93,26 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
           .internal(fileID: sourceFile.id)
         }
       let memberComponents: [QualifiedTypeNameGlobalType.Component] = memberNames.map({ name in
-        QualifiedTypeNameGlobalType.Component(qualifier: qualifier, name: name)
+        QualifiedTypeNameGlobalType.Component(
+          qualifier: qualifier,
+          name: name
+        )
       })
-      return MinimalNominal(
+      return ResolvedNominalTypeReference(
         mainDecl: resolvedMainDecl,
         name: QualifiedTypeName.topLevel(
           globalType.addingComponents(memberComponents)
-        )
+        ),
+        originatingSyntax: originatingSyntax
       )
     case .nestedScope(let scope, let type):
-      return MinimalNominal(
+      return ResolvedNominalTypeReference(
         mainDecl: resolvedMainDecl,
-        name: QualifiedTypeName.nestedScope(scope: scope, type: type.addingComponents(memberNames))
+        name: QualifiedTypeName.nestedScope(
+          scope: scope,
+          type: type.addingComponents(memberNames)
+        ),
+        originatingSyntax: originatingSyntax
       )
     }
   }
@@ -169,7 +188,7 @@ extension NominalTypeDeclSyntax2 {
         // Extensions can't be resolved right now.
         else if let extensionDecl = currentAncestor.as(ExtensionDeclSyntax.self) {
           return ChainResult.partiallyResolved(
-            PartiallyResolvedNominalTypeChain(base: extensionDecl.extendedType, members: members)
+            PartiallyResolvedNominalTypeChain(base: extensionDecl, members: members)
           )
         }
         // Top-level scope

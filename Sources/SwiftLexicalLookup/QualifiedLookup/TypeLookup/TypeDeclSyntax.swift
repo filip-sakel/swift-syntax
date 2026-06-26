@@ -14,7 +14,7 @@ import SwiftSyntax
 
 /// A nominal type declaration (struct, enum, class, actor, protocol), type
 /// alias, associated type or generic parameter.
-@_spi(_QualifiedLookup) public struct TypeDeclSyntax: SyntaxProtocol {
+@_spi(_QualifiedLookup) public struct TypeDeclSyntax: Hashable, SyntaxProtocol {
   public private(set) var _syntaxNode: Syntax
 
   public init?(_ node: __shared some SyntaxProtocol) {

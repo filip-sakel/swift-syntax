@@ -12,10 +12,21 @@
 
 import SwiftSyntax
 
+@_spi(_QualifiedLookup)
+public enum TypeLikeSyntax: Sendable, Hashable {
+  case typeSyntax(TypeSyntax)
+  case typeDecl(NominalTypeDeclSyntax2)
+}
+
+// TODO: Rename to `TypeReference`
 @_spi(_QualifiedLookup) public struct PartiallyResolvedTypeIdentifier: Sendable, CustomDebugStringConvertible {
   public struct Component: Hashable, Sendable, CustomDebugStringConvertible {
     let module: Identifier?
     let name: Identifier
+    /// The `TypeSyntax` or `TokenSyntax` from which we derived this type reference component;
+    /// used for targeted diagnostics.
+    // public let introducingSyntax: TypeLikeSyntax
+    public let introducingSyntax: TypeSyntax
 
     public var debugDescription: String {
       let modulePrefix = if let module { "\(module.name)::" } else { "" }
@@ -24,9 +35,13 @@ import SwiftSyntax
   }
   public let base: Component
   public private(set) var memberChain: [Component] = []
-  /// The `TypeSyntax` from which we derived this type reference; used
-  /// for targeted diagnostics.
-  public let typeSyntax: TypeSyntax
+  // /// The `TypeSyntax` from which we derived this type reference component;
+  // /// used for targeted diagnostics.
+  // public let typeSyntax: TypeSyntax
+
+  var lastComponent: Component {
+    memberChain.last ?? base
+  }
 
   // func addingComponent(_ newComponent: Component) -> PartiallyResolvedTypeIdentifier {
   //   PartiallyResolvedTypeIdentifier(
@@ -34,11 +49,13 @@ import SwiftSyntax
   //     memberChain: self.memberChain + [newComponent]
   //   )
   // }
-  func addingComponents(_ newComponents: [Component], newTypeSyntax: TypeSyntax) -> PartiallyResolvedTypeIdentifier {
+  func addingComponents(
+    _ newComponents: [Component] /*, newTypeSyntax: TypeSyntax*/
+  ) -> PartiallyResolvedTypeIdentifier {
     PartiallyResolvedTypeIdentifier(
       base: base,
-      memberChain: self.memberChain + newComponents,
-      typeSyntax: newTypeSyntax
+      memberChain: self.memberChain + newComponents
+        // typeSyntax: newTypeSyntax
     )
   }
 

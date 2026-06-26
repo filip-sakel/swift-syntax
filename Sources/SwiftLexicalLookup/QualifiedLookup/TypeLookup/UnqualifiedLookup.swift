@@ -13,6 +13,22 @@
 import SwiftIfConfig
 import SwiftSyntax
 
+@_spi(_QualifiedLookup) public struct UnqualifiedTypeLookupComponent: Sendable, CustomDebugStringConvertible {
+  let module: Identifier?
+  let name: Identifier
+  // let originatingSyntax: TypeLikeSyntax
+
+  public var debugDescription: String {
+    let modulePrefix: String
+    if let module {
+      modulePrefix = "\(module.name)::"
+    } else {
+      modulePrefix = ""
+    }
+    return "\(modulePrefix)\(name.name)"
+  }
+}
+
 // TODO: Every parent type needs to be resolved because even if we look for `A`
 // in `extension String.UTF8View { struct A { func f(_: A) } }` and find `struct A`,
 // we still need to bind extensions so we need to resolve `String.UTF8View`.
@@ -33,7 +49,7 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
   ///    `.A` to see if `A` has any member types named `Self`.
   /// 2. The second request will be to resolve `struct A` with no selected member
   ///    (i.e. type `A` itself)
-  case lookInsideType(TypeDeclSyntax, selectMember: PartiallyResolvedTypeIdentifier.Component?)
+  case lookInsideType(TypeDeclSyntax, selectMember: UnqualifiedTypeLookupComponent?)
 
   /// Resolve the extension's extended type and look for the members in the given
   /// member chain (if not empty).
@@ -49,7 +65,7 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
   ///    `.Self` to see if `A` has any member types named `Self`.
   /// 2. The second request will be to resolve `extension A` with no selected member
   ///    (i.e. the extended type `A` itself)
-  case lookInsideExtension(ExtensionDeclSyntax, selectMember: PartiallyResolvedTypeIdentifier.Component?)
+  case lookInsideExtension(ExtensionDeclSyntax, selectMember: UnqualifiedTypeLookupComponent?)
   /// E.g.
   /// ```swift
   /// extension Array {
@@ -143,7 +159,11 @@ extension SyntaxProtocol {
       case .lookForMembers(let decl):
         // TODO: Should probably already be a `DeclGroupSyntaxType`
         guard let declGroup = DeclGroupSyntaxType(decl) else { return [] }
-        let selectMember = PartiallyResolvedTypeIdentifier.Component(module: nil, name: typeName)
+        let selectMember = UnqualifiedTypeLookupComponent(
+          module: nil,
+          name: typeName,
+          originatingSyntax: .typeDecl(declGroup)
+        )
         if let nominalDecl = declGroup.as(NominalTypeDeclSyntax2.self) {
           return [UnqualifiedTypeLookupResult.lookInsideType(TypeDeclSyntax(nominalDecl), selectMember: selectMember)]
         } else if let extensionDecl = declGroup.as(ExtensionDeclSyntax.self) {

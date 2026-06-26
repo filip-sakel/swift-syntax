@@ -57,9 +57,10 @@ extension PartiallyResolvedTypeIdentifier {
     PartiallyResolvedTypeIdentifier(
       base: Component(
         module: Identifier(canonicalName: "Swift"),
-        name: Identifier(canonicalName: "Optional")
-      ),
-      typeSyntax: type
+        name: Identifier(canonicalName: "Optional"),
+        // introducingSyntax: TypeLikeSyntax.typeSyntax(type)
+        introducingSyntax: type
+      )
     )
   }
   /// E.g., `[Int]` -> `Array<Int>`
@@ -67,9 +68,10 @@ extension PartiallyResolvedTypeIdentifier {
     PartiallyResolvedTypeIdentifier(
       base: Component(
         module: Identifier(canonicalName: "Swift"),
-        name: Identifier(canonicalName: "Array")
-      ),
-      typeSyntax: type
+        name: Identifier(canonicalName: "Array"),
+        // introducingSyntax: TypeLikeSyntax.typeSyntax(type)
+        introducingSyntax: type
+      )
     )
   }
   // E.g., `[5 of Int]` -> `InlineArray<5, Int>`
@@ -77,9 +79,10 @@ extension PartiallyResolvedTypeIdentifier {
     PartiallyResolvedTypeIdentifier(
       base: Component(
         module: Identifier(canonicalName: "Swift"),
-        name: Identifier(canonicalName: "InlineArray")
-      ),
-      typeSyntax: type
+        name: Identifier(canonicalName: "InlineArray"),
+        // introducingSyntax: TypeLikeSyntax.typeSyntax(type)
+        introducingSyntax: type
+      )
     )
   }
   // E.g., `[String: Int]` -> `Dictionary<String, Int>`
@@ -87,9 +90,10 @@ extension PartiallyResolvedTypeIdentifier {
     PartiallyResolvedTypeIdentifier(
       base: Component(
         module: Identifier(canonicalName: "Swift"),
-        name: Identifier(canonicalName: "Dictionary")
-      ),
-      typeSyntax: type
+        name: Identifier(canonicalName: "Dictionary"),
+        // introducingSyntax: TypeLikeSyntax.typeSyntax(type)
+        introducingSyntax: type
+      )
     )
   }
 }
@@ -119,16 +123,31 @@ extension PartiallyResolvedTypeIdentifier {
 extension TypeSyntaxProtocol {
   fileprivate func _parseModuleAndIdentifier(
     moduleNameToken: TokenSyntax?,
-    nameToken: TokenSyntax
+    nameToken: TokenSyntax,
+    typeSyntax: TypeSyntax
   ) -> Result<PartiallyResolvedTypeIdentifier.Component, TypeResolutionFailure> {
     switch (moduleNameToken.map({ Identifier(validating: $0) }), Identifier(validating: nameToken)) {
     // Valid cases are:
     // (a) no module, valid name
     case (nil, let name?):
-      return .success(PartiallyResolvedTypeIdentifier.Component(module: nil, name: name))
+      return .success(
+        PartiallyResolvedTypeIdentifier.Component(
+          module: nil,
+          name: name,
+          // introducingSyntax: TypeLikeSyntax.typeSyntax(typeSyntax)
+          introducingSyntax: typeSyntax
+        )
+      )
     // (b) valid module, valid name
     case (let moduleName??, let name?):
-      return .success(PartiallyResolvedTypeIdentifier.Component(module: moduleName, name: name))
+      return .success(
+        PartiallyResolvedTypeIdentifier.Component(
+          module: moduleName,
+          name: name,
+          // introducingSyntax: TypeLikeSyntax.typeSyntax(typeSyntax)
+          introducingSyntax: typeSyntax
+        )
+      )
     // Invalid cases are:
     // (a) no module/valid module,  invalid name
     case (nil, nil), (_??, nil):
@@ -465,12 +484,17 @@ extension TypeSyntaxProtocol {
       }
 
       // Parse the module name (if provided), and the type name
-      switch _parseModuleAndIdentifier(moduleNameToken: moduleNameToken, nameToken: nameToken) {
+      let parsedResult = _parseModuleAndIdentifier(
+        moduleNameToken: moduleNameToken,
+        nameToken: nameToken,
+        typeSyntax: TypeSyntax(identifierType)
+      )
+      switch parsedResult {
       case .success(let newComponent):
         // Add nominal type
         return .memberResults([
           Result.success(
-            PartiallyResolvedTypeIdentifier(base: newComponent, typeSyntax: TypeSyntax(identifierType))
+            PartiallyResolvedTypeIdentifier(base: newComponent)
           )
         ])
       case .failure(let failure):
@@ -520,10 +544,24 @@ extension TypeSyntaxProtocol {
 
       // Parse the module name (if provided), and member-type name; then,
       // append to base types
-      switch _parseModuleAndIdentifier(moduleNameToken: moduleNameToken, nameToken: nameToken) {
+      let parsedResult = _parseModuleAndIdentifier(
+        moduleNameToken: moduleNameToken,
+        nameToken: nameToken,
+        typeSyntax: TypeSyntax(memberType)
+      )
+      switch parsedResult {
       case .success(let newComponent):
         // Try to add
         switch baseTypes {
+        // Append the new component
+        case .memberResults(let baseTypeResults):
+          return .memberResults(
+            baseTypeResults.map({ baseTypeResult in
+              baseTypeResult.map({ baseType in
+                baseType.addingComponents([newComponent])
+              })
+            })
+          )
         // Functions/tuples don't have type memebrs
         case .function:
           return .memberResults([
@@ -541,15 +579,6 @@ extension TypeSyntaxProtocol {
               ])
             )
           ])
-        // Append the new component
-        case .memberResults(let baseTypeResults):
-          return .memberResults(
-            baseTypeResults.map({ baseTypeResult in
-              baseTypeResult.map({ baseType in
-                baseType.addingComponents([newComponent], newTypeSyntax: TypeSyntax(memberType))
-              })
-            })
-          )
         }
       case .failure(let failure):
         // Add failure

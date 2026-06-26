@@ -79,7 +79,7 @@ import SwiftSyntax
       resolved: NominalType,
       possibleExtensionQueue: [ExtensionDeclSyntax],
       currentlyBound: [ExtensionDeclSyntax],
-      byAssumingMemberResolutions: [PartiallyResolvedTypeIdentifier.Component: MinimalNominal],
+      byAssumingMemberResolutions: [PartiallyResolvedTypeIdentifier.Component: ResolvedNominalTypeReference],
       dependentExtensionsStack: [PartiallyResolvedTypeIdentifier.Component: [ExtensionDeclSyntax]],
     )
   }
