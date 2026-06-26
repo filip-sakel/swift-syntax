@@ -13,20 +13,20 @@
 import SwiftSyntax
 
 @_spi(_QualifiedLookup) public struct PartiallyResolvedTypeIdentifier: Sendable, CustomDebugStringConvertible {
-  struct Component: CustomDebugStringConvertible {
+  public struct Component: Hashable, Sendable, CustomDebugStringConvertible {
     let module: Identifier?
     let name: Identifier
 
-    var debugDescription: String {
+    public var debugDescription: String {
       let modulePrefix = if let module { "\(module.name)::" } else { "" }
       return "\(modulePrefix)\(name.name)"
     }
   }
-  let base: Component
-  private(set) var memberChain: [Component] = []
+  public let base: Component
+  public private(set) var memberChain: [Component] = []
   /// The `TypeSyntax` from which we derived this type reference; used
   /// for targeted diagnostics.
-  let typeSyntax: TypeSyntax
+  public let typeSyntax: TypeSyntax
 
   // func addingComponent(_ newComponent: Component) -> PartiallyResolvedTypeIdentifier {
   //   PartiallyResolvedTypeIdentifier(
