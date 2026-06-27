@@ -69,7 +69,7 @@ extension Result where Success == [TypeDeclSyntax] {
     ///
     /// I.e. We don't allow structs/enums/actors, functions, tuples.
     case cannotComposeNonClassOrProtocol(resolved: MemberLookupResult<ResolvedNominalTypeReference>)
-    case noTypeMember(member: PartiallyResolvedTypeIdentifier.Component, in: MemberLookupResult<NominalType>)
+    case noTypeMember(member: ImplicitTypeReferenceComponent, in: MemberLookupResult<NominalType>)
 
     // // TODO: Can we simplify to a single failure?
     // case invalidChildren([TypeSyntax: [Failure]])
@@ -374,14 +374,15 @@ extension Result where Success == [TypeDeclSyntax] {
     // TODO: Merge lookup/skip logic if possible
     for lookupResult in baseLookupResults {
       switch lookupResult {
-      case .lookInsideType(let typeDecl, let selectMember):
-        // An array with the selectMember, or empty if not provided
-        let memberChainPrefix = selectMember.map({ [$0] }) ?? []
+      case .lookInsideType(let typeDecl, let lookForSelectedMember):
+        // An array with the base component if `lookForSelectedMember == true`, or empty.
+        let memberChainPrefix: [ImplicitTypeReferenceComponent] =
+          lookForSelectedMember ? [ImplicitTypeReferenceComponent(from: typeReference.base)] : []
 
         let typeLookupResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveTypeDecl(
           baseTypeDecl: typeDecl,
           baseTypeLikeSyntax: TypeLikeSyntax.typeSyntax(typeReference.lastComponent.introducingSyntax),
-          memberChain: memberChainPrefix + typeReference.memberChain,
+          memberChain: memberChainPrefix + typeReference.memberChain.map(ImplicitTypeReferenceComponent.init(from:)),
           originatingSyntax: originatingSyntax
         )
         // We skip only if the lookup succeeded but found no matching types
@@ -391,7 +392,7 @@ extension Result where Success == [TypeDeclSyntax] {
           continue
         }
         return typeLookupResult
-      case .lookInsideExtension(let extensionDecl, let selectMember):
+      case .lookInsideExtension(let extensionDecl, let lookForSelectedMember):
         // We might have to look inside an extension
         // For instance:
         //   extension Int {
@@ -415,13 +416,14 @@ extension Result where Success == [TypeDeclSyntax] {
           return .failure(failure)
         }
 
-        // An array with the selectMember, or empty if not provided
-        let memberChainPrefix = selectMember.map({ [$0] }) ?? []
+        // An array with the base component if `lookForSelectedMember == true`, or empty.
+        let memberChainPrefix: [ImplicitTypeReferenceComponent] =
+          lookForSelectedMember ? [ImplicitTypeReferenceComponent(from: typeReference.base)] : []
 
-        let typeLookupResult = resolveTypeDecl(
+        let typeLookupResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveTypeDecl(
           baseTypeDecl: TypeDeclSyntax(enclosingType.mainDecl),
           baseTypeLikeSyntax: TypeLikeSyntax.typeSyntax(typeReference.lastComponent.introducingSyntax),
-          memberChain: memberChainPrefix + typeReference.memberChain,
+          memberChain: memberChainPrefix + typeReference.memberChain.map(ImplicitTypeReferenceComponent.init(from:)),
           // Resolve from the location of the extension declaration
           originatingSyntax: extensionDecl.extendedType
         )
@@ -447,7 +449,7 @@ extension Result where Success == [TypeDeclSyntax] {
         let typeLookupResult = resolveTypeDecl(
           baseTypeDecl: TypeDeclSyntax(genericParameter),
           baseTypeLikeSyntax: TypeLikeSyntax.typeSyntax(typeReference.lastComponent.introducingSyntax),
-          memberChain: typeReference.memberChain,
+          memberChain: typeReference.memberChain.map(ImplicitTypeReferenceComponent.init(from:)),
           originatingSyntax: originatingSyntax
         )
         // Skip logic like above
@@ -485,7 +487,7 @@ extension Result where Success == [TypeDeclSyntax] {
   mutating func resolveTypeDecl(
     baseTypeDecl: TypeDeclSyntax,
     baseTypeLikeSyntax: TypeLikeSyntax,
-    memberChain: [PartiallyResolvedTypeIdentifier.Component],
+    memberChain: [ImplicitTypeReferenceComponent],
     originatingSyntax: TypeSyntax
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     log(
@@ -506,7 +508,7 @@ extension Result where Success == [TypeDeclSyntax] {
         // We check that the root is a source file (& registered in the symbol table)
         // at the top of ``resolveSyntax``.
         fatalError(
-          "[SwiftLexicalLookup] Internal error: Unexpectedly asked to resolve a type declaration whose root isn't a file root."
+          "[SwiftLexicalLookup] Internal error: Unexpectedly asked to resolve a type declaration whose root (\(nonFileRoot.kind) isn't a file root."
         )
       case .failure(.invalidIdentifier(let invalidIdentifier)):
         // TODO: Decide if this is too granular and we shud have a more general `.invalidContext` instead.
@@ -638,18 +640,7 @@ extension Result where Success == [TypeDeclSyntax] {
           // No results; continue in case next one has a result.
           break
         case Result.failure(let failure):
-          // TODO: This might become TypeSyntax
-          // E.g., in:
-          //   struct A {}
-          //   extension A {
-          //     protocol B {
-          //       func f(_: (B & Collection).Index) // <- Lookup here
-          //     }
-          //   }
-          // There's no type syntax for `A`; just the struct name (and we need
-          // to look into `A` because it could have another type member `B` making
-          // lookup ambiguous).
-          failures[.typeSyntax(firstTypeMember.introducingSyntax)] = failure
+          failures[firstTypeMember.introducingSyntax] = failure
         }
       }
 
@@ -732,7 +723,7 @@ extension Result where Success == [TypeDeclSyntax] {
       // Resolve this type declaration and add it to the results
       memberResult = resolveTypeDecl(
         baseTypeDecl: memberTypeDecl,
-        baseTypeLikeSyntax: TypeLikeSyntax.typeSyntax(firstTypeMember.introducingSyntax),
+        baseTypeLikeSyntax: firstTypeMember.introducingSyntax,
         memberChain: remainingMemberChain,
         originatingSyntax: originatingSyntax
       ).map({ result in Optional((typeDecl: memberTypeDecl, result: result)) })

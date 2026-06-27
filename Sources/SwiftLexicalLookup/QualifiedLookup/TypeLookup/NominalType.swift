@@ -136,7 +136,7 @@ extension NominalType {
   }
 
   func findMemberTypes(
-    component: PartiallyResolvedTypeIdentifier.Component,
+    component: ImplicitTypeReferenceComponent,
     lookupPosition: (file: SourceFileSyntax, position: AbsolutePosition),
     importedModules: [Identifier],
     moduleMap: [SourceFileSyntax: Identifier],
