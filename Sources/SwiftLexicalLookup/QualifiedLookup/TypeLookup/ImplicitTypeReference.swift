@@ -12,6 +12,12 @@
 
 import SwiftSyntax
 
+@_spi(_QualifiedLookup)
+public enum TypeLikeSyntax: Sendable, Hashable {
+  case typeSyntax(TypeSyntax)
+  case typeDecl(NominalTypeDeclSyntax2)
+}
+
 /// A type reference component either derived from source or implicitly generated.
 ///
 /// E.g. In `let a: Int.MyType`, `MyType` is a source-derived reference. However,

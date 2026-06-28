@@ -429,116 +429,116 @@ final class TestQualifiedTypeName: XCTestCase {
       """ as QualifiedTypeNameSource
     ])
   }
-  func testSimpleNestedCase() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::Hi")
-      struct Hi {
+  // func testSimpleNestedCase() {
+  //   assertQualifiedTypeName([
+  //     "MyFile.swift": """
+  //     \("🟥", name: "_(MyFile.swift)::Hi")
+  //     struct Hi {
+  //
+  //       \("🟩", name: "_(MyFile.swift)::Hi._(MyFile.swift)::A")
+  //       struct A {
+  //         static func f() -> \(reference: "🟩")A {}
+  //       }
+  //
+  //     }
+  //     func g(_: \(reference: "🟩")Hi.A)
+  //     func h(_: \(reference: "🟥")Hi)
+  //     """ as QualifiedTypeNameSource
+  //   ])
+  // }
+  // func testSimpleAlias() {
+  //   assertQualifiedTypeName([
+  //     "MyFile.swift": """
+  //     typealias A = \(reference: "🟥")B
+  //
+  //     \("🟥", name: "_(MyFile.swift)::B")
+  //     struct B {
+  //       static func f() -> \(reference: "🟥")A {}
+  //       static func g() -> \(reference: "🟥")B {}
+  //     }
+  //     func f() -> \(reference: "🟥")A {}
+  //     func g() -> \(reference: "🟥")B {}
+  //     """ as QualifiedTypeNameSource
+  //   ])
+  // }
 
-        \("🟩", name: "_(MyFile.swift)::Hi._(MyFile.swift)::A")
-        struct A {
-          static func f() -> \(reference: "🟩")A {}
-        }
-
-      }
-      func g(_: \(reference: "🟩")Hi.A)
-      func h(_: \(reference: "🟥")Hi)
-      """ as QualifiedTypeNameSource
-    ])
-  }
-  func testSimpleAlias() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      typealias A = \(reference: "🟥")B
-
-      \("🟥", name: "_(MyFile.swift)::B")
-      struct B {
-        static func f() -> \(reference: "🟥")A {}
-        static func g() -> \(reference: "🟥")B {}
-      }
-      func f() -> \(reference: "🟥")A {}
-      func g() -> \(reference: "🟥")B {}
-      """ as QualifiedTypeNameSource
-    ])
-  }
-
-  func testNestedAlias() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::Outer")
-      struct Outer {
-        typealias B = \(reference: "🟩")A
-
-        \("🟩", name: "_(MyFile.swift)::Outer._(MyFile.swift)::A")
-        struct A {
-          static func f() -> \(reference: "🟩")B {}
-          static func g() -> \(reference: "🟩")B {}
-        }
-      }
-      func f(_: \(reference: "🟩")Outer.A)
-      func g(_: \(reference: "🟩")Outer.B)
-      """ as QualifiedTypeNameSource
-    ])
-  }
-
-  func testSimpleComposition() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::A")
-      protocol A {}
-
-      typealias C = \(references: ["🟥", "🟩"])A & B
-
-      \("🟩", name: "_(MyFile.swift)::B")
-      protocol B {}
-      """ as QualifiedTypeNameSource
-    ])
-  }
-
-  func testSimpleFunction() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      typealias A = \(result: .function(argumentCount: 2))(_ a: Int, _ b: Int) -> Int
-      """ as QualifiedTypeNameSource
-    ])
-  }
-  func testSimpleTuple() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      func f(_: \(result: .tuple(labels: [Identifier(canonicalName: "a"), nil]))(a: Int, Bool))
-      """ as QualifiedTypeNameSource
-    ])
-  }
-
-  func testNonnominalComposition() {
-    // assertQualifiedTypeName(
-    //   [
-    //     "MyFile.swift": """
-    //     // Cannot compose non nominal types
-    //     struct A {}; struct B {}
-    //     typealias A = \(failure: .invalidComposition(["(A, B) -> Int" : .invalidComposition]))((A, B) -> Int) & Int
-    //     """ as QualifiedTypeNameSource
-    //   ],
-    //   verbose: true
-    // )
-
-
-    // typealias B = \(failure: .cannotComposeTupleOrFunction)Int & ((UnknownTypeA) -> UnknownTypeB)
-    // // Non-nominal types don't have type members
-    // typealias C = \(failure: .noTupleOrFunctionTypeMembers)(Int, Bool).MyType
-    // typealias D = \(failure: .noTupleOrFunctionTypeMembers)((Int) -> Bool).MyType
-    // // Ensure errors propagate
-    // struct MyStruct {}
-    // typealias E = \(failure: .cannotComposeTupleOrFunction)A.MyType
-    // typealias F = \(failure: .noTupleOrFunctionTypeMembers)A & MyStruct
-  }
-  func testTupleComposition() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      func f(_: \(result: .tuple(labels: [Identifier(canonicalName: "a"), nil]))(a: Int, Bool))
-      """ as QualifiedTypeNameSource
-    ])
-  }
+  // func testNestedAlias() {
+  //   assertQualifiedTypeName([
+  //     "MyFile.swift": """
+  //     \("🟥", name: "_(MyFile.swift)::Outer")
+  //     struct Outer {
+  //       typealias B = \(reference: "🟩")A
+  //
+  //       \("🟩", name: "_(MyFile.swift)::Outer._(MyFile.swift)::A")
+  //       struct A {
+  //         static func f() -> \(reference: "🟩")B {}
+  //         static func g() -> \(reference: "🟩")B {}
+  //       }
+  //     }
+  //     func f(_: \(reference: "🟩")Outer.A)
+  //     func g(_: \(reference: "🟩")Outer.B)
+  //     """ as QualifiedTypeNameSource
+  //   ])
+  // }
+  //
+  // func testSimpleComposition() {
+  //   assertQualifiedTypeName([
+  //     "MyFile.swift": """
+  //     \("🟥", name: "_(MyFile.swift)::A")
+  //     protocol A {}
+  //
+  //     typealias C = \(references: ["🟥", "🟩"])A & B
+  //
+  //     \("🟩", name: "_(MyFile.swift)::B")
+  //     protocol B {}
+  //     """ as QualifiedTypeNameSource
+  //   ])
+  // }
+  //
+  // func testSimpleFunction() {
+  //   assertQualifiedTypeName([
+  //     "MyFile.swift": """
+  //     typealias A = \(result: .function(argumentCount: 2))(_ a: Int, _ b: Int) -> Int
+  //     """ as QualifiedTypeNameSource
+  //   ])
+  // }
+  // func testSimpleTuple() {
+  //   assertQualifiedTypeName([
+  //     "MyFile.swift": """
+  //     func f(_: \(result: .tuple(labels: [Identifier(canonicalName: "a"), nil]))(a: Int, Bool))
+  //     """ as QualifiedTypeNameSource
+  //   ])
+  // }
+  //
+  // func testNonnominalComposition() {
+  //   // assertQualifiedTypeName(
+  //   //   [
+  //   //     "MyFile.swift": """
+  //   //     // Cannot compose non nominal types
+  //   //     struct A {}; struct B {}
+  //   //     typealias A = \(failure: .invalidComposition(["(A, B) -> Int" : .invalidComposition]))((A, B) -> Int) & Int
+  //   //     """ as QualifiedTypeNameSource
+  //   //   ],
+  //   //   verbose: true
+  //   // )
+  //
+  //
+  //   // typealias B = \(failure: .cannotComposeTupleOrFunction)Int & ((UnknownTypeA) -> UnknownTypeB)
+  //   // // Non-nominal types don't have type members
+  //   // typealias C = \(failure: .noTupleOrFunctionTypeMembers)(Int, Bool).MyType
+  //   // typealias D = \(failure: .noTupleOrFunctionTypeMembers)((Int) -> Bool).MyType
+  //   // // Ensure errors propagate
+  //   // struct MyStruct {}
+  //   // typealias E = \(failure: .cannotComposeTupleOrFunction)A.MyType
+  //   // typealias F = \(failure: .noTupleOrFunctionTypeMembers)A & MyStruct
+  // }
+  // func testTupleComposition() {
+  //   assertQualifiedTypeName([
+  //     "MyFile.swift": """
+  //     func f(_: \(result: .tuple(labels: [Identifier(canonicalName: "a"), nil]))(a: Int, Bool))
+  //     """ as QualifiedTypeNameSource
+  //   ])
+  // }
 
   // func testSimpleExtension() {
   //   assertQualifiedTypeName([

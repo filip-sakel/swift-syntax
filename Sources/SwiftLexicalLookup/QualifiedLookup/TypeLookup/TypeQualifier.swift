@@ -274,6 +274,13 @@ extension Result where Success == [TypeDeclSyntax] {
         failures[childTypeSyntax] = Failure.cannotComposeNonClassOrProtocol(
           resolved: .tuple(labels: labels)
         )
+      // Ignore if this particular type didn't contain the type member.
+      // E.g.
+      //   protocol A { typealias T = Int }
+      //   protocol B {}
+      //   let ab: (A & B).T // ✅
+      case .failure(Failure.noTypeMember):
+        continue
       case .failure(let resolutionFailure):
         failures[childTypeSyntax] = Failure.invalidChild(resolutionFailure)
       }
@@ -284,6 +291,8 @@ extension Result where Success == [TypeDeclSyntax] {
       log("Resolved \(typeSyntax.trimmedDescription) to failures \(failures)")
       return Result.failure(Failure.invalidComposition(failures))
     }
+
+    // TODO: Ensure we got at least one type member
 
     log("Resolved \(typeSyntax.trimmedDescription) to types \(types))")
     return Result.success(MemberLookupResult.memberResults(types))

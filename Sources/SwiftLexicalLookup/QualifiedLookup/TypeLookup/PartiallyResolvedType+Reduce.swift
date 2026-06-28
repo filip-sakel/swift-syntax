@@ -12,12 +12,6 @@
 
 import SwiftSyntax
 
-@_spi(_QualifiedLookup)
-public enum TypeLikeSyntax: Sendable, Hashable {
-  case typeSyntax(TypeSyntax)
-  case typeDecl(NominalTypeDeclSyntax2)
-}
-
 // TODO: Rename to `TypeReference`
 @_spi(_QualifiedLookup) public struct PartiallyResolvedTypeIdentifier: Sendable, CustomDebugStringConvertible {
   public struct Component: Hashable, Sendable, CustomDebugStringConvertible {

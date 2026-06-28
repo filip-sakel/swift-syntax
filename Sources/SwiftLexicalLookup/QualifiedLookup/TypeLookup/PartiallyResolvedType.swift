@@ -12,35 +12,36 @@
 
 import SwiftSyntax
 
-@_spi(_QualifiedLoookup) public enum PartiallyResolvedType: Sendable {
-  // Non-nominal types
-  case function(argumentCount: Int)
-  case tuple(labels: [Identifier?])
-  // Nominal
-  case nominalIdentifier(module: Identifier?, name: Identifier)
-  case nominalMember(bases: [PartiallyResolvedType], module: Identifier?, name: Identifier)
-
-  // Define known nominal types
-  /// E.g., `Int?` -> `Optional<Int>`
-  fileprivate static let _optionalType = PartiallyResolvedType.nominalIdentifier(
-    module: Identifier(canonicalName: "Swift"),
-    name: Identifier(canonicalName: "Optional")
-  )
-  /// E.g., `[Int]` -> `Array<Int>`
-  fileprivate static let _arrayType = PartiallyResolvedType.nominalIdentifier(
-    module: Identifier(canonicalName: "Swift"),
-    name: Identifier(canonicalName: "Array")
-  )
-  // E.g., `[5 of Int]` -> `InlineArray<5, Int>`
-  fileprivate static let _inlineArrayType = PartiallyResolvedType.nominalIdentifier(
-    module: Identifier(canonicalName: "Swift"),
-    name: Identifier(canonicalName: "InlineArray")
-  )
-  // E.g., `[String: Int]` -> `Dictionary<String, Int>`
-  fileprivate static let _dictionaryType = PartiallyResolvedType.nominalIdentifier(
-    module: Identifier(canonicalName: "Swift"),
-    name: Identifier(canonicalName: "Dictionary")
-  )
+// @_spi(_QualifiedLoookup) public enum PartiallyResolvedType: Sendable {
+//   // Non-nominal types
+//   case function(argumentCount: Int)
+//   case tuple(labels: [Identifier?])
+//   // Nominal
+//   case nominalIdentifier(module: Identifier?, name: Identifier)
+//   case nominalMember(bases: [PartiallyResolvedType], module: Identifier?, name: Identifier)
+//
+//   // Define known nominal types
+//   /// E.g., `Int?` -> `Optional<Int>`
+//   fileprivate static let _optionalType = PartiallyResolvedType.nominalIdentifier(
+//     module: Identifier(canonicalName: "Swift"),
+//     name: Identifier(canonicalName: "Optional")
+//   )
+//   /// E.g., `[Int]` -> `Array<Int>`
+//   fileprivate static let _arrayType = PartiallyResolvedType.nominalIdentifier(
+//     module: Identifier(canonicalName: "Swift"),
+//     name: Identifier(canonicalName: "Array")
+//   )
+//   // E.g., `[5 of Int]` -> `InlineArray<5, Int>`
+//   fileprivate static let _inlineArrayType = PartiallyResolvedType.nominalIdentifier(
+//     module: Identifier(canonicalName: "Swift"),
+//     name: Identifier(canonicalName: "InlineArray")
+//   )
+//   // E.g., `[String: Int]` -> `Dictionary<String, Int>`
+//   fileprivate static let _dictionaryType = PartiallyResolvedType.nominalIdentifier(
+//     module: Identifier(canonicalName: "Swift"),
+//     name: Identifier(canonicalName: "Dictionary")
+//   )
+extension PartiallyResolvedType {
   /// Types for which we can use the suppression syntax.
   /// E.g., `AnyKeyPath & ~Sendable`
   /// TODO: Get them all from the compiler
@@ -49,6 +50,18 @@ import SwiftSyntax
     Identifier(canonicalName: "Escapable"),
     Identifier(canonicalName: "Sendable"),
   ]
+}
+
+@_spi(_QualifiedLoookup) public enum PartiallyResolvedType {
+  // E.g., (Encodable & Collection).Element -> [Encodable.Element, Collection.Element]
+  //       (Encodable & Collection.MyProto) & OtherProto -> [subscomposition(Encodable & Collection.MyProto)]
+  //       [[Encodable.MyProto, Collection.MyProto], OtherProto]
+  // TODO: This doesn't make sense
+  // case base(MemberLookupResult<PartiallyResolvedTypeIdentifier>)
+  case function
+  case tuple
+  case typeId(PartiallyResolvedTypeIdentifier)
+  case composition([TypeSyntax: PartiallyResolvedType])
 }
 
 extension PartiallyResolvedTypeIdentifier {
@@ -376,6 +389,7 @@ extension TypeSyntaxProtocol {
   //     }
   //   }
   // }
+  //
 
   @_spi(_QualifiedLoookup)
   public func partiallyResolve() -> MemberLookupResult<
