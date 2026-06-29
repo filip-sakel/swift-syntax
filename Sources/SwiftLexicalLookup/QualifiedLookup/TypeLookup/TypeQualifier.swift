@@ -63,18 +63,21 @@ extension Result where Success == [TypeDeclSyntax] {
 
   func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
     guard _verbose else { return }
+    // fatalError("Hi")
     print(logPrefix.map({ "[\($0)]" }).joined(), component, "[\(file):\(line)]")
   }
 
   mutating func withLogging<T>(
     request: String,
     describe: (T) -> String,
-    perform action: (_ mutableSelf: inout TypeQualifier) -> T
+    perform action: (_ mutableSelf: inout TypeQualifier) -> T,
+    file: StaticString = #file,
+    line: UInt = #line
   ) -> T {
     logPrefix.append(request)
-    log("Resolving...")
+    log("Resolving...", file: file, line: line)
     let result = action(&self)
-    log("Resolved \(describe(result))")
+    log("Resolved \(describe(result))", file: file, line: line)
     logPrefix.removeLast()
     return result
   }
@@ -254,7 +257,7 @@ extension Result where Success == [TypeDeclSyntax] {
   public mutating func resolveSyntax(
     typeSyntax: TypeSyntax
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
-    withLogging(request: "Resolve syntax \(typeSyntax.trimmedDescription)", describe: \._debugDescription) {
+    withLogging(request: "Resolve syntax `\(typeSyntax.trimmedDescription)`", describe: \._debugDescription) {
       $0._resolveSyntax(typeSyntax: typeSyntax)
     }
   }
@@ -271,7 +274,6 @@ extension Result where Success == [TypeDeclSyntax] {
     else {
       return .failure(.syntaxNotInSymbolTable(rootKind: typeSyntax.root.kind))
     }
-    log("Resolving syntax: \(typeSyntax.trimmedDescription)")
 
     // // Resolve type references (or return tuple/function)
     // let typeReferenceResults: [Result<PartiallyResolvedTypeIdentifier, LocalizedTypeResolutionFailure>]
@@ -282,10 +284,8 @@ extension Result where Success == [TypeDeclSyntax] {
       // TODO: Handle so we don't fail `Encodable & Any` like we do `Encodable & Int.Type`
       return Result.success(MemberLookupResult.anyType)
     case .success(.function(let argumentCount)):
-      log("Resolved \(typeSyntax.trimmedDescription) to .function")
       return Result.success(.function(argumentCount: argumentCount))
     case .success(.tuple(let labels)):
-      log("Resolved \(typeSyntax.trimmedDescription) to .tuple")
       return Result.success(.tuple(labels: labels))
     // case .metatype(of: _):
     //   // // Empty type case
@@ -417,6 +417,7 @@ extension Result where Success == [TypeDeclSyntax] {
     // log("Partially resolved \(typeSyntax.trimmedDescription) to type references \(typeReferenceResults)")
 
     // Collect valid types and failures
+    var anyTypeCounter = 0
     var types = [ResolvedNominalTypeReference]()
     var failures = [TypeSyntax: Failure]()
     // for typeReferenceResult in typeReferenceResults {
@@ -466,7 +467,7 @@ extension Result where Success == [TypeDeclSyntax] {
       // E.g. `Codable & Any` ✅
       // But: `Codable & Int.Type` ❌
       case .success(.anyType):
-        continue
+        anyTypeCounter += 1
       // Ignore if this particular type didn't contain the type member.
       // E.g.
       //   protocol A { typealias T = Int }
@@ -485,9 +486,11 @@ extension Result where Success == [TypeDeclSyntax] {
       return Result.failure(Failure.invalidComposition(failures))
     }
 
-    // TODO: Ensure we got at least one type member
+    // We get `anyType` only when all the constituent types are `any`.
+    guard anyTypeCounter != syntaxToTypes.count else {
+      return Result.success(MemberLookupResult.anyType)
+    }
 
-    // log("Resolved \(typeSyntax.trimmedDescription) to types \(types))")
     return Result.success(MemberLookupResult.memberResults(types))
   }
 
@@ -495,7 +498,7 @@ extension Result where Success == [TypeDeclSyntax] {
     extensionDecl: ExtensionDeclSyntax
   ) -> Result<ResolvedNominalTypeReference, Failure> {
     withLogging(
-      request: "Extended type syntax \(extensionDecl.extendedType.trimmedDescription)",
+      request: "Extended type syntax `\(extensionDecl.extendedType.trimmedDescription)`",
       describe: \._debugDescription
     ) {
       $0._resolveExtendedTypeSyntax(extensionDecl: extensionDecl)
@@ -541,7 +544,7 @@ extension Result where Success == [TypeDeclSyntax] {
     originatingSyntax: TypeSyntax
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
-      request: "Type reference \(typeBaseComponent.debugDescription)",
+      request: "Type reference `\(typeBaseComponent.debugDescription)`",
       describe: \._debugDescription
     ) {
       $0._resolveTypeReference(
@@ -828,7 +831,7 @@ extension Result where Success == [TypeDeclSyntax] {
     firstTypeMember: ImplicitTypeReferenceComponent
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
-      request: "Member \(firstTypeMember.debugDescription)",
+      request: "Member `\(firstTypeMember.debugDescription)`",
       describe: \._debugDescription
     ) {
       $0._resolveMember(baseType: baseType, firstTypeMember: firstTypeMember)

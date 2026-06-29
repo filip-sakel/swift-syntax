@@ -189,7 +189,19 @@ extension TypeSyntaxProtocol {
     case .functionType(let functionType):
       return Result.success(PartiallyResolvedType.function(argumentCount: functionType.parameters.count))
     // Valid tuples (we treat single-element tuples as their only contained type below)
-    case .tupleType(let tupleType) where tupleType.elements.count >= 1:
+    case .tupleType(let tupleType):
+      // Single-element tuples are just the type, e.g., the tuple type syntax
+      // `(Int)` is just `Int`.
+      // We diagnose single-element labels elsewhere
+      // TODO: Should we diagnose single-element labels here?
+      if
+        let soleTupleElement = tupleType.elements.first,
+        tupleType.elements.count == 1
+      {
+        // Forward resolution
+        return soleTupleElement.type.partiallyResolve()
+      }
+
       // Get labels and collect identifier errors
       let labels: [Identifier?] = tupleType.elements.map({ label -> Identifier? in
         // Tuple elements get their labels from the first name.
@@ -396,18 +408,6 @@ extension TypeSyntaxProtocol {
       return packElementType.partiallyResolve()
     case .packExpansionType(let packExpansionType):
       return packExpansionType.partiallyResolve()
-    case .tupleType(let tupleType) /* where tupleType.elements.count == 1 */:
-      // Single-element tuples are invalid; forward to the element's type (diagnosed elsewhere)
-      guard
-        let soleTupleElement = tupleType.elements.first,
-        tupleType.elements.count == 1
-      else {
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Tuple type unexpectedly has \(tupleType.elements.count) elements, a condition which should have been handled in a previous case."
-        )
-      }
-      // Forward resolution
-      return soleTupleElement.type.partiallyResolve()
     case .compositionType(let compositionType):
       return Result.success(PartiallyResolvedType.composition(compositionType.elements.map(\.type)))
     // // Add all types and failures from composition types

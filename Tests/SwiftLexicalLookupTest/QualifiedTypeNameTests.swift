@@ -535,13 +535,26 @@ final class TestQualifiedTypeName: XCTestCase {
       """ as QualifiedTypeNameSource
     ])
   }
-  // func testAnyType() {
-  //   assertQualifiedTypeName([
-  //     "MyFile.swift": """
-  //     func f(_: \(result: .anyType)(Any & ~Copyable) & ~Escapable)
-  //     """ as QualifiedTypeNameSource
-  //   ], verbose: false)
-  // }
+  func testSimpleAnyType() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      func f(_: \(result: .anyType)Any)
+      func g(_: \(result: .anyType)(Any & Any) & Any)
+      """ as QualifiedTypeNameSource
+    ])
+  }
+  func testAnyTypeComposition() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::ProtoA")
+      protocol ProtoA {}
+      \("🟩", name: "_(MyFile.swift)::ProtoB")
+      protocol ProtoB {}
+      func f(_: \(references: ["🟥"])(Any & ProtoA) & Any)
+      func g(_: \(references: ["🟥", "🟩"])((ProtoB & Any) & Any) & ProtoB)
+      """ as QualifiedTypeNameSource
+    ])
+  }
 
   func testNonnominalComposition() {
     // assertQualifiedTypeName(
@@ -563,6 +576,19 @@ final class TestQualifiedTypeName: XCTestCase {
     // struct MyStruct {}
     // typealias E = \(failure: .cannotComposeTupleOrFunction)A.MyType
     // typealias F = \(failure: .noTupleOrFunctionTypeMembers)A & MyStruct
+  }
+
+  func testDuplicateComposition() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::ProtoA")
+      protocol ProtoA {}
+      \("🟩", name: "_(MyFile.swift)::ProtoB")
+      protocol ProtoB {}
+      func f(_: \(references: ["🟥"])ProtoA & Any & ProtoA)
+      func g(_: \(references: ["🟥", "🟩"])(ProtoA & ProtoB) & ProtoA)
+      """ as QualifiedTypeNameSource
+    ])
   }
   // func testTupleComposition() {
   //   assertQualifiedTypeName([
@@ -731,6 +757,18 @@ final class TestQualifiedTypeName: XCTestCase {
   // TODO: Think about isolation use cases? (That seems more like type checking)
 
   // TODO: Macro test, e.g. @freestanding macro noargsButCallable() = ...; #closure(args)
+
+  // TODO: Test same-file redeclarations
+  // e.g.
+  // // FileA.swift
+  // protocol A {}
+  // struct A {}
+  //
+  // e.g.
+  // func f() {
+  //   struct A {}
+  //   typealias A = Int
+  // }
 
   // TODO: Aliased suppressed type test (base type / suppressed base type can be aliased & composed)
   //   typealias A = Escapable
