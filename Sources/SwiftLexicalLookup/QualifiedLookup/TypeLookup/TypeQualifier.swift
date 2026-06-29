@@ -51,9 +51,245 @@ extension Result where Success == [TypeDeclSyntax] {
   public let name: QualifiedTypeName
   public let originatingSyntax: TypeLikeSyntax
 
+  @_spi(_QualifiedLookup) public init(
+    mainDecl: NominalTypeDeclSyntax2,
+    name: QualifiedTypeName,
+    originatingSyntax: TypeLikeSyntax
+  ) {
+    self.mainDecl = mainDecl
+    self.name = name
+    self.originatingSyntax = originatingSyntax
+  }
+
   public var debugDescription: String {
     "\(name) (\(mainDecl.kind))"
   }
+}
+
+@_spi(_QualifiedLookup)
+public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNominal: Sendable>: Error {
+  /// Cannot find the given type identifier in scope (using unqualified lookup).
+  ///
+  /// E.g.,
+  /// ```
+  /// func f(_: A) {} // ❌ error: cannot find type 'A' in scope
+  /// ```
+  case noTypeInScope
+
+  /// Only protocol, class and composition types can form compositions.
+  ///
+  /// I.e. We don't allow structs/enums/actors, functions, tuples.
+  case cannotComposeNonClassOrProtocol(resolved: MemberLookupResult<MinimalNominal>)
+  case noTypeMember(member: ImplicitTypeReferenceComponent, in: MemberLookupResult<ExtendedNominal>)
+
+  // // TODO: Can we simplify to a single failure?
+  // case invalidChildren([TypeSyntax: [Failure]])
+
+  /// We can only extend structs/enums/classes/actors/protocols
+  ///
+  /// I.e. We can't extend tuples, functions, protocol compositions, metatypes, etc.
+  case cannotExtendNonNominal(nonnominal: MemberLookupResult<MinimalNominal>)
+  /// Child has error, so we can't qualify this type but we can't offer a useful diagnostic either.
+  ///
+  /// E.g.
+  ///   typealias A = Encodable & Int.Type // ❌ error: non-protocol, non-class type 'Int.Type' cannot be used within a protocol-constrained type
+  ///   func f(_: A) {} // No diagnostic here
+  case invalidAliasedType(Self)
+  case invalidComposition([(TypeSyntax, Self)])
+  // TODO: Get rid of this
+  case other(any Error)
+
+  /// We defer generic parameters/associated types to the type checker.
+  case genericParameterOrAssociatedType
+
+  /// Type members (obtained through qualified lookup) had errors
+  ///
+  /// E.g.
+  /// ```swift
+  /// protocol A { typealias T = Undefined }
+  /// class B<Generic> { typealias T = Generic }
+  ///
+  /// func f(_: (A & B).T)
+  /// ```
+  /// TODO: Convert to tuple array
+  case invalidMembers([TypeLikeSyntax: Self])
+
+  // /// The extension in which the type we're looking up is
+  // /// defined returned an error.
+  // ///
+  // /// extension Codable {
+  // ///   struct MyStruct {
+  // ///     func f(_: MyStruct) {} // <- Look up here
+  // ///   }
+  // /// }
+  // /// In this case, `Codable`, i.e., `Encodable & Decodable` isn't nominal
+  // /// and can't be extended.
+  // case invalidBaseExtension(ExtensionDeclSyntax, failure: Failure)
+
+  /// The base type which we need to derive a qualified name is invalid.
+  ///
+  /// Causes:
+  /// 1. Nested in invalid nominal type declaration, e.g.:
+  ///    ```swift
+  ///    struct { // ❌ error: expected identifier in struct declaration
+  ///      typealias A = Int
+  ///      func f(a: A) {
+  ///        let n: Int = a + "" // ✅ Compiler doesn't diagnose
+  ///      }
+  ///    }
+  ///    ```
+  ///    Note that if we use an invalid name like `struct 555`, the compiler
+  ///    will interpret the name as the backtick-escaped '`555`' to offer
+  ///    better diagnostics.
+  /// 2. Nested in extension whose type doesn't resolve to a nominal type
+  ///
+  ///    This failure happens when unqualified lookup wants to return the
+  ///    extended type or a member/generic parameter of the extended type.
+  ///    E.g.:
+  ///
+  ///    ```swift
+  ///    extension UndefinedType { // ❌ error: cannot find 'UndefinedType' in scope
+  ///      func f(a: AlsoUndefined) {} // ✅ Compiler doesn't diagnose
+  ///    }
+  ///    extension UndefinedType {
+  ///      typealias T = Int
+  ///      func f(a: T) -> Int {} // ❌ error: cannot find type 'T' in scope
+  ///    }
+  ///    ```
+  case invalidBaseType(Self)
+
+  /// Name lookup found invalid type redeclarations so references to that
+  /// type name are ambiguous.
+  ///
+  /// For example:
+  ///   typealias A = Bool
+  ///   typealias A = Int
+  ///   typealias A = String
+  ///
+  ///   let a: A // ❌ error: 'A' is ambiguous for type lookup
+  case ambiguousTypeDecl([TypeDeclSyntax])
+
+  /// All evaluated syntax must have a ``SourceFileSyntax`` root that's
+  /// registered in the provided symbol table.
+  case syntaxNotInSymbolTable(rootKind: SyntaxKind)
+
+  /// Produce a simplified description for debugging.
+  ///
+  /// Namely, for syntax nodes we use `.trimmedDescription` and for `ResolvedNominalTypeReference`
+  /// we simply compare the qualified type name description.
+  @_spi(_QualifiedLookup) public func _describeDebug(
+    resolveMininalNominal: (MinimalNominal) -> String,
+    resolveExtendedNominal: (ExtendedNominal) -> String,
+    newlinePrefix: String = ""
+  ) -> String {
+    let prefixStep = "  "
+    func describeType<T>(_ memberResults: MemberLookupResult<T>, describe: (T) -> String) -> String {
+      return memberResults._description(describeMembers: { results in
+        results.map(describe).joined(separator: ", ")
+      })
+    }
+
+    switch self {
+    case .noTypeInScope:
+      return ".noTypeInScope"
+    case .cannotComposeNonClassOrProtocol(let type):
+      return ".cannotComposeNonClassOrProtocol(\(describeType(type, describe: resolveMininalNominal)))"
+    case .noTypeMember(let member, let type):
+      return
+        ".noTypeMember(member: \(member.debugDescription), in: \(describeType(type, describe: resolveExtendedNominal)))"
+    case .cannotExtendNonNominal(let nonnominal):
+      return ".cannotExtendNonNominal(nonnominal: \(describeType(nonnominal, describe: resolveMininalNominal)))"
+    case .invalidAliasedType(let nestedFailure):
+      return """
+        .invalidAliasedType(
+        \(nestedFailure._describeDebug(
+          resolveMininalNominal: resolveMininalNominal,
+          resolveExtendedNominal: resolveExtendedNominal,
+          newlinePrefix: newlinePrefix + prefixStep
+          )
+        )
+        \(newlinePrefix))
+        """
+    case .invalidComposition(let invalidChildren):
+      let invalidChildrenDescription = invalidChildren.map({ (childSyntax, childFailure) in
+        let childDescription = childFailure._describeDebug(
+          resolveMininalNominal: resolveMininalNominal,
+          resolveExtendedNominal: resolveExtendedNominal,
+          newlinePrefix: newlinePrefix + prefixStep + prefixStep
+        )
+        return "\(newlinePrefix)\(prefixStep)\(childSyntax.trimmedDescription): \(childDescription)"
+      }).joined(separator: ",\n")
+      return ".invalidComposition([\(invalidChildrenDescription)])"
+    case .other(let otherFailure):
+      return ".other(\(String(reflecting: otherFailure)))"
+    case .genericParameterOrAssociatedType:
+      return ".genericParameterOrAssociatedType"
+    case .invalidMembers(let invalidMembers):
+      let invalidMembersDescription = invalidMembers.map({ (childSyntax, memberFailure) in
+        let memberDescription = memberFailure._describeDebug(
+          resolveMininalNominal: resolveMininalNominal,
+          resolveExtendedNominal: resolveExtendedNominal,
+          newlinePrefix: newlinePrefix + prefixStep + prefixStep
+        )
+        return "\(newlinePrefix)\(prefixStep)\(childSyntax.trimmedDescription): \(memberDescription)"
+      }).joined(separator: ", ")
+
+      return """
+        \(newlinePrefix).invalidMembers(
+        \(invalidMembersDescription)
+        \(newlinePrefix))
+        """
+    case .invalidBaseType(let baseFailure):
+      let baseDescription = baseFailure._describeDebug(
+        resolveMininalNominal: resolveMininalNominal,
+        resolveExtendedNominal: resolveExtendedNominal,
+        newlinePrefix: newlinePrefix + prefixStep + prefixStep
+      )
+
+      return """
+        \(newlinePrefix).invalidBaseType(
+        \(baseDescription)
+        \(newlinePrefix))
+        """
+    case .ambiguousTypeDecl(let ambiguousDecls):
+      let ambiguousDeclsDescription = ambiguousDecls.map(\.trimmedDescription).joined(separator: ", ")
+      return ".ambiguousTypeDecl([\(ambiguousDeclsDescription)])"
+    case .syntaxNotInSymbolTable(let rootKind):
+      return ".syntaxNotInSymbolTable(rootKind: \(rootKind))"
+    }
+  }
+}
+
+extension TypeQualifierFailure: CustomDebugStringConvertible
+where
+  MinimalNominal == ResolvedNominalTypeReference,
+  ExtendedNominal == NominalType
+{
+  public var debugDescription: String {
+    return _describeDebug(
+      resolveMininalNominal: \.debugDescription,
+      resolveExtendedNominal: { extendedNominal in
+        let minimalNominal = ResolvedNominalTypeReference(
+          mainDecl: extendedNominal.mainDecl,
+          name: extendedNominal.qualifiedName,
+          originatingSyntax: TypeLikeSyntax(TypeSyntax(MissingTypeSyntax()))
+        )
+        return minimalNominal.debugDescription
+      }
+    )
+  }
+
+  /// Check if these failures are equal even if the syntax nodes slightly differ.
+  // @_spi(_QualifiedLookup) public _syntacticEquals(_ other: Failure) -> Bool {
+  //   // // If they're strictly equal
+  //   // if self == other { return true }
+  //
+  //   switch (self, other) {
+  //   case (.noTypeInScope, .noTypeInScope):
+  //     return true
+  //   case (.
+  //   }
+  // }
 }
 
 /// Finds the main declaration and qualified name of the nominal types
@@ -82,115 +318,7 @@ extension Result where Success == [TypeDeclSyntax] {
     return result
   }
 
-  public indirect enum Failure: Error {
-    /// Cannot find the given type identifier in scope (using unqualified lookup).
-    ///
-    /// E.g.,
-    /// ```
-    /// func f(_: A) {} // ❌ error: cannot find type 'A' in scope
-    /// ```
-    case noTypeInScope
-
-    /// Only protocol, class and composition types can form compositions.
-    ///
-    /// I.e. We don't allow structs/enums/actors, functions, tuples.
-    case cannotComposeNonClassOrProtocol(resolved: MemberLookupResult<ResolvedNominalTypeReference>)
-    case noTypeMember(member: ImplicitTypeReferenceComponent, in: MemberLookupResult<NominalType>)
-
-    // // TODO: Can we simplify to a single failure?
-    // case invalidChildren([TypeSyntax: [Failure]])
-
-    /// We can only extend structs/enums/classes/actors/protocols
-    ///
-    /// I.e. We can't extend tuples, functions, protocol compositions, metatypes, etc.
-    case cannotExtendNonNominal(nonnominal: MemberLookupResult<ResolvedNominalTypeReference>)
-    /// Child has error, so we can't qualify this type but we can't offer a useful diagnostic either.
-    ///
-    /// E.g.
-    ///   typealias A = Encodable & Int.Type // ❌ error: non-protocol, non-class type 'Int.Type' cannot be used within a protocol-constrained type
-    ///   func f(_: A) {} // No diagnostic here
-    case invalidAliasedType(Failure)
-    case invalidComposition([TypeSyntax: Failure])
-    case other(any Error)
-
-    /// We defer generic parameters/associated types to the type checker.
-    case genericParameterOrAssociatedType
-
-    /// Qualified lookup members had errors
-    ///
-    /// E.g.
-    /// ```swift
-    /// protocol A { typealias T = Undefined }
-    /// class B<Generic> { typealias T = Generic }
-    ///
-    /// func f(_: (A & B).T)
-    /// ```
-    case invalidMembers([TypeLikeSyntax: Failure])
-
-    // // In direct member lookup when members are invalid.
-    // case invalidMembers([TypeLikeSyntax: Failure])
-
-    // /// The extension in which the type we're looking up is
-    // /// defined returned an error.
-    // ///
-    // /// extension Codable {
-    // ///   struct MyStruct {
-    // ///     func f(_: MyStruct) {} // <- Look up here
-    // ///   }
-    // /// }
-    // /// In this case, `Codable`, i.e., `Encodable & Decodable` isn't nominal
-    // /// and can't be extended.
-    // case invalidBaseExtension(ExtensionDeclSyntax, failure: Failure)
-
-    /// The base type which we need to derive a qualified name is invalid.
-    ///
-    /// Causes:
-    /// 1. Nested in invalid nominal type declaration, e.g.:
-    ///    ```swift
-    ///    struct { // ❌ error: expected identifier in struct declaration
-    ///      typealias A = Int
-    ///      func f(a: A) {
-    ///        let n: Int = a + "" // ✅ Compiler doesn't diagnose
-    ///      }
-    ///    }
-    ///    ```
-    ///    Note that if we use an invalid name like `struct 555`, the compiler
-    ///    will interpret the name as the backtick-escaped '`555`' to offer
-    ///    better diagnostics.
-    /// 2. Nested in extension whose type doesn't resolve to a nominal type
-    ///
-    ///    This failure happens when unqualified lookup wants to return the
-    ///    extended type or a member/generic parameter of the extended type.
-    ///    E.g.:
-    ///
-    ///    ```swift
-    ///    extension UndefinedType { // ❌ error: cannot find 'UndefinedType' in scope
-    ///      func f(a: AlsoUndefined) {} // ✅ Compiler doesn't diagnose
-    ///    }
-    ///    extension UndefinedType {
-    ///      typealias T = Int
-    ///      func f(a: T) -> Int {} // ❌ error: cannot find type 'T' in scope
-    ///    }
-    ///    ```
-    case invalidBaseType(Failure)
-
-    /// Name lookup found invalid type redeclarations so references to that
-    /// type name are ambiguous.
-    ///
-    /// For example:
-    ///   typealias A = Bool
-    ///   typealias A = Int
-    ///   typealias A = String
-    ///
-    ///   let a: A // ❌ error: 'A' is ambiguous for type lookup
-    case ambiguousTypeDecl([TypeDeclSyntax])
-
-    /// All evaluated syntax must have a ``SourceFileSyntax`` root that's
-    /// registered in the provided symbol table.
-    case syntaxNotInSymbolTable(rootKind: SyntaxKind)
-
-    // case noMemberType(PartiallyResolvedTypeIdentifier.Component, in: NominalType)
-  }
+  public typealias Failure = TypeQualifierFailure<ResolvedNominalTypeReference, NominalType>
 
   public private(set) var failures = [TypeSyntax: [Failure]]()
   var boundExtensions = [ExtensionDeclSyntax: ResolvedNominalTypeReference]()
@@ -254,6 +382,18 @@ extension Result where Success == [TypeDeclSyntax] {
   // }
   //
 
+  // TODO: Add per-scope canonicalized cache so that:
+  //   func f() {
+  //     // === `f`'s scope ===
+  //     let a: ProtoA // -> canonical syntax `_::ProtoA`
+  //     let aAgain: (ProtoA) // -> same canonical syntax
+  //     let aOnceMore: (ProtoA & Any) & ~Escapable // -> same canonical syntax
+  //     let aOnceAgain: (~Copyable & Any) & ProtoA // -> same canonical syntax
+  //   }
+  //   // === top-level scope ===
+  //   let maybeDifferentA: ProtoA // -> same canonical syntax, but different scope
+  //   NOTE: This is just the syntax; if we want to treat this as a nominal type (e.g.
+  //    to store in a property), then we need to consider that `ProtoA` != ``
   public mutating func resolveSyntax(
     typeSyntax: TypeSyntax
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
@@ -419,7 +559,7 @@ extension Result where Success == [TypeDeclSyntax] {
     // Collect valid types and failures
     var anyTypeCounter = 0
     var types = [ResolvedNominalTypeReference]()
-    var failures = [TypeSyntax: Failure]()
+    var failures = [(TypeSyntax, Failure)]()
     // for typeReferenceResult in typeReferenceResults {
     for (childTypeSyntax, childTypeResult) in syntaxToTypes {
       // // Extract the type reference or log error
@@ -448,20 +588,35 @@ extension Result where Success == [TypeDeclSyntax] {
           // If we have no nominals, e.g., `Int.Type`, or a single nominal that's not
           // a struct/enum/actor, we throw an error
           default:
-            failures[childTypeSyntax] = Failure.cannotComposeNonClassOrProtocol(
-              resolved: .memberResults(nominals)
+            failures.append(
+              (
+                childSyntax: childTypeSyntax,
+                childFailure: Failure.cannotComposeNonClassOrProtocol(
+                  resolved: .memberResults(nominals)
+                )
+              )
             )
           }
         }
         types.append(contentsOf: nominals)
       // Tuples/function
       case .success(.function(let argumentCount)):
-        failures[childTypeSyntax] = Failure.cannotComposeNonClassOrProtocol(
-          resolved: .function(argumentCount: argumentCount)
+        failures.append(
+          (
+            childSyntax: childTypeSyntax,
+            childFailure: Failure.cannotComposeNonClassOrProtocol(
+              resolved: .function(argumentCount: argumentCount)
+            )
+          )
         )
       case .success(.tuple(let labels)):
-        failures[childTypeSyntax] = Failure.cannotComposeNonClassOrProtocol(
-          resolved: .tuple(labels: labels)
+        failures.append(
+          (
+            childSyntax: childTypeSyntax,
+            childFailure: Failure.cannotComposeNonClassOrProtocol(
+              resolved: .tuple(labels: labels)
+            )
+          )
         )
       // `Any` doesn't contribute any types but IS valid
       // E.g. `Codable & Any` ✅
@@ -476,7 +631,12 @@ extension Result where Success == [TypeDeclSyntax] {
       case .failure(Failure.noTypeMember):
         continue
       case .failure(let resolutionFailure):
-        failures[childTypeSyntax] = resolutionFailure
+        failures.append(
+          (
+            childSyntax: childTypeSyntax,
+            childFailure: resolutionFailure
+          )
+        )
       }
     }
 

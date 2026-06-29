@@ -37,7 +37,7 @@ extension MemberLookupResult: Equatable where Result: Equatable {}
 extension MemberLookupResult: Hashable where Result: Hashable {}
 
 extension MemberLookupResult {
-  fileprivate func _description(describeMembers: ([Result]) -> String) -> String {
+  internal func _description(describeMembers: ([Result]) -> String) -> String {
     switch self {
     case .function(let argumentCount):
       return ".function(argumentCount: \(argumentCount))"

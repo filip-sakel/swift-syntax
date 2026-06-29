@@ -12,7 +12,7 @@
 
 import Foundation
 import SwiftIfConfig
-@_spi(_QualifiedLookup) @_spi(Experimental) import SwiftLexicalLookup
+@_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) @_spi(Experimental) import SwiftLexicalLookup
 import SwiftParser
 import SwiftSyntax
 import XCTest
@@ -45,6 +45,12 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
     let marker: Character
     let expectedName: String
   }
+
+  /// The nominal type used in failures is a marker character that points
+  /// to the actual nominal type declaration.
+  // TODO: Could make the "ExtendedType" an array that includes the primary declaration & all the bound extensions
+  typealias QualifierFailure = TypeQualifierFailure<Character, Character>
+
   struct TypeSyntaxExpectation {
     let definitionMarker: Character
     // Source location where this expectation was created
@@ -59,7 +65,7 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
     // case definition(TypeNameExpectation, file: StaticString, line: UInt)
     case definition(marker: Character, name: String, file: StaticString, line: UInt)
     case references(
-      result: Result<MemberLookupResult<Character>, TypeQualifier.Failure>,
+      result: Result<MemberLookupResult<Character>, QualifierFailure>,
       file: StaticString,
       line: UInt
     )
@@ -84,14 +90,14 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
       components.append(.definition(marker: marker, name: name, file: file, line: line))
     }
     mutating func appendInterpolation(
-      resultOrFailure: Result<MemberLookupResult<Character>, TypeQualifier.Failure>,
+      resultOrFailure: Result<MemberLookupResult<Character>, QualifierFailure>,
       file: StaticString = #file,
       line: UInt = #line
     ) {
       components.append(.references(result: resultOrFailure, file: file, line: line))
     }
     mutating func appendInterpolation(
-      failure: TypeQualifier.Failure,
+      failure: QualifierFailure,
       file: StaticString = #file,
       line: UInt = #line
     ) {
@@ -127,7 +133,7 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
   /// A map from positions in the string to the expected type-lookup result at that location.
   let positionsToExpectations:
     [String.Index: (
-      markers: Result<MemberLookupResult<Character>, TypeQualifier.Failure>, file: StaticString, line: UInt
+      markers: Result<MemberLookupResult<Character>, QualifierFailure>, file: StaticString, line: UInt
     )]
 
   init(stringInterpolation: Interpolation) {
@@ -135,7 +141,7 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
     var markersAndNames: [(marker: Character, index: String.Index, name: String, file: StaticString, line: UInt)] = []
     var positionsToExpectations:
       [String.Index: (
-        markers: Result<MemberLookupResult<Character>, TypeQualifier.Failure>, file: StaticString, line: UInt
+        markers: Result<MemberLookupResult<Character>, QualifierFailure>, file: StaticString, line: UInt
       )] = [:]
     for component in stringInterpolation.components {
       switch component {
@@ -171,6 +177,39 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
     var interpolation = Interpolation(literalCapacity: 1, interpolationCount: 0)
     interpolation.appendLiteral(value)
     self.init(stringInterpolation: interpolation)
+  }
+}
+
+extension ResolvedNominalTypeReference {
+  @_spi(_QualifiedLookup)
+  public static func _mockMarkerType(_ kind: SyntaxKind, marker: Character) -> ResolvedNominalTypeReference? {
+    // Get the declaration kind
+    let typeDecl: DeclSyntax
+    switch kind {
+    case .structDecl: typeDecl = "struct"
+    case .enumDecl: typeDecl = "enum"
+    case .classDecl: typeDecl = "class"
+    case .actorDecl: typeDecl = "actor"
+    case .protocolDecl: typeDecl = "protocol"
+    default: return nil
+    }
+    let originatingSyntax: TypeSyntax = "\(raw: marker)"
+
+    return ResolvedNominalTypeReference(
+      // We should only get type declarations
+      mainDecl: NominalTypeDeclSyntax2(typeDecl)!,
+      name: QualifiedTypeName.topLevel(
+        QualifiedTypeNameGlobalType(
+          components: [
+            QualifiedTypeNameGlobalType.Component(
+              qualifier: .external(moduleName: Identifier(canonicalName: "_")),
+              name: Identifier(canonicalName: "_")
+            )
+          ]
+        )!
+      ),
+      originatingSyntax: TypeLikeSyntax(originatingSyntax)
+    )
   }
 }
 
@@ -255,6 +294,18 @@ final class TestQualifiedTypeName: XCTestCase {
       }
     }
 
+    /// Helper for converting a qualified type name to a string description
+    func describeQualifiedName(_ name: QualifiedTypeName) -> String {
+      name._describe(describeFileID: { fileID in
+        // Get name of first matching id
+        for (fileName, file) in lookupFiles {
+          guard file.id == fileID else { continue }
+          return fileName
+        }
+        return fileID.hashValue.description
+      })
+    }
+
     // Perform lookup
     let symbolTable = SymbolTable3(moduleToSources: [Identifier(canonicalName: moduleName): lookupFiles])
     for (fileName, lookupSource) in lookupSources {
@@ -333,13 +384,7 @@ final class TestQualifiedTypeName: XCTestCase {
           // Map tuple to results
           var namesToDeclsTemporary = [NominalTypeDeclSyntax2: String]()
           for nominalType in nominalTypes {
-            let nameDescription = nominalType.name.describe(describeFileID: { fileID in
-              // Get name of first matching id
-              for (fileName, file) in lookupFiles where file.id == fileID {
-                return fileName
-              }
-              return fileID.hashValue.description
-            })
+            let nameDescription = describeQualifiedName(nominalType.name)
             guard namesToDeclsTemporary[nominalType.mainDecl] == nil else { continue assertionLoop }
             namesToDeclsTemporary[nominalType.mainDecl] = nameDescription
           }
@@ -356,10 +401,22 @@ final class TestQualifiedTypeName: XCTestCase {
           continue
         case (.failure(let expectedFailure), .failure(let failure)):
           // TODO: Implement proper comparisons
+          let markerToQualifiedName = { (nominalMarker: Character) -> String in
+            guard let nominalDecl = markerToType[nominalMarker] else { return "_" }
+            return nominalDecl.name
+          }
+          let expectedFailureDescription = expectedFailure._describeDebug(
+            resolveMininalNominal: markerToQualifiedName,
+            resolveExtendedNominal: markerToQualifiedName
+          )
+          let failureDescription = failure._describeDebug(
+            resolveMininalNominal: { describeQualifiedName($0.name) },
+            resolveExtendedNominal: { describeQualifiedName($0.qualifiedName) }
+          )
           XCTAssertEqual(
-            String(reflecting: expectedFailure),
-            String(reflecting: failure),
-            "Mismatch in expetced type-qualifier failure and actual failure.",
+            expectedFailureDescription,
+            failureDescription,
+            "Mismatch in expected type-qualifier failure and actual failure.",
             file: file,
             line: line
           )
@@ -557,6 +614,24 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testNonnominalComposition() {
+    assertQualifiedTypeName(
+      [
+        "MyFile.swift": """
+        // Cannot compose non nominal types
+        \("🟥", name: "_(MyFile.swift)::A")
+        struct A {}
+
+        struct B {}
+
+        typealias A = \(failure: .invalidComposition([
+          ("((A, B) -> Int)", .cannotComposeNonClassOrProtocol(resolved: .function(argumentCount: 2))),
+          ("A", .cannotComposeNonClassOrProtocol(resolved: .memberResults(["🟥"]))),
+        ]))
+        ((A, B) -> Int) & A
+        """ as QualifiedTypeNameSource
+      ],
+      verbose: true
+    )
     // assertQualifiedTypeName(
     //   [
     //     "MyFile.swift": """
@@ -792,4 +867,10 @@ final class TestQualifiedTypeName: XCTestCase {
   //
   // Fourth failing:
   //   typealias A = ~Sendable
+
+  // TODO: Diagnose compositions with `anyType`
+  // e.g.
+  //   protocol MyProto: ~Copyable {}
+  //   extension MyProto & ~Copyable {} // ❌ error: non-nominal type 'MyProto & ~Copyable' cannot be extended
+  //   extension MyProto & Any {} // ⚠️ extending a protocol composition is not supported; extending 'MyProto' instead
 }

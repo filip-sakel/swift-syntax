@@ -13,7 +13,7 @@
 import SwiftSyntax
 
 // A global type name, `Swift::Int._(MyFileA.swift)::MyType`.
-public struct QualifiedTypeNameGlobalType: Sendable, Hashable, CustomDebugStringConvertible {
+@_spi(_QualifiedLookup) public struct QualifiedTypeNameGlobalType: Sendable, Hashable, CustomDebugStringConvertible {
   public enum Qualifier: Sendable, Hashable, CustomDebugStringConvertible {
     case `internal`(fileID: SyntaxIdentifier)
     case external(moduleName: Identifier)
@@ -37,12 +37,17 @@ public struct QualifiedTypeNameGlobalType: Sendable, Hashable, CustomDebugString
     let qualifier: Qualifier
     let name: Identifier
 
-    public func describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
+    @_spi(_QualifiedLookup) public init(qualifier: QualifiedTypeNameGlobalType.Qualifier, name: Identifier) {
+      self.qualifier = qualifier
+      self.name = name
+    }
+
+    @_spi(_QualifiedLookup) public func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
       return "\(qualifier.describe(describeFileID: describeFileID))::\(name.name)"
     }
 
     public var debugDescription: String {
-      describe(describeFileID: \.hashValue.description)
+      _describe(describeFileID: \.hashValue.description)
     }
   }
 
@@ -70,16 +75,17 @@ public struct QualifiedTypeNameGlobalType: Sendable, Hashable, CustomDebugString
     return newType
   }
 
-  public func describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
-    return components.map({ $0.describe(describeFileID: describeFileID) }).joined(separator: ".")
+  @_spi(_QualifiedLookup) public func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
+    return components.map({ $0._describe(describeFileID: describeFileID) }).joined(separator: ".")
   }
 
   public var debugDescription: String {
-    describe(describeFileID: \.hashValue.description)
+    _describe(describeFileID: \.hashValue.description)
   }
 }
 
 // Array of identifiers, e.g., `A.B.C`
+@_spi(_QualifiedLookup)
 public indirect enum QualifiedTypeNameNestedType: Sendable, Hashable, CustomDebugStringConvertible {
   case base(Identifier)
   case member(base: QualifiedTypeNameNestedType, name: Identifier)
@@ -121,16 +127,16 @@ public indirect enum QualifiedTypeNameNestedType: Sendable, Hashable, CustomDebu
   // Specifies an (internal) nested-level scope and a dot-separated sequence of identifiers.
   case nestedScope(scope: CodeBlockItemListSyntax, type: QualifiedTypeNameNestedType)
 
-  public func describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
+  @_spi(_QualifiedLookup) public func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
     switch self {
     case .topLevel(let globalType):
-      return globalType.describe(describeFileID: describeFileID)
+      return globalType._describe(describeFileID: describeFileID)
     case .nestedScope(let scope, let nestedType):
       return "\(scope.id.hashValue)>\(nestedType.debugDescription)"
     }
   }
 
   public var debugDescription: String {
-    describe(describeFileID: \.hashValue.description)
+    _describe(describeFileID: \.hashValue.description)
   }
 }
