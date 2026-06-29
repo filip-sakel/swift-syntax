@@ -48,7 +48,7 @@ extension PartiallyResolvedType {
   fileprivate static let _knownSuppressibleTypes: Set = [
     Identifier(canonicalName: "Copyable"),
     Identifier(canonicalName: "Escapable"),
-    Identifier(canonicalName: "Sendable"),
+    // Identifier(canonicalName: "Sendable"),
   ]
 }
 
@@ -78,6 +78,8 @@ extension PartiallyResolvedType {
 // @_spi(_QualifiedLoookup) public enum PartiallyResolvedBaseType {
 //   case metatype(of: TypeSyntax)
 // }
+
+// TODO: Handle `AnyObject`
 @_spi(_QualifiedLoookup) public enum PartiallyResolvedType {
   case anyType
   case typeIdentifier(Result<PartiallyResolvedTypeIdentifier.Component, InvalidTypeIdentifierFailure>)
@@ -331,14 +333,19 @@ extension TypeSyntaxProtocol {
     case .metatypeType, .namedOpaqueReturnType:
       return Result.success(PartiallyResolvedType.composition([]))
     case .suppressedType(let suppressedType):
-      // Check the suppressed type is known (but don't add to a resolved type)
-      guard
-        let identifierType = suppressedType.type.as(IdentifierTypeSyntax.self),
-        let typeName = Identifier(validating: identifierType.name),
-        PartiallyResolvedType._knownSuppressibleTypes.contains(typeName)
-      else {
-        return Result.failure(TypeResolutionFailure.unknownSuppressedType)
-      }
+      // Don't diagnose here since suprressed types can be aliased, e.g.:
+      //   typealias A = Escapable
+      //   struct B: ~A {}
+      // TODO: Figure out way to diagnose later
+      //
+      // // Check the suppressed type is known (but don't add to a resolved type)
+      // guard
+      //   let identifierType = suppressedType.type.as(IdentifierTypeSyntax.self),
+      //   let typeName = Identifier(validating: identifierType.name),
+      //   PartiallyResolvedType._knownSuppressibleTypes.contains(typeName)
+      // else {
+      //   return Result.failure(TypeResolutionFailure.unknownSuppressedType)
+      // }
       return Result.success(PartiallyResolvedType.anyType)
 
     // Invalid base case

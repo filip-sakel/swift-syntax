@@ -59,12 +59,35 @@ extension Result where Success == [TypeDeclSyntax] {
 /// Finds the main declaration and qualified name of the nominal types
 /// to which the the given type syntax refers.
 @_spi(_QualifiedLookup) public struct TypeQualifier {
+  var logPrefix = [String]()
+
   func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
     guard _verbose else { return }
-    print("\(file):\(line)", component)
+    print(logPrefix.map({ "[\($0)]" }).joined(), component, "[\(file):\(line)]")
+  }
+
+  mutating func withLogging<T>(
+    request: String,
+    describe: (T) -> String,
+    perform action: (_ mutableSelf: inout TypeQualifier) -> T
+  ) -> T {
+    logPrefix.append(request)
+    log("Resolving...")
+    let result = action(&self)
+    log("Resolved \(describe(result))")
+    logPrefix.removeLast()
+    return result
   }
 
   public indirect enum Failure: Error {
+    /// Cannot find the given type identifier in scope (using unqualified lookup).
+    ///
+    /// E.g.,
+    /// ```
+    /// func f(_: A) {} // ❌ error: cannot find type 'A' in scope
+    /// ```
+    case noTypeInScope
+
     /// Only protocol, class and composition types can form compositions.
     ///
     /// I.e. We don't allow structs/enums/actors, functions, tuples.
@@ -83,24 +106,70 @@ extension Result where Success == [TypeDeclSyntax] {
     /// E.g.
     ///   typealias A = Encodable & Int.Type // ❌ error: non-protocol, non-class type 'Int.Type' cannot be used within a protocol-constrained type
     ///   func f(_: A) {} // No diagnostic here
-    case invalidChild(Failure)
+    case invalidAliasedType(Failure)
     case invalidComposition([TypeSyntax: Failure])
     case other(any Error)
 
-    // In direct member lookup when members are invalid.
+    /// We defer generic parameters/associated types to the type checker.
+    case genericParameterOrAssociatedType
+
+    /// Qualified lookup members had errors
+    ///
+    /// E.g.
+    /// ```swift
+    /// protocol A { typealias T = Undefined }
+    /// class B<Generic> { typealias T = Generic }
+    ///
+    /// func f(_: (A & B).T)
+    /// ```
     case invalidMembers([TypeLikeSyntax: Failure])
 
-    /// The extension in which the type we're looking up is
-    /// defined returned an error.
+    // // In direct member lookup when members are invalid.
+    // case invalidMembers([TypeLikeSyntax: Failure])
+
+    // /// The extension in which the type we're looking up is
+    // /// defined returned an error.
+    // ///
+    // /// extension Codable {
+    // ///   struct MyStruct {
+    // ///     func f(_: MyStruct) {} // <- Look up here
+    // ///   }
+    // /// }
+    // /// In this case, `Codable`, i.e., `Encodable & Decodable` isn't nominal
+    // /// and can't be extended.
+    // case invalidBaseExtension(ExtensionDeclSyntax, failure: Failure)
+
+    /// The base type which we need to derive a qualified name is invalid.
     ///
-    /// extension Codable {
-    ///   struct MyStruct {
-    ///     func f(_: MyStruct) {} // <- Look up here
-    ///   }
-    /// }
-    /// In this case, `Codable`, i.e., `Encodable & Decodable` isn't nominal
-    /// and can't be extended.
-    case invalidBaseExtension(ExtensionDeclSyntax, failure: Failure)
+    /// Causes:
+    /// 1. Nested in invalid nominal type declaration, e.g.:
+    ///    ```swift
+    ///    struct { // ❌ error: expected identifier in struct declaration
+    ///      typealias A = Int
+    ///      func f(a: A) {
+    ///        let n: Int = a + "" // ✅ Compiler doesn't diagnose
+    ///      }
+    ///    }
+    ///    ```
+    ///    Note that if we use an invalid name like `struct 555`, the compiler
+    ///    will interpret the name as the backtick-escaped '`555`' to offer
+    ///    better diagnostics.
+    /// 2. Nested in extension whose type doesn't resolve to a nominal type
+    ///
+    ///    This failure happens when unqualified lookup wants to return the
+    ///    extended type or a member/generic parameter of the extended type.
+    ///    E.g.:
+    ///
+    ///    ```swift
+    ///    extension UndefinedType { // ❌ error: cannot find 'UndefinedType' in scope
+    ///      func f(a: AlsoUndefined) {} // ✅ Compiler doesn't diagnose
+    ///    }
+    ///    extension UndefinedType {
+    ///      typealias T = Int
+    ///      func f(a: T) -> Int {} // ❌ error: cannot find type 'T' in scope
+    ///    }
+    ///    ```
+    case invalidBaseType(Failure)
 
     /// Name lookup found invalid type redeclarations so references to that
     /// type name are ambiguous.
@@ -180,8 +249,17 @@ extension Result where Success == [TypeDeclSyntax] {
   //
   //   return Result.success(MemberLookupResult.memberResults(nominalTypes))
   // }
+  //
 
   public mutating func resolveSyntax(
+    typeSyntax: TypeSyntax
+  ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
+    withLogging(request: "Resolve syntax \(typeSyntax.trimmedDescription)", describe: \._debugDescription) {
+      $0._resolveSyntax(typeSyntax: typeSyntax)
+    }
+  }
+
+  public mutating func _resolveSyntax(
     typeSyntax: TypeSyntax,
     // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
     // requester: Requester,
@@ -397,7 +475,7 @@ extension Result where Success == [TypeDeclSyntax] {
       case .failure(Failure.noTypeMember):
         continue
       case .failure(let resolutionFailure):
-        failures[childTypeSyntax] = Failure.invalidChild(resolutionFailure)
+        failures[childTypeSyntax] = resolutionFailure
       }
     }
 
@@ -413,13 +491,24 @@ extension Result where Success == [TypeDeclSyntax] {
     return Result.success(MemberLookupResult.memberResults(types))
   }
 
+  fileprivate mutating func resolveExtendedTypeSyntax(
+    extensionDecl: ExtensionDeclSyntax
+  ) -> Result<ResolvedNominalTypeReference, Failure> {
+    withLogging(
+      request: "Extended type syntax \(extensionDecl.extendedType.trimmedDescription)",
+      describe: \._debugDescription
+    ) {
+      $0._resolveExtendedTypeSyntax(extensionDecl: extensionDecl)
+    }
+  }
+
   /// Resolve the given type syntax from an extension declaration
   /// to a single nominal type.
   ///
   /// Note that we only diagnose extending tuples/functions and compositions
   /// (e.g. `Codable = Encodable & Decodable`). However, we don't diagnose
   /// things like extending an existential (e.g. `extension any Collection`).
-  fileprivate mutating func resolveExtendedTypeSyntax(
+  fileprivate mutating func _resolveExtendedTypeSyntax(
     extensionDecl: ExtensionDeclSyntax
   ) -> Result<ResolvedNominalTypeReference, Failure> {
     // Throw if syntax resolution fails
@@ -448,6 +537,21 @@ extension Result where Success == [TypeDeclSyntax] {
   }
 
   fileprivate mutating func resolveTypeReference(
+    typeBaseComponent: ImplicitTypeReferenceComponent,
+    originatingSyntax: TypeSyntax
+  ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
+    withLogging(
+      request: "Type reference \(typeBaseComponent.debugDescription)",
+      describe: \._debugDescription
+    ) {
+      $0._resolveTypeReference(
+        typeBaseComponent: typeBaseComponent,
+        originatingSyntax: originatingSyntax
+      )
+    }
+  }
+
+  fileprivate mutating func _resolveTypeReference(
     // _ typeReference: PartiallyResolvedTypeIdentifier,
     typeBaseComponent: ImplicitTypeReferenceComponent,
     originatingSyntax: TypeSyntax
@@ -501,38 +605,22 @@ extension Result where Success == [TypeDeclSyntax] {
     // Find first matching type declaration
     // TODO: Merge lookup/skip logic if possible
     for lookupResult in baseLookupResults {
-      switch lookupResult {
-      case .lookInsideType(let typeDecl, let lookForSelectedMember):
-        // // An array with the base component if `lookForSelectedMember == true`, or empty.
-        // let memberChainPrefix: [ImplicitTypeReferenceComponent] =
-        //   lookForSelectedMember ? [ImplicitTypeReferenceComponent(from: typeReference.base)] : []
+      // The enclosing type
+      let enclosingTypeResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
+      // False if we can return the enclosing type itself; true if we need to
+      // perform qualified lookup and return a type member.
+      let lookForSelectedMember: Bool
 
-        let enclosingTypeResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveTypeDecl(
+      switch lookupResult {
+      case .lookInsideType(let typeDecl, let findSelectedMember):
+        enclosingTypeResult = resolveTypeDecl(
           baseTypeDecl: typeDecl,
           baseTypeLikeSyntax: typeBaseComponent.introducingSyntax,
           // memberChain: memberChainPrefix + typeReference.memberChain.map(ImplicitTypeReferenceComponent.init(from:)),
           // originatingSyntax: originatingSyntax
         )
-
-        // Look for member if requested
-        let typeLookupResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
-        if lookForSelectedMember {
-          typeLookupResult = resolveMember(
-            baseType: enclosingTypeResult,
-            firstTypeMember: typeBaseComponent
-          )
-        } else {
-          typeLookupResult = enclosingTypeResult
-        }
-
-        // We skip only if the lookup succeeded but found no matching types
-        // (i.e. we didn't find any types not because the underlying type declaration has an error
-        // but because this type has no such member)
-        if case Result.success(MemberLookupResult.memberResults([])) = typeLookupResult {
-          continue
-        }
-        return typeLookupResult
-      case .lookInsideExtension(let extensionDecl, let lookForSelectedMember):
+        lookForSelectedMember = findSelectedMember
+      case .lookInsideExtension(let extensionDecl, let findSelectedMember):
         // We might have to look inside an extension
         // For instance:
         //   extension Int {
@@ -548,42 +636,13 @@ extension Result where Success == [TypeDeclSyntax] {
         // One of the lookup results will be to look for `A` in `extension Int`.
         // The enclosing type is `Swift::Int.(MyFile.swift)::A`. Then, to find `A.B` we'll
         // just append `.A` to the member chain. Hence, we look for `.A.B` in `Swift::Int`
-        let enclosingType: ResolvedNominalTypeReference
         switch resolveExtendedTypeSyntax(extensionDecl: extensionDecl) {
         case .success(let type):
-          enclosingType = type
+          enclosingTypeResult = Result.success(MemberLookupResult.memberResults([type]))
         case .failure(let failure):
           return .failure(failure)
         }
-
-        // // An array with the base component if `lookForSelectedMember == true`, or empty.
-        // let memberChainPrefix: [ImplicitTypeReferenceComponent] =
-        //   lookForSelectedMember ? [ImplicitTypeReferenceComponent(from: typeBaseComponent)] : []
-        //
-        // let typeLookupResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveTypeDecl(
-        //   baseTypeDecl: TypeDeclSyntax(enclosingType.mainDecl),
-        //   baseTypeLikeSyntax: TypeLikeSyntax.typeSyntax(typeReference.lastComponent.introducingSyntax),
-        //   memberChain: memberChainPrefix + typeReference.memberChain.map(ImplicitTypeReferenceComponent.init(from:)),
-        //   // Resolve from the location of the extension declaration
-        //   originatingSyntax: extensionDecl.extendedType
-        // )
-
-        // Look for member if requested
-        let typeLookupResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
-        if lookForSelectedMember {
-          typeLookupResult = resolveMember(
-            baseType: Result.success(MemberLookupResult.memberResults([enclosingType])),
-            firstTypeMember: typeBaseComponent
-          )
-        } else {
-          typeLookupResult = Result.success(MemberLookupResult.memberResults([enclosingType]))
-        }
-
-        // Skip logic like above
-        if case Result.success(MemberLookupResult.memberResults([])) = typeLookupResult {
-          continue
-        }
-        return typeLookupResult
+        lookForSelectedMember = findSelectedMember
       case .lookForGenericParameters(let extensionDecl):
         // Resolve extended type
         let baseType: ResolvedNominalTypeReference
@@ -591,40 +650,77 @@ extension Result where Success == [TypeDeclSyntax] {
         case .success(let type):
           baseType = type
         case .failure(let failure):
-          return .failure(failure)
+          return Result.failure(Failure.invalidBaseType(failure))
         }
 
         // Check for generic parameters
         // TODO: Should we diagnose
         guard let genericParameter = baseType.mainDecl.findGenericParameters(withName: typeBaseComponent.name).first
         else { continue }
-        // // Forward to the type-declaration resolver
-        // let typeLookupResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveTypeDecl(
-        //   baseTypeDecl: TypeDeclSyntax(genericParameter),
-        //   baseTypeLikeSyntax: TypeLikeSyntax.typeSyntax(typeReference.lastComponent.introducingSyntax),
-        //   // memberChain: typeReference.memberChain.map(ImplicitTypeReferenceComponent.init(from:)),
-        //   // originatingSyntax: originatingSyntax
-        // )
-        //
-        // // Skip logic like above
-        // if case Result.success(MemberLookupResult.memberResults([])) = typeLookupResult {
-        //   continue
-        // }
-        // return typeLookupResult
-
-        // Defer to the type checker
-        return Result.success(MemberLookupResult.memberResults([]))
+        enclosingTypeResult = Result.failure(.genericParameterOrAssociatedType)
+        lookForSelectedMember = false
       case .lookInModule:
         // TODO: Handle
-        break
+        continue
       case .lookInImports:
         // TODO: Handle
-        break
+        continue
       }
+
+      // Whether we have to look for a member or not, we can't succeed without
+      // knowing the enclosing type
+      let enclosingType: MemberLookupResult<ResolvedNominalTypeReference>
+      switch enclosingTypeResult {
+      case .success(let result):
+        enclosingType = result
+      // Continue to next scope if unqualified lookup didn't find the type in this scope
+      case .failure(.noTypeInScope):
+        continue
+      case .failure(let failure):
+        return Result.failure(Failure.invalidBaseType(failure))
+      }
+
+      // If we don't have to look for a member, return
+      if !lookForSelectedMember { return Result.success(enclosingType) }
+
+      // Look for the member
+      let memberTypeResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveMember(
+        baseType: Result.success(enclosingType),
+        firstTypeMember: typeBaseComponent
+      )
+
+      // Get the type member
+      let memberType: MemberLookupResult<ResolvedNominalTypeReference>
+      switch memberTypeResult {
+      case .success(let result):
+        memberType = result
+      // Continue like above
+      case .failure(.noTypeMember):
+        continue
+      case .failure(let failure):
+        return Result.failure(Failure.invalidMembers([typeBaseComponent.introducingSyntax: failure]))
+      }
+
+      return Result.success(memberType)
     }
 
     // No type matched
-    return .success(.memberResults([]))
+    return Result.failure(Failure.noTypeInScope)
+  }
+
+  fileprivate mutating func resolveTypeDecl(
+    baseTypeDecl: TypeDeclSyntax,
+    baseTypeLikeSyntax: TypeLikeSyntax
+  ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
+    withLogging(
+      request: "Decl \(baseTypeDecl.kind) `\(baseTypeDecl.name.trimmedDescription)`",
+      describe: \._debugDescription
+    ) {
+      $0._resolveTypeDecl(
+        baseTypeDecl: baseTypeDecl,
+        baseTypeLikeSyntax: baseTypeLikeSyntax
+      )
+    }
   }
 
   /// Resolve the given type declaration produced by the given `baseTypeLikeSyntax`.
@@ -641,7 +737,7 @@ extension Result where Success == [TypeDeclSyntax] {
   /// `resolveTypeDecl` with `protocol A` as the base type declaration, `A` as
   /// the type syntax (from the `let` declaration), with an empty member chain
   /// and `A & B` as the originating syntax.
-  mutating func resolveTypeDecl(
+  fileprivate mutating func _resolveTypeDecl(
     baseTypeDecl: TypeDeclSyntax,
     baseTypeLikeSyntax: TypeLikeSyntax,
     // memberChain: [ImplicitTypeReferenceComponent],
@@ -657,16 +753,19 @@ extension Result where Success == [TypeDeclSyntax] {
     if let nominalTypeDecl = baseTypeDecl.as(NominalTypeDeclSyntax2.self) {
       nominalDecl = nominalTypeDecl
     } else if let typeAlias = baseTypeDecl.as(TypeAliasDeclSyntax.self) {
-      // log(
-      //   "[For syntax \(originatingSyntax) & \(baseTypeDecl.kind) '\(baseTypeDecl.name.trimmedDescription)'] Partially resolved to type alias with syntax \(typeAlias.initializer.value)."
-      // )
-      return resolveSyntax(typeSyntax: typeAlias.initializer.value)
+      log(
+        "Partially resolved to type alias = \(typeAlias.initializer.value)."
+      )
+
+      let aliasedResult = resolveSyntax(typeSyntax: typeAlias.initializer.value)
+      // Map error so that callers don't think this type decl has an issue (the type alias is diagnosed separately)
+      return aliasedResult.mapError(Failure.invalidAliasedType(_:))
     } else { /* else if it's an associated type or generic parameter */
       // log(
       //   "[For syntax \(originatingSyntax) & \(baseTypeDecl.kind) '\(baseTypeDecl.name.trimmedDescription)'] Declaration type doesn't have members."
       // )
       // No members for generic parameters and associated types
-      return .success(MemberLookupResult.memberResults([]))
+      return Result.failure(Failure.genericParameterOrAssociatedType)
     }
 
     // Get the type chain
@@ -719,12 +818,24 @@ extension Result where Success == [TypeDeclSyntax] {
           MemberLookupResult.memberResults([resolvedBaseNominal])
         )
       case .failure(let failure):
-        return Result.failure(Failure.invalidBaseExtension(partiallyResolvedName.base, failure: failure))
+        return Result.failure(Failure.invalidBaseType(failure))
       }
     }
   }
 
   fileprivate mutating func resolveMember(
+    baseType: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>,
+    firstTypeMember: ImplicitTypeReferenceComponent
+  ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
+    withLogging(
+      request: "Member \(firstTypeMember.debugDescription)",
+      describe: \._debugDescription
+    ) {
+      $0._resolveMember(baseType: baseType, firstTypeMember: firstTypeMember)
+    }
+  }
+
+  fileprivate mutating func _resolveMember(
     baseType: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>,
     firstTypeMember: ImplicitTypeReferenceComponent
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
