@@ -195,51 +195,67 @@ extension Result where Success == [TypeDeclSyntax] {
     }
     log("Resolving syntax: \(typeSyntax.trimmedDescription)")
 
-    // Resolve type references (or return tuple/function)
-    let typeReferenceResults: [Result<PartiallyResolvedTypeIdentifier, LocalizedTypeResolutionFailure>]
-    switch typeSyntax.partiallyResolve() {
-    case .function(let argumentCount):
+    // // Resolve type references (or return tuple/function)
+    // let typeReferenceResults: [Result<PartiallyResolvedTypeIdentifier, LocalizedTypeResolutionFailure>]
+
+    let partialType: Result<PartiallyResolvedType, TypeResolutionFailure> = typeSyntax.partiallyResolve()
+    switch partialType {
+    case .success(.anyType):
+      // TODO: Handle so we don't fail `Encodable & Any` like we do `Encodable & Int.Type`
+      return Result.success(MemberLookupResult.anyType)
+    case .success(.function(let argumentCount)):
       log("Resolved \(typeSyntax.trimmedDescription) to .function")
       return Result.success(.function(argumentCount: argumentCount))
-    case .tuple(let labels):
+    case .success(.tuple(let labels)):
       log("Resolved \(typeSyntax.trimmedDescription) to .tuple")
       return Result.success(.tuple(labels: labels))
-    case .metatype(of: _):
-      return Result.success(MemberLookupResult.memberResults([]))
-    case .id(let component):
-      return resolveTypeReferences(PartiallyResolvedTypeIdentifier(base: component), originatingSyntax: typeSyntax)
-    case .member(let baseTypeSyntax, let memberComponent):
+    // case .metatype(of: _):
+    //   // // Empty type case
+    //   // guard let firstTypeReferenceResult = typeReferenceResults.first else {
+    //   //   log("Resolved \(typeSyntax.trimmedDescription) to empty type")
+    //   //   return Result.success(.memberResults([]))
+    //   // }
+    //   return Result.success(MemberLookupResult.memberResults([]))
+    case .success(.typeIdentifier(.success(let component))):
+      return resolveTypeReference(
+        typeBaseComponent: ImplicitTypeReferenceComponent(from: component),
+        originatingSyntax: typeSyntax
+      )
+    case .success(.member(let baseTypeSyntax, .success(let memberComponent))):
       let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax)
       return resolveMember(
         baseType: baseTypeResult,
         firstTypeMember: ImplicitTypeReferenceComponent(from: memberComponent)
       )
-    case .composition(let constituentTypes):
+    case .success(.composition(let constituentTypes)):
       // TODO: Record assumption that `consituentTypes` is unique.
       var syntaxToTypes = [TypeSyntax: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>]()
       for constituentTypeSyntax in constituentTypes {
         syntaxToTypes[constituentTypeSyntax] = resolveSyntax(typeSyntax: constituentTypeSyntax)
       }
+      return reduceComposition(syntaxToTypes)
+    case .failure(let failure):
+      return Result.failure(Failure.other(failure))
+    case .success(.member(base: _, .failure(let nameFailure))),
+      .success(.typeIdentifier(.failure(let nameFailure))):
+      return Result.failure(Failure.other(nameFailure))
     // case .memberResults(let typeReferences):
     //   typeReferenceResults = typeReferences
     }
 
-    // Empty type case
-    guard let firstTypeReferenceResult = typeReferenceResults.first else {
-      log("Resolved \(typeSyntax.trimmedDescription) to empty type")
-      return Result.success(.memberResults([]))
-    }
-
-    // Single-type case
-    guard typeReferenceResults.count > 1 else {
-      log("Partially resolved \(typeSyntax.trimmedDescription) to type reference \(firstTypeReferenceResult)")
-      switch firstTypeReferenceResult {
-      case .success(let typeReference):
-        return resolveTypeReferences(typeReference, originatingSyntax: typeSyntax)
-      case .failure(let resolutionFailure):
-        return .failure(Failure.other(resolutionFailure))
-      }
-    }
+    // // Single-type case
+    // guard typeReferenceResults.count > 1 else {
+    //   log("Partially resolved \(typeSyntax.trimmedDescription) to type reference \(firstTypeReferenceResult)")
+    //   switch firstTypeReferenceResult {
+    //   case .success(let typeReference):
+    //     return resolveTypeReference(
+    //       typeBaseComponent: ImplicitTypeReferenceComponent(from: typeReference),
+    //       originatingSyntax: typeSyntax
+    //     )
+    //   case .failure(let resolutionFailure):
+    //     return .failure(Failure.other(resolutionFailure))
+    //   }
+    // }
 
     // // Composition case
     //
@@ -325,20 +341,22 @@ extension Result where Success == [TypeDeclSyntax] {
     // Collect valid types and failures
     var types = [ResolvedNominalTypeReference]()
     var failures = [TypeSyntax: Failure]()
-    for typeReferenceResult in typeReferenceResults {
-      // Extract the type reference or log error
-      let typeReference: PartiallyResolvedTypeIdentifier
-      switch typeReferenceResult {
-      case .success(let success):
-        typeReference = success
-      case .failure(let localizedFailure):
-        // Log failure but continue in case others succeed
-        failures[typeSyntax] = Failure.other(localizedFailure)
-        continue
-      }
+    // for typeReferenceResult in typeReferenceResults {
+    for (childTypeSyntax, childTypeResult) in syntaxToTypes {
+      // // Extract the type reference or log error
+      // let typeReference: PartiallyResolvedTypeIdentifier
+      // switch typeReferenceResult {
+      // case .success(let success):
+      //   typeReference = success
+      // case .failure(let localizedFailure):
+      //   // Log failure but continue in case others succeed
+      //   failures[typeSyntax] = Failure.other(localizedFailure)
+      //   continue
+      // }
 
-      let childTypeSyntax = typeReference.lastComponent.introducingSyntax
-      switch resolveTypeReferences(typeReference, originatingSyntax: typeSyntax) {
+      // let childTypeSyntax = typeReference.lastComponent.introducingSyntax
+      // switch resolveTypeReference(typeBaseComponent: typeReference, originatingSyntax: typeSyntax) {
+      switch childTypeResult {
       // Only nominals are valid in compositions
       // TODO: Diagnose composing metatype but distinguish from `& Any`
       case .success(.memberResults(let nominals)):
@@ -366,6 +384,11 @@ extension Result where Success == [TypeDeclSyntax] {
         failures[childTypeSyntax] = Failure.cannotComposeNonClassOrProtocol(
           resolved: .tuple(labels: labels)
         )
+      // `Any` doesn't contribute any types but IS valid
+      // E.g. `Codable & Any` ✅
+      // But: `Codable & Int.Type` ❌
+      case .success(.anyType):
+        continue
       // Ignore if this particular type didn't contain the type member.
       // E.g.
       //   protocol A { typealias T = Int }
@@ -380,13 +403,13 @@ extension Result where Success == [TypeDeclSyntax] {
 
     // Stop even if we only have one failure
     guard failures.isEmpty else {
-      log("Resolved \(typeSyntax.trimmedDescription) to failures \(failures)")
+      // log("Resolved \(typeSyntax.trimmedDescription) to failures \(failures)")
       return Result.failure(Failure.invalidComposition(failures))
     }
 
     // TODO: Ensure we got at least one type member
 
-    log("Resolved \(typeSyntax.trimmedDescription) to types \(types))")
+    // log("Resolved \(typeSyntax.trimmedDescription) to types \(types))")
     return Result.success(MemberLookupResult.memberResults(types))
   }
 
@@ -418,13 +441,13 @@ extension Result where Success == [TypeDeclSyntax] {
         return .failure(.cannotExtendNonNominal(nonnominal: lookupResult))
       }
       return .success(firstNominalType)
-    // Functions/tuples aren't nominal
-    case .function, .tuple:
+    // Functions/tuples/`Any` aren't nominal
+    case .function, .tuple, .anyType:
       return .failure(.cannotExtendNonNominal(nonnominal: lookupResult))
     }
   }
 
-  fileprivate mutating func resolveTypeReferences(
+  fileprivate mutating func resolveTypeReference(
     // _ typeReference: PartiallyResolvedTypeIdentifier,
     typeBaseComponent: ImplicitTypeReferenceComponent,
     originatingSyntax: TypeSyntax
@@ -434,7 +457,7 @@ extension Result where Success == [TypeDeclSyntax] {
     // log("[For syntax \(originatingSyntax.trimmedDescription)] Resolving ref '\(typeReference)'")
 
     // Get the base type
-    let (optionalModule, typeName) = (typeBaseComponent.module, typeBaseComponent.base.name)
+    // let (optionalModule, typeName) = (typeBaseComponent.module, typeBaseComponent.base.name)
 
     // Perfom unqualified lookup up to find the base type's declaration
     //
@@ -445,7 +468,7 @@ extension Result where Success == [TypeDeclSyntax] {
     //     }
     //   }
     let baseLookupResults: [UnqualifiedTypeLookupResult]
-    if let module = optionalModule {
+    if let module = typeBaseComponent.module {
       // Top-level unqualified lookup in external module
       //
       // Top-level means that we look for declarations at the file scope of the
@@ -466,11 +489,14 @@ extension Result where Success == [TypeDeclSyntax] {
       // Note: We use ``originatingSyntax`` because `typeReference.typeSyntax`
       // is mostly used for producing diagnostics. However, the latter should
       // be a child of ``originatingSyntax``.
-      baseLookupResults = originatingSyntax.findUnqualifiedType(typeName, configuredRegions: configuredRegions)
+      baseLookupResults = originatingSyntax.findUnqualifiedType(
+        typeBaseComponent.name,
+        configuredRegions: configuredRegions
+      )
     }
-    log(
-      "[For syntax \(originatingSyntax.trimmedDescription)] Partially resolved base '\(typeName.name)' to  `\(baseLookupResults)`"
-    )
+    // log(
+    //   "[For syntax \(originatingSyntax.trimmedDescription)] Partially resolved base '\(typeName.name)' to  `\(baseLookupResults)`"
+    // )
 
     // Find first matching type declaration
     // TODO: Merge lookup/skip logic if possible
@@ -481,7 +507,7 @@ extension Result where Success == [TypeDeclSyntax] {
         // let memberChainPrefix: [ImplicitTypeReferenceComponent] =
         //   lookForSelectedMember ? [ImplicitTypeReferenceComponent(from: typeReference.base)] : []
 
-        let outerTypeResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveTypeDecl(
+        let enclosingTypeResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveTypeDecl(
           baseTypeDecl: typeDecl,
           baseTypeLikeSyntax: typeBaseComponent.introducingSyntax,
           // memberChain: memberChainPrefix + typeReference.memberChain.map(ImplicitTypeReferenceComponent.init(from:)),
@@ -492,11 +518,11 @@ extension Result where Success == [TypeDeclSyntax] {
         let typeLookupResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
         if lookForSelectedMember {
           typeLookupResult = resolveMember(
-            baseType: outerTypeResult,
+            baseType: enclosingTypeResult,
             firstTypeMember: typeBaseComponent
           )
         } else {
-          typeLookupResult = outerTypeResult
+          typeLookupResult = enclosingTypeResult
         }
 
         // We skip only if the lookup succeeded but found no matching types
@@ -530,17 +556,29 @@ extension Result where Success == [TypeDeclSyntax] {
           return .failure(failure)
         }
 
-        // An array with the base component if `lookForSelectedMember == true`, or empty.
-        let memberChainPrefix: [ImplicitTypeReferenceComponent] =
-          lookForSelectedMember ? [ImplicitTypeReferenceComponent(from: typeBaseComponent)] : []
+        // // An array with the base component if `lookForSelectedMember == true`, or empty.
+        // let memberChainPrefix: [ImplicitTypeReferenceComponent] =
+        //   lookForSelectedMember ? [ImplicitTypeReferenceComponent(from: typeBaseComponent)] : []
+        //
+        // let typeLookupResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveTypeDecl(
+        //   baseTypeDecl: TypeDeclSyntax(enclosingType.mainDecl),
+        //   baseTypeLikeSyntax: TypeLikeSyntax.typeSyntax(typeReference.lastComponent.introducingSyntax),
+        //   memberChain: memberChainPrefix + typeReference.memberChain.map(ImplicitTypeReferenceComponent.init(from:)),
+        //   // Resolve from the location of the extension declaration
+        //   originatingSyntax: extensionDecl.extendedType
+        // )
 
-        let typeLookupResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveTypeDecl(
-          baseTypeDecl: TypeDeclSyntax(enclosingType.mainDecl),
-          baseTypeLikeSyntax: TypeLikeSyntax.typeSyntax(typeReference.lastComponent.introducingSyntax),
-          memberChain: memberChainPrefix + typeReference.memberChain.map(ImplicitTypeReferenceComponent.init(from:)),
-          // Resolve from the location of the extension declaration
-          originatingSyntax: extensionDecl.extendedType
-        )
+        // Look for member if requested
+        let typeLookupResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
+        if lookForSelectedMember {
+          typeLookupResult = resolveMember(
+            baseType: Result.success(MemberLookupResult.memberResults([enclosingType])),
+            firstTypeMember: typeBaseComponent
+          )
+        } else {
+          typeLookupResult = Result.success(MemberLookupResult.memberResults([enclosingType]))
+        }
+
         // Skip logic like above
         if case Result.success(MemberLookupResult.memberResults([])) = typeLookupResult {
           continue
@@ -558,19 +596,24 @@ extension Result where Success == [TypeDeclSyntax] {
 
         // Check for generic parameters
         // TODO: Should we diagnose
-        guard let genericParameter = baseType.mainDecl.findGenericParameters(withName: typeName).first else { continue }
-        // Forward to the type-declaration resolver
-        let typeLookupResult = resolveTypeDecl(
-          baseTypeDecl: TypeDeclSyntax(genericParameter),
-          baseTypeLikeSyntax: TypeLikeSyntax.typeSyntax(typeReference.lastComponent.introducingSyntax),
-          memberChain: typeReference.memberChain.map(ImplicitTypeReferenceComponent.init(from:)),
-          originatingSyntax: originatingSyntax
-        )
-        // Skip logic like above
-        if case Result.success(MemberLookupResult.memberResults([])) = typeLookupResult {
-          continue
-        }
-        return typeLookupResult
+        guard let genericParameter = baseType.mainDecl.findGenericParameters(withName: typeBaseComponent.name).first
+        else { continue }
+        // // Forward to the type-declaration resolver
+        // let typeLookupResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveTypeDecl(
+        //   baseTypeDecl: TypeDeclSyntax(genericParameter),
+        //   baseTypeLikeSyntax: TypeLikeSyntax.typeSyntax(typeReference.lastComponent.introducingSyntax),
+        //   // memberChain: typeReference.memberChain.map(ImplicitTypeReferenceComponent.init(from:)),
+        //   // originatingSyntax: originatingSyntax
+        // )
+        //
+        // // Skip logic like above
+        // if case Result.success(MemberLookupResult.memberResults([])) = typeLookupResult {
+        //   continue
+        // }
+        // return typeLookupResult
+
+        // Defer to the type checker
+        return Result.success(MemberLookupResult.memberResults([]))
       case .lookInModule:
         // TODO: Handle
         break
@@ -718,8 +761,11 @@ extension Result where Success == [TypeDeclSyntax] {
     // For instance, the following are invalid:
     //   let x: (a: Int, b: Int).a // ❌ 'a' is not a member type of '(a: Swift.Int, b: Swift.Int)'
     //   let y: Int.Type.MyType    // ❌ 'MyType' is not a member type of 'Swift.Int.Type'
+    // TODO: Think about a helper for mapping non-member types
     case MemberLookupResult.memberResults([]):
       return Result.failure(Failure.noTypeMember(member: firstTypeMember, in: MemberLookupResult.memberResults([])))
+    case MemberLookupResult.anyType:
+      return Result.failure(Failure.noTypeMember(member: firstTypeMember, in: MemberLookupResult.anyType))
     case MemberLookupResult.function(let argumentCount):
       return Result.failure(
         Failure.noTypeMember(member: firstTypeMember, in: MemberLookupResult.function(argumentCount: argumentCount))
@@ -727,8 +773,6 @@ extension Result where Success == [TypeDeclSyntax] {
     case MemberLookupResult.tuple(let labels):
       return Result.failure(Failure.noTypeMember(member: firstTypeMember, in: MemberLookupResult.tuple(labels: labels)))
     }
-
-    // === First Member (Qualified) ===
 
     // Perform qualified type lookup
     //
@@ -772,7 +816,7 @@ extension Result where Success == [TypeDeclSyntax] {
       // We ignore failures since they're from non-matching extensions and diagnosed separately
       let (extensions, _) = bindExtensions(
         matchingForName: name,
-        // resolvedFrom: originatingSyntax
+        resolvedFrom: firstTypeMember.introducingSyntax
       )
       let nominalBaseType = NominalType(
         qualifiedName: name,
@@ -787,13 +831,7 @@ extension Result where Success == [TypeDeclSyntax] {
 
       // Perform direct type lookup
       // TODO: Figure out imported modules
-      let originatingSyntax: Syntax
-      switch firstTypeMember.introducingSyntax {
-      case .typeDecl(let typeDecl):
-        originatingSyntax = Syntax(typeDecl)
-      case .typeSyntax(let typeSyntax):
-        originatingSyntax = Syntax(typeSyntax)
-      }
+      let originatingSyntax = Syntax(firstTypeMember.introducingSyntax)
       guard let file = originatingSyntax.root.as(SourceFileSyntax.self) else {
         fatalError(
           "[SwiftLexicalLookup] Internal error: Unexpectedly had to resolve type syntax whose root isn't a source file."

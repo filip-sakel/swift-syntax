@@ -16,6 +16,7 @@ import SwiftSyntax
   case function(argumentCount: Int)
   case tuple(labels: [Identifier?])
   case memberResults([Result])
+  case anyType
 
   public func mapMembers<NewResult>(_ transform: (Result) -> NewResult) -> MemberLookupResult<NewResult> {
     switch self {
@@ -23,6 +24,8 @@ import SwiftSyntax
       return .function(argumentCount: argumentCount)
     case .tuple(let labels):
       return .tuple(labels: labels)
+    case .anyType:
+      return .anyType
     case .memberResults(let results):
       return .memberResults(results.map(transform))
     }
@@ -40,6 +43,8 @@ extension MemberLookupResult {
       return ".function(argumentCount: \(argumentCount))"
     case .tuple(let labels):
       return ".tuple(\(labels.map({ $0?.name ?? "_"}))"
+    case .anyType:
+      return ".anyType"
     case .memberResults(let members):
       return ".memberResults([\(describeMembers(members))])"
     }
