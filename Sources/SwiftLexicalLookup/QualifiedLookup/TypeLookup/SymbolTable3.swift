@@ -232,18 +232,6 @@ extension NominalType {
 ///       using `typealias B = A`, which requires that `A` have no member types,
 ///       but `extension A.B` introduces a member type `struct A`
 ///
-///
-/// TODO: Analyze why does this give us an error? <-
-/// ```swift
-/// struct A {}
-/// extension A.Inner {} // - error: extension of type 'A.Inner' (aka 'A') must be declared as an extension of 'A'
-/// extension A.Outer { typealias Inner = Self }
-/// extension A { typealias Outer = A }
-/// ```
-/// // Assuming this turns out to be valid, what happens if we add an `extension A.Inner.Outer { typealias `Self` = Int }`
-///
-///
-///
 /// TODO: Implement above only for extensions when looking up type members in
 ///       direct-lookup essentially where we call `bindExtensions` (don't think
 ///       about caching regular syntax yet; try to get MVP).
@@ -257,38 +245,24 @@ extension NominalType {
 ///       members that require updating other dependent extensions, which in turn
 ///       updates the dependent extension we added? (without causing a cycle)
 @_spi(_QualifiedLookup) public struct ExtensionBindingState {
-  public enum ResolutionState {
-    /// We're in the process of resolving this extension. Helps catch cycles.
-    case resolvingForType(typeName: QualifiedTypeName)
-    /// Resolving this extended type requires resolving the given member first.
-    case requiresTypeMember(typeName: QualifiedTypeName, member: ImplicitTypeReferenceComponent)
-    case resolved(
-      stochasticAssumptions: [Identifier: Result<MemberLookupResult<QualifiedTypeName>, TypeQualifier.Failure>],
-      // TODO: How do we handle redeclarations in the same decl group
-      assumedResolution: Result<QualifiedTypeName, TypeQualifier.Failure>
-    )
+  // public enum ResolutionState {
+  //   /// We're in the process of resolving this extension. Helps catch cycles.
+  //   case resolving
+  //   case resolved(
+  //     dependencies: [Identifier: Result<MemberLookupResult<QualifiedTypeName>, TypeQualifier.Failure>],
+  //     // TODO: How do we handle redeclarations in the same decl group
+  //     assumedResolution: Result<QualifiedTypeName, TypeQualifier.Failure>
+  //   )
+  // }
+  struct Dependence {
+    let resolvedType: QualifiedTypeName
+    let typeMember: Identifier
+    var resolvedDecls: [TypeDeclSyntax]
   }
-
-  /// Sometimes we assume a type member resolves to a particular type declaration
-  /// without resolving the full type in order to make forward progress.
-  /// However, at the end, we need to validate that our stochastic lookup
-  /// results actually resolve to the right types.
-  ///
-  /// This is likely the cause of this bug (https://github.com/swiftlang/swift/issues/90206):
-  /// ```swift
-  /// struct A {}
-  /// extension A.B { struct A {} }
-  ///   // | |- ⚠️ warning: extending a protocol composition is not supported; extending 'A' instead
-  ///   // | `- 🗒️ note: did you mean to extend the most specific type 'A.A' instead?
-  /// extension A { typealias B = A }
-  /// let b: A.B = A.A() // ✅
-  /// ```
-  /// The last line implies that the compiler resolved `A.B` to `A.A` but `A`
-  /// is declared in an extension of `A.B`. For a more thorough explanation,
-  /// you can check out the linked issue.
-  // TODO: Try to find (& prove) more efficient approach
-  var typeMemberAssumptions: [PartiallyResolvedTypeIdentifier.Component: ResolvedNominalTypeReference]
-  var dependentExtensionsStack: [PartiallyResolvedTypeIdentifier.Component: [ExtensionDeclSyntax]]
+  var dependence: Dependence?
+  var resolution: Result<QualifiedTypeName, TypeQualifier.Failure>
+  // var typeMemberAssumptions: [PartiallyResolvedTypeIdentifier.Component: ResolvedNominalTypeReference]
+  // var dependentExtensionsStack: [PartiallyResolvedTypeIdentifier.Component: [ExtensionDeclSyntax]]
 }
 
 @_spi(_QualifiedLookup) public enum TypeSyntaxResolutionState {
@@ -383,5 +357,4 @@ extension NominalType {
     }
     return result
   }()
-
 }

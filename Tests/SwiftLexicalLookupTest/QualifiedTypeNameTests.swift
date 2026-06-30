@@ -904,5 +904,44 @@ final class TestQualifiedTypeName: XCTestCase {
   // //   Introduces `struct C` violating dependence
   // extension A.B.D { struct C {} }
   // ```
+  //
+  // Example E (with rationale)
+  //
+  // ```swift
+  // struct A {}
+  // extension A.Inner {} // - error: extension of type 'A.Inner' (aka 'A') must be declared as an extension of 'A'
+  // extension A.Outer { typealias Inner = Self }
+  // extension A { typealias Outer = A }
+  // ```
+  // I think our method for find extended (MyFile.swift)::A would be:
+  // 1. Visit `extension A.Inner`
+  //    a. Resolve `A` to (MyFile.swift)::A
+  //    b. Resolve extension to 'no member `Inner`' error
+  //       1. Depends on type (MyFile.swift)::A > Inner
+  // 2. Visit `extension A.Outer`
+  //    a. Resolve `A` to (MyFile.swift)::A
+  //    b. Resolve extension to 'no member `Outer`' error
+  //       1. Depends on type (MyFile.swift)::A > Outer`
+  // 3. Visit `extension A`
+  //    a. Resolve `A` to (MyFile.swift)::A
+  //    b. Bind to (MyFile.swift)::A
+  //       1. No dependencies
+  //    c. Update `extension A.Outer` [no dependency constraints]
+  //       1. Resolve `A` to (MyFile.swift)::A
+  //       2. Resolve `A.Outer` to (MyFile.swift)::A
+  //          a. Depending on (MyFile.swift)::A having no member `A`
+  //       3. Bind `extension A.Outer` to (MyFile.swift)::A
+  //          a. Depending on (MyFile.swift)::A having no member `A`
+  //          b. Introducing type member `Inner`
+  //    d. Update `extension A.Inner` [implicit dependency: no member `A`]
+  //       1. Resolve `A` to (MyFile.swift)::A
+  //       2. Resolve `A.Inner` to (MyFile.swift)::A
+  //          a. Depending on (MyFile.swift)::A having no member `Self`
+  //       3. Bind `extension A.Inner` to (MyFile.swift)::A
+  //          a. Depending on (MyFile.swift)::A having no members `Self`
+  //          b. Introducing no members
+  // // Assuming this turns out to be valid, what happens if we add an `extension A.Inner.Outer { typealias `Self` = Int }`
+  //
+  //
 
 }
