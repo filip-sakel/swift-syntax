@@ -292,6 +292,8 @@ where
   // }
 }
 
+// TODO: Add .lookForSupertype, .lookForDynamicMember & implemenet internal/external module lookup
+
 /// Finds the main declaration and qualified name of the nominal types
 /// to which the the given type syntax refers.
 @_spi(_QualifiedLookup) public struct TypeQualifier {
@@ -320,8 +322,8 @@ where
 
   public typealias Failure = TypeQualifierFailure<ResolvedNominalTypeReference, NominalType>
 
-  public private(set) var failures = [TypeSyntax: [Failure]]()
-  var boundExtensions = [ExtensionDeclSyntax: ResolvedNominalTypeReference]()
+  // public private(set) var failures = [TypeSyntax: [Failure]]()
+  // var boundExtensions = [ExtensionDeclSyntax: ResolvedNominalTypeReference]()
 
   let symbolTable: SymbolTable3
   let configuredRegions: ConfiguredRegions?
@@ -408,6 +410,7 @@ where
     // requester: Requester,
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     // We assert the syntax *entered* into the API is in the symbol table.
+    // TODO: Consider how this plays out with `#if`
     guard
       let fileRoot = typeSyntax.root.as(SourceFileSyntax.self),
       symbolTable.moduleMap[fileRoot] != nil

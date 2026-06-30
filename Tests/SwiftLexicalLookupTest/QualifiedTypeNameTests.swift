@@ -629,21 +629,9 @@ final class TestQualifiedTypeName: XCTestCase {
         ]))
         ((A, B) -> Int) & A
         """ as QualifiedTypeNameSource
-      ],
-      verbose: true
+      ]
     )
-    // assertQualifiedTypeName(
-    //   [
-    //     "MyFile.swift": """
-    //     // Cannot compose non nominal types
-    //     struct A {}; struct B {}
-    //     typealias A = \(failure: .invalidComposition(["(A, B) -> Int" : .invalidComposition]))((A, B) -> Int) & Int
-    //     """ as QualifiedTypeNameSource
-    //   ],
-    //   verbose: true
-    // )
 
-    // typealias B = \(failure: .cannotComposeTupleOrFunction)Int & ((UnknownTypeA) -> UnknownTypeB)
     // // Non-nominal types don't have type members
     // typealias C = \(failure: .noTupleOrFunctionTypeMembers)(Int, Bool).MyType
     // typealias D = \(failure: .noTupleOrFunctionTypeMembers)((Int) -> Bool).MyType
@@ -846,6 +834,7 @@ final class TestQualifiedTypeName: XCTestCase {
   // }
 
   // TODO: Aliased suppressed type test (base type / suppressed base type can be aliased & composed)
+  // NOTE: Looks like this is SEMA (name lookup also diagnoses later)
   //   typealias A = Escapable
   //   struct B: ~A {}
   // Another legal program:
@@ -873,4 +862,47 @@ final class TestQualifiedTypeName: XCTestCase {
   //   protocol MyProto: ~Copyable {}
   //   extension MyProto & ~Copyable {} // ❌ error: non-nominal type 'MyProto & ~Copyable' cannot be extended
   //   extension MyProto & Any {} // ⚠️ extending a protocol composition is not supported; extending 'MyProto' instead
+
+  // TODO: Dependent extension tests
+  //
+  // Example A
+  // ```swift
+  // struct A {}
+  // extension A.Inner {} // error: ambiguous type name 'Inner' in 'A'
+  // extension A { typealias Inner = A }
+  // extension A.Inner { // error: ambiguous type name 'Inner' in 'A'
+  //     typealias Inner = Int //  error: invalid redeclaration of 'Inner'
+  // }
+  // ```
+  // Example B
+  //  <bug report>
+  //
+  // Example C (from docstrings)
+  // ```
+  // struct A {}
+  // extension A.Inner {}
+  // extension A { typealias A = Inner }
+  // ```
+  //
+  // Example D (with comments explaining rationale)
+  //
+  // ```swift
+  // struct C {}
+  // struct A { typealias B = C }
+  //
+  // // Finds A -> (MyFile.swift)::A with member `B`->`typealias B = C`
+  // // Binds to (MyFile.swift)::C
+  // //   Depending on `A` having no type member `C`
+  // //   Introducing type member `typealias D = C`
+  // extension A.B { typealias D = C }
+  //
+  // // Finds A -> (MyFile.swift)::A with member `B`->`typealias B = C`
+  // // Resolves member `A.B` to (MyFile.swift)::C with type member `D`
+  // // Resolves `A.B.D` to (MyFile.swift)::C
+  // //   Depending on `C` having no type member `C
+  // // Try to bind `extension A.B.D` to (MyFile.swift)::C
+  // //   Introduces `struct C` violating dependence
+  // extension A.B.D { struct C {} }
+  // ```
+
 }
