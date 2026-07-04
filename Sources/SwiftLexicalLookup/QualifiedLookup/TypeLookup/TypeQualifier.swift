@@ -330,6 +330,24 @@ where
   let _verbose: Bool
   let _checkNominalInCompositionIsClassOrProtocol = true
 
+  // TODO: Should we allow just one source-file resolution at a time?
+  var extensionBindingRequest:
+    (
+      /// The file for which we're binding extensions
+      forFile: SourceFileSyntax,
+      /// The type syntax that initiated this request
+      requestSyntax: TypeLikeSyntax,
+      /// The type with all the extensions bound
+      currentNominal: NominalType,
+      /// All extensions we've bound so far
+      boundExtensions: []
+      remainingExtensions: [ExtensionDeclSyntax],
+
+    )? = nil
+  // [SourceFileSyntax: (
+  //   requestSyntax: TypeLikeSyntax, currentNominal: NominalType, remainingExtensions: [ExtensionDeclSyntax]
+  // )] = [:]
+
   public init(symbolTable: SymbolTable3, configuredRegions: ConfiguredRegions?, _verbose: Bool) {
     self.symbolTable = symbolTable
     self.configuredRegions = configuredRegions
@@ -1085,10 +1103,6 @@ where
         }
       }
 
-      // log(
-      //   "[For syntax \(originatingSyntax) & \(baseTypeDecl.kind) '\(baseTypeDecl.name)' & qualified '\(name.debugDescription)'] Requesting extension binding."
-      // )
-
       // Bind extensions and construct a nominal type.
       // We ignore failures since they're from non-matching extensions and diagnosed separately
       let (extensions, _) = bindExtensions(
@@ -1102,9 +1116,6 @@ where
         extensions: extensions
       )
       nominalBaseTypes.append(nominalBaseType)
-      // log(
-      //   "[For syntax \(originatingSyntax) & \(baseTypeDecl.kind) '\(baseTypeDecl.name)' & qualified '\(name.debugDescription)'] Bound extensions \(extensions)."
-      // )
 
       // Perform direct type lookup
       // TODO: Figure out imported modules
@@ -1123,9 +1134,6 @@ where
         configuredRegions: configuredRegions,
         _verbose: _verbose
       )
-      // log(
-      //   "[For syntax \(originatingSyntax) & \(baseTypeDecl.kind) '\(baseTypeDecl.name)' & qualified '\(name.debugDescription) & extensions: \(extensions)'] Direct lookup yielded: \(typeDeclsResult._debugSyntaxDescription)."
-      // )
 
       // Get the referenced type decl (and address failures)
       let memberTypeDecl: TypeDeclSyntax
@@ -1214,11 +1222,89 @@ where
     return Result.success(firstResult)
   }
 
+  /// There are three paths:
+  /// 1. The symbol table hasn't resolved the extensions accessibles from this source file
+  ///    We need to bind all said extensions
+  /// 2. We're currently binding the given type
+  /// 3. The symbol table has a cached/resolved version
+  fileprivate mutating func _resolveNominalType(
+    name: QualifiedTypeName,
+    originatingSyntax: TypeLikeSyntax
+  ) -> Result<NominalType, Failure> {
+    // The type must already be in the symbol table (even with no extensions bound)
+    guard let currentNominal = symbolTable.typeState[name] else {
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Tried resolving type whose name isn't in the symbol table to a nominal type."
+      )
+    }
+
+    // If we're already trying to bind this type, return the "in-progress" type
+    if let bindingRequest = extensionBindingRequest {
+      // If
+      guard bindingRequest.currentNominal.qualifiedName == name else {
+        return .success(currentNominal)
+      }
+      return .success(bindingRequest.currentNominal)
+    }
+
+    // // Extract the current nominal to start the binding process
+    // let currentNominal: NominalType
+    // switch typeState {
+    // case .resolved(let current):
+    //   currentNominal = current
+    // case .bindingPotentialExtensions(_, let currentNominal, _, _):
+    //   // If we're binding extensions, return the current version
+    //   return Result.success(currentNominal)
+    // }
+
+    // Find all the extensions we need to bind
+    //
+    // First, get the file of the originatingSyntax
+    guard let sourceFile = originatingSyntax.root.as(SourceFileSyntax.self) else {
+      fatalError("[SwiftLexicalLookup] Internal error: Unexpectedly couldn't file source file of originating syntax")
+    }
+    let accessibleExtensions = symbolTable.findAllExtensions(
+      accessibleFrom: sourceFile,
+      configuredRegions: configuredRegions
+    )
+
+    // Find what extensions we haven't bound yet
+    let unboundExtensions = accessibleExtensions.filter({ (file, extensions) in
+      currentNominal.extensions[file] == nil
+    })
+
+    // If we've already bound everything, our type is ready
+    if unboundExtensions.isEmpty { return .success(currentNominal) }
+
+    // Start the binding process for each file
+    for file in
+    self.extensionBindingRequest = (
+      requestSyntax: originatingSyntax,
+      currentNominal: currentNominal,
+      remainingExtensions:
+    )
+  }
+
   mutating func bindExtensions(
     matchingForName nameQuery: QualifiedTypeName,
     resolvedFrom originatingSyntax: TypeLikeSyntax
       // TODO: We don't technically need the `failures` result for the API; only for debugging.
-  ) -> (matches: [SourceFileSyntax: [ExtensionDeclSyntax]], failures: [ExtensionDeclSyntax: Failure]) {
+  ) -> NominalType {  // (matches: [SourceFileSyntax: [ExtensionDeclSyntax]], failures: [ExtensionDeclSyntax: Failure]) {
+    let currentNominal: NominalType
+    switch symbolTable.typeState[nameQuery] {
+    case TypeResolutionState.resolved(let resolved):
+      // Check if
+    case TypeResolutionState.bindingPotentialExtension(
+      resolved: NominalType,
+      stochasticMembers: [Identifier: [TypeDeclSyntax]]
+    ):
+
+    }
+    // FIXME: Get current nominal from symbol table & remember if we're
+    // binding extensions; if so, add a dependence with our result
+    // Perhaps do within bindExtensions and then get the nominal type
+    // with (keeping out erroneous, ergo unbound, extensions)
+    //
     // TODO: Wrap the type syntax in a SymbolTableSyntax<TypeSyntax> that guarantees this
     guard let file = originatingSyntax.root.as(SourceFileSyntax.self) else {
       fatalError(

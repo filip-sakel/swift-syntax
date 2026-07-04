@@ -111,6 +111,15 @@ extension SourceFileSyntax {
 
 extension SymbolTable3 {
   // TODO: Merge with nominal-type lookup-position-sensitive code
+  //
+  // Extensions come from several sources:
+  // 1. Current file (e.g., fileprivate nominal types draw just from here)
+  // 2. Current module (e.g., internal nominal types can only be here)
+  // 3. Imported modules
+  //    a. Current file's imported modules
+  //    b. Internal/public/@_exported modules in other files
+  //    c. Transitive dependencies in member visibility migration mode (TODO :Verify)
+  //
   func findAllExtensions(
     accessibleFrom lookupFile: SourceFileSyntax,
     configuredRegions: ConfiguredRegions?
