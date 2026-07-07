@@ -410,6 +410,31 @@ import SwiftSyntax
     "ExtensionDeclScope"
   }
 
+  // /// The extended type's generic parameters are only available from the
+  // /// inheritance clause, generic where clause and member block.
+  // ///
+  // /// Note: Although generic parameters are always invalid in the inheritance
+  // /// clause (since we can't inherit from a generic parameter), lookup still
+  // /// surfaces generic parameters in the inheritance clause for diagnostic
+  // /// purposes. For instance:
+  // /// ```swift
+  // /// class A<B: AnyObject> {}
+  // /// extension A: B {} // ❌ error: inheritance from non-protocol type 'B'
+  // /// ```
+  // /// But if we rename the generic parameter to `T`:
+  // /// ```swift
+  // /// class A<T: AnyObject> {}
+  // /// extension A: B {} // ❌ - error: cannot find type 'B' in scope
+  // /// ```
+  // private var _genericParameterAvailabilityRange: Range<AbsolutePosition> {
+  //   // Start from the inheritance clause if available, or try the
+  //   // generic where clause if available; otherwise, just start at the member block.
+  //   let startPosition = inheritanceClause?.position ?? genericWhereClause?.position ?? memberBlock.position
+  //   // Extensions always end with the member block
+  //   let endPosition = memberBlock.endPosition
+  //   return startPosition..<endPosition
+  // }
+
   /// Returns results matching lookup, including implicit `Self`,
   /// `lookInGenericParametersOfExtendedType` and `lookInMembers` depending on `lookupPosition`.
   @_spi(Experimental) public func lookup(
@@ -436,6 +461,18 @@ import SwiftSyntax
 
       return [.lookForGenericParameters(of: self)]
         + defaultLookupImplementation(identifier, at: lookUpPosition, with: config)
+    }
+
+    // TODO: This looks like a bug fix that shouldn't be gated behind a feature flag
+    //
+    // We took care of look ups within the member block & the generic where clause above.
+    // We also handle inheritance clauses where a generic where clause is defined.
+    //
+    // So just check we're not in the inheritance clause (if it exists).
+    if config._dontFindGenericParametersForExtendedType,
+      inheritanceClause?.range.contains(lookUpPosition) != true
+    {
+      return lookupInParent(identifier, at: lookUpPosition, with: config)
     }
 
     return [.lookForGenericParameters(of: self)]

@@ -810,7 +810,7 @@ final class TestNameLookup: XCTestCase {
         "7️⃣": declExpectation,
         "9️⃣": declExpectation,
       ],
-      config: LookupConfig(_lookupTopScope: true)
+      config: LookupConfig(_lookupTopScope: true, _dontFindGenericParametersForExtendedType: true)
     )
   }
 

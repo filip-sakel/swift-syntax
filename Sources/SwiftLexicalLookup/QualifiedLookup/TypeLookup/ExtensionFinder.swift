@@ -63,22 +63,7 @@ extension SourceFileSyntax {
 }
 
 extension SourceFileSyntax {
-  fileprivate final class _ConfiguredExtensionVisitor: ActiveSyntaxVisitor {
-    var extensionDecls = Set<ExtensionDeclSyntax>()
-
-    override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
-      extensionDecls.insert(node)
-      return .visitChildren
-    }
-    // Don't go to nested scopes
-    override func visit(_ node: CodeBlockItemListSyntax) -> SyntaxVisitorContinueKind {
-      return .skipChildren
-    }
-    // Don't go into `DeclGroupSyntax`'s members
-    override func visit(_ node: MemberBlockSyntax) -> SyntaxVisitorContinueKind {
-      return .skipChildren
-    }
-  }
+  /// Helper visitor for `findExtensions`
   fileprivate final class _ExtensionVisitor: SyntaxVisitor {
     var extensionDecls = Set<ExtensionDeclSyntax>()
 
@@ -86,9 +71,35 @@ extension SourceFileSyntax {
       extensionDecls.insert(node)
       return .visitChildren
     }
-    // Don't go to nested scopes
+    // Don't go into to nested scopes; just the source file
     override func visit(_ node: CodeBlockItemListSyntax) -> SyntaxVisitorContinueKind {
+      if node.parent?.is(SourceFileSyntax.self) == true {
+        return .visitChildren
+      } else {
+        return .skipChildren
+      }
+    }
+    // Don't go into `DeclGroupSyntax`'s members
+    override func visit(_ node: MemberBlockSyntax) -> SyntaxVisitorContinueKind {
       return .skipChildren
+    }
+  }
+  /// Same as `_ExtensionVisitor`, but only visits active nodes according to
+  /// the given configured regions.
+  fileprivate final class _ConfiguredExtensionVisitor: ActiveSyntaxVisitor {
+    var extensionDecls = Set<ExtensionDeclSyntax>()
+
+    override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
+      extensionDecls.insert(node)
+      return .visitChildren
+    }
+    // Don't go into to nested scopes; just the source file
+    override func visit(_ node: CodeBlockItemListSyntax) -> SyntaxVisitorContinueKind {
+      if node.parent?.is(SourceFileSyntax.self) == true {
+        return .visitChildren
+      } else {
+        return .skipChildren
+      }
     }
     // Don't go into `DeclGroupSyntax`'s members
     override func visit(_ node: MemberBlockSyntax) -> SyntaxVisitorContinueKind {
@@ -96,6 +107,8 @@ extension SourceFileSyntax {
     }
   }
 
+  /// Finds all top-level extensions, visiting only active nodes if
+  /// ``configuredRegions`` is provided.
   func findExtensions(configuredRegions: ConfiguredRegions?) -> Set<ExtensionDeclSyntax> {
     if let configuredRegions {
       let visitor = _ConfiguredExtensionVisitor(viewMode: .all, configuredRegions: configuredRegions)

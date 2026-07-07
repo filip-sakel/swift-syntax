@@ -112,7 +112,11 @@ extension SyntaxProtocol {
   ) -> [UnqualifiedTypeLookupResult] {
     let results: [LookupResult] = self.lookup(
       typeName,
-      with: LookupConfig(configuredRegions: configuredRegions, _lookupTopScope: true)
+      with: LookupConfig(
+        configuredRegions: configuredRegions,
+        _lookupTopScope: true,
+        _dontFindGenericParametersForExtendedType: true
+      )
     )
     let filteredResults = results.flatMap({ result -> [UnqualifiedTypeLookupResult] in
       switch result {

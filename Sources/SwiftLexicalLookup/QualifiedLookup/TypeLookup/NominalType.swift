@@ -297,10 +297,7 @@ extension NominalType: CustomDebugStringConvertible {
     let extensionDescriptions =
       extensions
       .flatMap(\.value)  // Get the extensions
-      .map({ extensionDecl in
-        // Describe the extension without its members
-        extensionDecl.with(\.memberBlock, MemberBlockSyntax(members: [])).trimmedDescription
-      })
+      .map(\._memberlessDescription)  // Describe without members
       .joined(separator: ", ")
 
     return

@@ -196,7 +196,10 @@ extension ResolvedNominalTypeReference {
 
     // We should only get type declarations
     let typeDecl = NominalTypeDeclSyntax2(rawTypeDecl)!
-    return ResolvedNominalTypeReference._mockMarkerType(mainDecl: typeDecl, originatingSyntax: originatingSyntax)
+    return ResolvedNominalTypeReference._mockMarkerType(
+      mainDecl: typeDecl,
+      originatingSyntax: originatingSyntax
+    )
   }
 }
 
@@ -643,23 +646,41 @@ final class TestQualifiedTypeName: XCTestCase {
   //   ])
   // }
 
-  // func testSimpleExtension() {
-  //   assertQualifiedTypeName([
-  //     "MyFile.swift": """
-  //     \("🟥", name: "_(MyFile.swift)::A")
-  //     struct A {}
-  //
-  //     extension A {
-  //       \("🟥", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
-  //       struct B {
-  //         func f(_: \(references: "🟥")B)
-  //       }
-  //       func g(_: \(references: "🟥")B)
-  //     }
-  //     func h(_: \(references: "🟥")A.B)
-  //     """ as QualifiedTypeNameSource
-  //   ])
-  // }
+  func testSimpleExtension() {
+    // assertQualifiedTypeName(
+    //   [
+    //     "MyFile.swift": """
+    //     \("🟥", name: "_(MyFile.swift)::A")
+    //     struct A {}
+    //
+    //     extension A {
+    //       \("🟥", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
+    //       struct B {
+    //         func f(_: \(references: ["🟥"])B)
+    //       }
+    //       func g(_: \(references: ["🟥"])B)
+    //     }
+    //     func h(_: \(references: ["🟥"])A.B)
+    //     """ as QualifiedTypeNameSource
+    //   ],
+    //   verbose: true
+    // )
+    assertQualifiedTypeName(
+      [
+        "MyFile.swift": """
+        \("🟥", name: "_(MyFile.swift)::A")
+        struct A {}
+
+        extension A {
+          \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
+          struct B {}
+        }
+        func h(_: \(references: ["🟩"])A.B)
+        """ as QualifiedTypeNameSource
+      ],
+      verbose: true
+    )
+  }
 
   // func testCodeBlockSimpleCase() {
   //   assertQualifiedTypeName([

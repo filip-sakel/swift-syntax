@@ -340,12 +340,16 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 /// Finds the main declaration and qualified name of the nominal types
 /// to which the the given type syntax refers.
 @_spi(_QualifiedLookup) public struct TypeQualifier {
+  var logText = ""
   var logPrefix = [String]()
 
-  func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
+  mutating func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
     guard _verbose else { return }
-    // fatalError("Hi")
-    print(logPrefix.map({ "[\($0)]" }).joined(), component, "[\(file):\(line)]")
+    // Keep log text separately
+    let newLine = "\(logPrefix.map({ "[\($0)]" }).joined()) \(component) [\(file):\(line)]"
+    logText += newLine + "\n"
+    // Print new line
+    print(newLine)
   }
 
   mutating func withLogging<T>(
@@ -355,6 +359,12 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     file: StaticString = #file,
     line: UInt = #line
   ) -> T {
+    if let nestingLimit = self._logNestingLimit {
+      precondition(
+        logPrefix.count < nestingLimit,
+        "Exceeded log nesting limit, suggesting there's an infinite loop. If you think this is a mistake, you may change the limit in ``TypeQualifier``. Current output:\n\(logText)"
+      )
+    }
     logPrefix.append(request)
     log("Resolving...", file: file, line: line)
     let result = action(&self)
@@ -374,6 +384,8 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   var requestedExtensions: Set<ExtensionDeclSyntax> = []
 
   let _verbose: Bool
+  /// How many `withLogging` calls we can nest. Useful for debugging infinite loops.
+  let _logNestingLimit: Int? = 10
   let _checkNominalInCompositionIsClassOrProtocol = true
 
   // var extensionBindingRequest:
@@ -839,9 +851,8 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
         configuredRegions: configuredRegions
       )
     }
-    // log(
-    //   "[For syntax \(originatingSyntax.trimmedDescription)] Partially resolved base '\(typeName.name)' to  `\(baseLookupResults)`"
-    // )
+
+    log("Base lookup results: \(baseLookupResults)")
 
     // Find first matching type declaration
     // TODO: Merge lookup/skip logic if possible
@@ -1082,6 +1093,15 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     firstTypeMember: ImplicitTypeReferenceComponent,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
+    // let possibleBaseNames: String
+    // switch baseType {
+    // case .success(let nonNominal):
+    //   possibleBaseName = nonNominal._description(describeMembers: { resolvedBaseTypes in
+    //     resolvedBaseTypes.map(\.name.debugDescription).joined(separator: ", ")
+    //   })
+    // case .failure:
+    //   possibleBaseName = "<error>"
+    // }
     withLogging(
       request: "Member `\(firstTypeMember.debugDescription)`",
       describe: \._debugDescription
@@ -1176,7 +1196,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
       // Bind extensions and construct a nominal type.
       // We ignore failures since they're from non-matching extensions and diagnosed separately
-      let nominalBaseType = _resolveNominalType(
+      let nominalBaseType = resolveNominalType(
         name: baseType.name,
         originatingSyntax: firstTypeMember.introducingSyntax
       )
@@ -1293,7 +1313,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     originatingSyntax: TypeLikeSyntax
   ) -> NominalType {
     withLogging(
-      request: "Extended Nominal`\(name)`",
+      request: "Extended nominal`\(name)`",
       describe: \.debugDescription
     ) {
       $0._resolveNominalType(name: name, originatingSyntax: originatingSyntax)
@@ -1327,6 +1347,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       accessibleFrom: sourceFile,
       configuredRegions: configuredRegions
     )
+    log("Accessible extensions: \(accessibleExtensions.flatMap(\.value).map(\._memberlessDescription))")
 
     // Detect if there's an existing binding request (before requesting more extensions)
     let startsExtensionBinding = self.requestedExtensions.isEmpty
@@ -1335,73 +1356,111 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     for (file, extensionDecls) in accessibleExtensions {
       // Skip if the file has already been resolved
       guard let unresolvedFileExtensions = symbolTable.unresolvedExtensions[file] else { continue }
+      // Log the extension to be added (also subtract existing requestedExtensions since we're calling `formUnion` below)
+      log(
+        "Adding extensions: \(extensionDecls.intersection(unresolvedFileExtensions).subtracting(self.requestedExtensions).map(\._memberlessDescription))"
+      )
       // Add the unresolved extensions in the file
       self.requestedExtensions.formUnion(extensionDecls.intersection(unresolvedFileExtensions))
     }
 
     // If there's an existing request, it will take care of the rest
     guard startsExtensionBinding else {
+      log("Binding request already underway; returning")
+
       // Even if not all extensions are loaded, we queued up all extensions that
       // need to be processed, so we'll get invalidated appropriately.
       return currentNominal
     }
+    // Return if no extensions are available
+    if self.requestedExtensions.isEmpty {
+      log("No extensions to bind.")
+      return currentNominal
+    }
+
+    log("Initiating extension binding.")
 
     // It's up to us to bind all required extensions
+    // TODO: Consider how this might play out if `requestedExtensions` was an OrderedSet
     while let extensionDecl = self.requestedExtensions.first {
-      // Resolve, tracking dependencies
-      //
-      // Note: We don't add these dependencies to our dependencies since
-      // this is considered a completely separate type resolution. We
-      // track these dependencies in the symbol table's corresponding
-      // extension state.
-      var extensionDependencies = [ExtensionBindingResult.Dependency]()
-      let extendedTypeResult = resolveExtendedTypeSyntax(
-        extensionDecl: extensionDecl,
-        memberDependencies: &extensionDependencies
+      // We remove at the end of the loop because we want nested syntax-resolution
+      // requests to see that we're actively trying to bind this extension.
+      defer { self.requestedExtensions.remove(extensionDecl) }
+
+      var invalidatedExtensions: Set<ExtensionDeclSyntax> = withLogging(
+        request: "Binding `\(extensionDecl._memberlessDescription)`",
+        describe: { (invalidatedExtensions: SymbolTable3.InvalidatedExtensions) in
+          "Invalidated: \(invalidatedExtensions.map(\._memberlessDescription))"
+        },
+        perform: {
+          // Resolve, tracking dependencies
+          //
+          // Note: We don't add these dependencies to our dependencies since
+          // this is considered a completely separate type resolution. We
+          // track these dependencies in the symbol table's corresponding
+          // extension state.
+          var extensionDependencies = [ExtensionBindingResult.Dependency]()
+          let extendedTypeResult = $0.resolveExtendedTypeSyntax(
+            extensionDecl: extensionDecl,
+            memberDependencies: &extensionDependencies
+          )
+
+          // Register in the symbol table
+          let bindingResult: Result<SymbolTable3.InvalidatedExtensions, SymbolTable3.ExtensionBindingFailure> =
+            $0.symbolTable.bindExtension(
+              extensionDecl,
+              // Only get the name
+              to: extendedTypeResult.map(\.name),
+              dependencies: extensionDependencies
+            )
+
+          // Handle failures
+
+          switch bindingResult {
+          case .success(let success):
+            return success
+          case .failure(let failure):
+            // Ensure we handle future failure types
+            switch failure {
+            // TODO: Reduce possible failures (e.g. nonRegisteredSyntaxRoot should go)
+            // (e.g. invalidated/binding modes may be able to simplify)
+            //
+            // Explanation:
+            // .nonRegisteredSyntaxRoot: We got this extension from the symbol table, which gets extensions from files
+            // .cannotFixNonInvalidated: We request binding, not fixing invalidated extensions, so this shouldn't happen
+            // .cannotBindInvalidated: We track invalidated extensions separately so this shoudln't happen
+            // .alreadyResolved: The queueing step should not have enqueued already-resolved extensions
+            // .boundToUnresolvedName: We checked for this at the start of this function
+            // .bindingBeforeFixingInvalidatedExtensions: The loop below should fix invalidated extensions after each pass.
+            case .nonRegisteredSyntaxRoot, .cannotFixNonInvalidated, .cannotBindInvalidated, .alreadyResolved,
+              .boundToUnresolvedName, .bindingBeforeFixingInvalidatedExtensions:
+              fatalError(
+                "[SwiftLexicalLookup] Internal error: Unexpected failure when attempting to bind extension: \(failure); extension: \(extensionDecl.trimmedDescription)"
+              )
+            }
+          }
+        }
       )
 
-      // Register in the symbol table
-      let bindingResult: Result<SymbolTable3.InvalidatedExtensions, SymbolTable3.ExtensionBindingFailure> =
-        symbolTable.bindExtension(
-          extensionDecl,
-          // Only get the name
-          to: extendedTypeResult.map(\.name),
-          dependencies: extensionDependencies
-        )
-
-      // Handle failures
-      var invalidatedExtensions: [ExtensionDeclSyntax]
-      switch bindingResult {
-      case .success(let success):
-        invalidatedExtensions = success
-      case .failure(let failure):
-        // Ensure we handle future failure types
-        switch failure {
-        // TODO: Reduce possible failures (e.g. nonRegisteredSyntaxRoot should go)
-        // (e.g. invalidated/binding modes may be able to simplify)
-        //
-        // Explanation:
-        // .nonRegisteredSyntaxRoot: We got this extension from the symbol table, which gets extensions from files
-        // .cannotFixNonInvalidated: We request binding, not fixing invalidated extensions, so this shouldn't happen
-        // .cannotBindInvalidated: We track invalidated extensions separately so this shoudln't happen
-        // .alreadyResolved: The queueing step should not have enqueued already-resolved extensions
-        // .boundToUnresolvedName: We checked for this at the start of this function
-        // .bindingBeforeFixingInvalidatedExtensions: The loop below should fix invalidated extensions after each pass.
-        case .nonRegisteredSyntaxRoot, .cannotFixNonInvalidated, .cannotBindInvalidated, .alreadyResolved,
-          .boundToUnresolvedName, .bindingBeforeFixingInvalidatedExtensions:
-          fatalError(
-            "[SwiftLexicalLookup] Internal error: Unexpected failure when attempting to bind extension: \(failure); extension: \(extensionDecl.trimmedDescription)"
-          )
-        }
-      }
-
       // Fix invalidated extensions
-      while let brokenExtensionDecl = invalidatedExtensions.first {
+      // TODO: Consider implementing `popFirst` or a queue
+      while let invalidatedExtensionDecl = invalidatedExtensions.first {
+        // TODO: Figure out if it's actually possible for an invalidated extension
+        // to transitively reintroduce itself (i.e. if `invalidatedExtensions` could be
+        // an array instead of a set where we just pop the first invalidated extension)
+        defer { invalidatedExtensions.remove(invalidatedExtensionDecl) }
+
         // Re-resolve with dependency tracking
-        var brokenExtensionDependencies = [ExtensionBindingResult.Dependency]()
-        let extendedTypeResult = resolveExtendedTypeSyntax(
-          extensionDecl: brokenExtensionDecl,
-          memberDependencies: &brokenExtensionDependencies
+        var invalidatedExtensionDependencies = [ExtensionBindingResult.Dependency]()
+        let extendedTypeResult = withLogging(
+          request: "Fixing invalidated `\(invalidatedExtensionDecl._memberlessDescription)`",
+          describe: \._debugDescription,
+          perform: {
+            $0.resolveExtendedTypeSyntax(
+              extensionDecl: invalidatedExtensionDecl,
+              memberDependencies: &invalidatedExtensionDependencies
+            )
+          }
         )
 
         // Register in the symbol table
@@ -1410,7 +1469,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
             extensionDecl,
             // Only get the name
             to: extendedTypeResult.map(\.name),
-            dependencies: extensionDependencies
+            dependencies: invalidatedExtensionDependencies
           )
 
         // Process failures
@@ -1441,7 +1500,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
         }
 
         // Enqueue invalidated extensions
-        invalidatedExtensions.append(contentsOf: nestedInvalidatedExtensions)
+        invalidatedExtensions.formUnion(nestedInvalidatedExtensions)
       }
     }
 

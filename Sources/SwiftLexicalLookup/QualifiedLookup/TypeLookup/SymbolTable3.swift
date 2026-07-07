@@ -319,7 +319,7 @@ extension SymbolTable3 {
     case bindingBeforeFixingInvalidatedExtensions(invalidatedExtension: ExtensionDeclSyntax)
   }
 
-  typealias InvalidatedExtensions = [ExtensionDeclSyntax]
+  typealias InvalidatedExtensions = Set<ExtensionDeclSyntax>
 
   // /// Inserts the given extension moving it from `unresolvedExtensions` to `extensions`
   // /// and updating the nominal type's lookup table and extensions.
@@ -403,7 +403,7 @@ extension SymbolTable3 {
 
     // Compute the new extension state and what old extensions we've broken
     let newExtensionState: ExtensionBindingState
-    let invalidatedExtensions: [ExtensionDeclSyntax]
+    let invalidatedExtensions: Set<ExtensionDeclSyntax>
     switch result {
     case .success(let resolvedName):
       // Get nominal type
@@ -476,7 +476,7 @@ extension SymbolTable3 {
       // 3. Invalidate extension-binding results depending on the type members
       //    we're adding
       // TODO: Find more efficient way to do this
-      var brokenExtensionDecls = [ExtensionDeclSyntax]()
+      var invalidatedExtensionDecls = Set<ExtensionDeclSyntax>()
       for (extensionDecl, extensionState) in extensionState {
         // We can only break resolved extensions
         let extensionBindingResult: ExtensionBindingResult
@@ -517,12 +517,12 @@ extension SymbolTable3 {
           firstConflictingDependency: firstConflictingDependency,
           firstConflictingTypeDecls: firstConflictingTypeDecls
         )
-        brokenExtensionDecls.append(extensionDecl)
+        invalidatedExtensionDecls.insert(extensionDecl)
       }
       newExtensionState = ExtensionBindingState.resolved(
         ExtensionBindingResult(dependencies: [], resolution: .success(resolvedName))
       )
-      invalidatedExtensions = brokenExtensionDecls
+      invalidatedExtensions = invalidatedExtensionDecls
 
       // Update ``NominalType``
       var newNominal: NominalType = currentNominal

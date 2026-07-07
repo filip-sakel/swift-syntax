@@ -36,6 +36,21 @@ public struct LookupConfig {
   public var configuredRegions: ConfiguredRegions?
   /// Documentated at internal init
   internal var _lookupTopScope: Bool = false
+  /// Doesn't return `.lookForGenericParameters` for the extended type
+  /// of an extension.
+  ///
+  /// This flag should likely be removed and become the default behavior.
+  ///
+  /// For instance, if we turn on `_dontFindGenericParametersForExtendedType`:
+  /// ```
+  /// extension A where // <- Looking up `A` here doesn't look for generic parameters
+  ///                   //    of the extended type `A`
+  ///   T == Int // <- Looking up `T` here *will* look for generic parameters of `A`
+  /// { ... }
+  /// ```
+  /// If the flag is off, looking up `A` in `extension A` will also tell us to
+  /// look for generic parameters of `A` (the very syntax we're looking up).
+  internal var _dontFindGenericParametersForExtendedType: Bool = false
 
   /// Creates a new lookup configuration.
   ///
@@ -58,10 +73,12 @@ public struct LookupConfig {
   @_spi(Experimental) public init(
     finishInSequentialScope: Bool = false,
     configuredRegions: ConfiguredRegions? = nil,
-    _lookupTopScope: Bool
+    _lookupTopScope: Bool,
+    _dontFindGenericParametersForExtendedType: Bool
   ) {
     self.finishInSequentialScope = finishInSequentialScope
     self.configuredRegions = configuredRegions
     self._lookupTopScope = _lookupTopScope
+    self._dontFindGenericParametersForExtendedType = _dontFindGenericParametersForExtendedType
   }
 }
