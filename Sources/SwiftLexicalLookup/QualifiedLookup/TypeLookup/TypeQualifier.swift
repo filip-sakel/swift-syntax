@@ -51,6 +51,28 @@ extension Result where Success == [TypeDeclSyntax] {
   public let name: QualifiedTypeName
   public let originatingSyntax: TypeLikeSyntax
 
+  private init(
+    mainDecl: NominalTypeDeclSyntax2,
+    name: QualifiedTypeName,
+    originatingSyntax: TypeLikeSyntax
+  ) {
+    self.mainDecl = mainDecl
+    self.name = name
+    self.originatingSyntax = originatingSyntax
+  }
+
+  // fileprivate init(
+  //   _debugDescription mainDecl: NominalTypeDeclSyntax2,
+  //   name: QualifiedTypeName,
+  //   originatingSyntax: TypeLikeSyntax,
+  //   savingToTable symbolTable: SymbolTable3
+  // )
+
+  public var debugDescription: String {
+    "\(name) (\(mainDecl.kind))"
+  }
+}
+extension ResolvedNominalTypeReference {
   @_spi(_QualifiedLookup) public init(
     mainDecl: NominalTypeDeclSyntax2,
     name: QualifiedTypeName,
@@ -65,15 +87,24 @@ extension Result where Success == [TypeDeclSyntax] {
     symbolTable.registerNominal(mainDecl: mainDecl, redeclarations: [], qualifiedName: name)
   }
 
-  // fileprivate init(
-  //   _debugDescription mainDecl: NominalTypeDeclSyntax2,
-  //   name: QualifiedTypeName,
-  //   originatingSyntax: TypeLikeSyntax,
-  //   savingToTable symbolTable: SymbolTable3
-  // )
-
-  public var debugDescription: String {
-    "\(name) (\(mainDecl.kind))"
+  @_spi(_QualifiedLookupTests) public static func _mockMarkerType(
+    mainDecl: NominalTypeDeclSyntax2,
+    originatingSyntax: TypeSyntax
+  ) -> ResolvedNominalTypeReference {
+    ResolvedNominalTypeReference(
+      mainDecl: mainDecl,
+      name: QualifiedTypeName.topLevel(
+        QualifiedTypeNameGlobalType(
+          components: [
+            QualifiedTypeNameGlobalType.Component(
+              qualifier: .external(moduleName: Identifier(canonicalName: "_")),
+              name: Identifier(canonicalName: "_")
+            )
+          ]
+        )!
+      ),
+      originatingSyntax: TypeLikeSyntax(originatingSyntax)
+    )
   }
 }
 
@@ -1255,6 +1286,18 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     }
 
     return Result.success(firstResult)
+  }
+
+  fileprivate mutating func resolveNominalType(
+    name: QualifiedTypeName,
+    originatingSyntax: TypeLikeSyntax
+  ) -> NominalType {
+    withLogging(
+      request: "Extended Nominal`\(name)`",
+      describe: \.debugDescription
+    ) {
+      $0._resolveNominalType(name: name, originatingSyntax: originatingSyntax)
+    }
   }
 
   /// There are three paths:

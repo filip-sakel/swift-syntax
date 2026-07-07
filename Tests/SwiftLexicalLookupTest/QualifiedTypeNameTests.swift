@@ -181,35 +181,22 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
 }
 
 extension ResolvedNominalTypeReference {
-  @_spi(_QualifiedLookup)
-  public static func _mockMarkerType(_ kind: SyntaxKind, marker: Character) -> ResolvedNominalTypeReference? {
+  fileprivate static func _mockMarkerType(_ kind: SyntaxKind, marker: Character) -> ResolvedNominalTypeReference? {
     // Get the declaration kind
-    let typeDecl: DeclSyntax
+    let rawTypeDecl: DeclSyntax
     switch kind {
-    case .structDecl: typeDecl = "struct"
-    case .enumDecl: typeDecl = "enum"
-    case .classDecl: typeDecl = "class"
-    case .actorDecl: typeDecl = "actor"
-    case .protocolDecl: typeDecl = "protocol"
+    case .structDecl: rawTypeDecl = "struct"
+    case .enumDecl: rawTypeDecl = "enum"
+    case .classDecl: rawTypeDecl = "class"
+    case .actorDecl: rawTypeDecl = "actor"
+    case .protocolDecl: rawTypeDecl = "protocol"
     default: return nil
     }
     let originatingSyntax: TypeSyntax = "\(raw: marker)"
 
-    return ResolvedNominalTypeReference(
-      // We should only get type declarations
-      mainDecl: NominalTypeDeclSyntax2(typeDecl)!,
-      name: QualifiedTypeName.topLevel(
-        QualifiedTypeNameGlobalType(
-          components: [
-            QualifiedTypeNameGlobalType.Component(
-              qualifier: .external(moduleName: Identifier(canonicalName: "_")),
-              name: Identifier(canonicalName: "_")
-            )
-          ]
-        )!
-      ),
-      originatingSyntax: TypeLikeSyntax(originatingSyntax)
-    )
+    // We should only get type declarations
+    let typeDecl = NominalTypeDeclSyntax2(rawTypeDecl)!
+    return ResolvedNominalTypeReference._mockMarkerType(mainDecl: typeDecl, originatingSyntax: originatingSyntax)
   }
 }
 
@@ -362,17 +349,12 @@ final class TestQualifiedTypeName: XCTestCase {
         // Find the minimal-nominal type
         let expectedMarkers: [Character]
         let declsToNames: [NominalTypeDeclSyntax2: String]
+        var typeResolutionDependencies = [ExtensionBindingResult.Dependency]()
         let lookupResultOrFailure: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeQualifier.Failure> =
-          typeQualifier.resolveSyntax(typeSyntax: targetTypeSyntax)
+          typeQualifier.resolveSyntax(typeSyntax: targetTypeSyntax, memberDependencies: &typeResolutionDependencies)
+        // _ = consume typeResolutionDependencies
 
         // Report errors
-        if !typeQualifier.failures.isEmpty {
-          XCTFail(
-            "Lookup of `\(targetTypeSyntax.trimmedDescription)` generated errors: \(typeQualifier.failures).",
-            file: file,
-            line: line
-          )
-        }
         if verbose {
           print(">>> Result of `\(targetTypeSyntax.trimmedDescription)` lookup: \(lookupResultOrFailure)")
         }

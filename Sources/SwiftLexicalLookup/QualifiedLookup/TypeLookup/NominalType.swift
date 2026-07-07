@@ -287,3 +287,27 @@ extension NominalType {
     return .success(typeDecls)
   }
 }
+
+// MARK: Debug Description
+
+extension NominalType: CustomDebugStringConvertible {
+  @_spi(_QualifiedLookupTests) public func _describe(
+    describeFileID: (SyntaxIdentifier) -> String
+  ) -> String {
+    let extensionDescriptions =
+      extensions
+      .flatMap(\.value)  // Get the extensions
+      .map({ extensionDecl in
+        // Describe the extension without its members
+        extensionDecl.with(\.memberBlock, MemberBlockSyntax(members: [])).trimmedDescription
+      })
+      .joined(separator: ", ")
+
+    return
+      "NominalType(name: \(qualifiedName._describe(describeFileID: describeFileID)), kind: '\(mainDecl.kind)', extensions: [\(extensionDescriptions)])"
+  }
+
+  public var debugDescription: String {
+    _describe(describeFileID: \.hashValue.description)
+  }
+}
