@@ -194,10 +194,7 @@ extension TypeSyntaxProtocol {
       // `(Int)` is just `Int`.
       // We diagnose single-element labels elsewhere
       // TODO: Should we diagnose single-element labels here?
-      if
-        let soleTupleElement = tupleType.elements.first,
-        tupleType.elements.count == 1
-      {
+      if let soleTupleElement = tupleType.elements.first, tupleType.elements.count == 1 {
         // Forward resolution
         return soleTupleElement.type.partiallyResolve()
       }

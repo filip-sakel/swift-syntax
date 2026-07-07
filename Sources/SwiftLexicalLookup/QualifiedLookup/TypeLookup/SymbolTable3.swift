@@ -138,7 +138,7 @@ import SwiftSyntax
   // var dependentExtensionsStack: [PartiallyResolvedTypeIdentifier.Component: [ExtensionDeclSyntax]]
 }
 
-extension Array where Element == ExtensionBindingResult.Dependency {
+extension Collection where Element == ExtensionBindingResult.Dependency {
   fileprivate func _firstMatchingTypeMembers(
     resolvedType: QualifiedTypeName,
     typeMembers: [Identifier: [TypeDeclSyntax]]
@@ -246,16 +246,17 @@ extension Array where Element == ExtensionBindingResult.Dependency {
 
   // internal var typeSyntaxState: [TypeSyntax: TypeSyntaxResolutionState] = [:]
   // internal var typeState: [QualifiedTypeName: TypeResolutionState] = [:]
-  internal private(set) var typeState: [QualifiedTypeName: NominalType]
+  internal private(set) var typeState: [QualifiedTypeName: NominalType] = [:]
   internal private(set) var extensionState: [ExtensionDeclSyntax: ExtensionBindingState] = [:]
   internal private(set) lazy var unresolvedExtensions: [SourceFileSyntax: Set<ExtensionDeclSyntax>] = {
-    var result = [SourceFileSyntax: [ExtensionDeclSyntax]]()
+    var result = [SourceFileSyntax: Set<ExtensionDeclSyntax>]()
     for (module, files) in moduleToSources {
       for (_, file) in files {
         // TODO: Implement configuredRegions
         result[file] = file.findExtensions(configuredRegions: nil)
       }
     }
+    return result
   }()
 
   public init(moduleToSources: [Module: [String: SourceFileSyntax]]) {
@@ -289,10 +290,26 @@ extension DeclGroupSyntax {
   }
 }
 
+// MARK: Registering Nominal
+extension SymbolTable3 {
+  func registerNominal(
+    mainDecl: NominalTypeDeclSyntax2,
+    redeclarations: [NominalTypeDeclSyntax2],
+    qualifiedName: QualifiedTypeName
+  ) {
+    typeState[qualifiedName] = NominalType(
+      qualifiedName: qualifiedName,
+      mainDecl: mainDecl,
+      redeclarations: redeclarations,
+      extensions: [:]
+    )
+  }
+}
+
 // MARK: Nominal + Extension Binding
 extension SymbolTable3 {
   enum ExtensionBindingFailure: Error {
-    case alreadyBound
+    case alreadyResolved
     case cannotBindInvalidated
     case cannotFixNonInvalidated
     /// Either root isn't a source file, or said source file isn't registered
@@ -301,6 +318,8 @@ extension SymbolTable3 {
     // See todo comment below
     case bindingBeforeFixingInvalidatedExtensions(invalidatedExtension: ExtensionDeclSyntax)
   }
+
+  typealias InvalidatedExtensions = [ExtensionDeclSyntax]
 
   // /// Inserts the given extension moving it from `unresolvedExtensions` to `extensions`
   // /// and updating the nominal type's lookup table and extensions.
@@ -318,7 +337,7 @@ extension SymbolTable3 {
     _ extensionDecl: ExtensionDeclSyntax,
     to result: Result<QualifiedTypeName, TypeQualifier.Failure>,
     dependencies: [ExtensionBindingResult.Dependency]
-  ) -> Result<[ExtensionDeclSyntax], ExtensionBindingFailure> {
+  ) -> Result<InvalidatedExtensions, ExtensionBindingFailure> {
     _admitExtension(
       extensionDecl,
       isUpdatingInvalidating: false,
@@ -334,7 +353,7 @@ extension SymbolTable3 {
     _ extensionDecl: ExtensionDeclSyntax,
     to result: Result<QualifiedTypeName, TypeQualifier.Failure>,
     dependencies: [ExtensionBindingResult.Dependency]
-  ) -> Result<[ExtensionDeclSyntax], ExtensionBindingFailure> {
+  ) -> Result<InvalidatedExtensions, ExtensionBindingFailure> {
     _admitExtension(
       extensionDecl,
       isUpdatingInvalidating: true,
@@ -349,7 +368,7 @@ extension SymbolTable3 {
     isUpdatingInvalidating isFixingInvalidating: Bool,
     to result: Result<QualifiedTypeName, TypeQualifier.Failure>,
     dependencies: [ExtensionBindingResult.Dependency]
-  ) -> Result<[ExtensionDeclSyntax], ExtensionBindingFailure> {
+  ) -> Result<InvalidatedExtensions, ExtensionBindingFailure> {
     // Get file and module
     guard
       let sourceFile = extensionDecl.root.as(SourceFileSyntax.self),
@@ -363,7 +382,7 @@ extension SymbolTable3 {
       var unresolvedFileExtensions = unresolvedExtensions[sourceFile],
       unresolvedFileExtensions.contains(extensionDecl)
     else {
-      return .failure(ExtensionBindingFailure.alreadyBound)
+      return .failure(ExtensionBindingFailure.alreadyResolved)
     }
     switch (isFixingInvalidating, extensionState[extensionDecl]) {
     case (false, nil), (true, .invalidated):
@@ -384,7 +403,7 @@ extension SymbolTable3 {
 
     // Compute the new extension state and what old extensions we've broken
     let newExtensionState: ExtensionBindingState
-    let brokenExtensions: [ExtensionDeclSyntax]
+    let invalidatedExtensions: [ExtensionDeclSyntax]
     switch result {
     case .success(let resolvedName):
       // Get nominal type
@@ -407,13 +426,14 @@ extension SymbolTable3 {
         // This extension is invalid (its definition depends on at least one
         // of its type members), so we act like it doesn't introduce any
         // members.
-        brokenExtensions = []
+        invalidatedExtensions = []
         break
       }
       // 2. Can't introduce members our dependencies' declaration contexts
       //    depend on (without a cycle)
       // TODO: Either prove this is sufficient or recursively search for dependencies (see
       // relevant documentation in NominalType.swift)
+      var allRecursiveTypeMembers = [TypeDeclSyntax]()
       for dependency in dependencies {
         // We can't invalidate any of the extensions that introduced our the types
         // we depend on; otherwise, we risk a cycle.
@@ -429,19 +449,28 @@ extension SymbolTable3 {
               "[SwiftLexicalLookup] Internal error: While trying to bind extension to '\(resolvedName)', found dependency to type member `\(dependency.typeMember.name)` originating from a non-resolved/invalidated extension: \(String(reflecting: extensionState[introducingExtension]))."
             )
           }
-          if let (_, recursiveTypeMembers) = introducingExtensionResult.dependencies._firstMatchingTypeMembers(
-            resolvedType: resolvedName,
-            typeMembers: typeMembers
-          ) {
-            newExtensionState = ExtensionBindingState.cannotDependOnIntroducedMembers(typeMembers: recursiveTypeMembers)
-            // This extension is invalid (its definition depends on at least one
-            // of its type members), so we act like it doesn't introduce any
-            // members.
-            brokenExtensions = []
-            break
+
+          // Continue if there are no conflicts
+          guard
+            let (_, recursiveTypeMembers) = introducingExtensionResult.dependencies._firstMatchingTypeMembers(
+              resolvedType: resolvedName,
+              typeMembers: typeMembers
+            )
+          else {
+            continue
           }
 
+          // Record recursive members
+          allRecursiveTypeMembers.append(contentsOf: recursiveTypeMembers)
         }
+      }
+      guard allRecursiveTypeMembers.isEmpty else {
+        // This extension is invalid (its definition depends on at least one
+        // of its type members), so we act like it doesn't introduce any
+        // members.
+        newExtensionState = ExtensionBindingState.cannotDependOnIntroducedMembers(typeMembers: allRecursiveTypeMembers)
+        invalidatedExtensions = []
+        break
       }
 
       // 3. Invalidate extension-binding results depending on the type members
@@ -493,7 +522,7 @@ extension SymbolTable3 {
       newExtensionState = ExtensionBindingState.resolved(
         ExtensionBindingResult(dependencies: [], resolution: .success(resolvedName))
       )
-      brokenExtensions = brokenExtensionDecls
+      invalidatedExtensions = brokenExtensionDecls
 
       // Update ``NominalType``
       var newNominal: NominalType = currentNominal
@@ -511,7 +540,7 @@ extension SymbolTable3 {
         ExtensionBindingResult(dependencies: [], resolution: .failure(failure))
       )
       // Can't break a type's extensions since we didn't bind to one
-      brokenExtensions = []
+      invalidatedExtensions = []
     }
 
     // Invalidate the extensions depending on the type members that this
@@ -597,25 +626,6 @@ extension SymbolTable3 {
     unresolvedExtensions[sourceFile] = unresolvedFileExtensions
 
     // Return which extensions broke
-    return .success(brokenExtensions)
+    return .success(invalidatedExtensions)
   }
-
-  // enum ExtensionBindingResult {
-  //   case
-  // }
-  // func _bindExtensions(
-  //   // forSyntax: TypeSyntax,
-  //   sourceFile: SourceFileSyntax,
-  //   resolvedName: QualifiedTypeName,
-  //   // _ body: (_ potentialExtension: ExtensionDeclSyntax) -> Void
-  // ) -> Result<NominalType, ExtensionBindingFailure> {
-  //   // We can't have overlapping binding requests
-  //   guard case .resolved(let nominal) = typeState[resolvedName] else {
-  //     return .failure(ExtensionBindingFailure.alreadyBinding)
-  //   }
-  //
-  //   // Find possible extensions
-  //   // TODO: Pass configuredRegions
-  //   let extensions: findAllExtensions(accessibleFrom: sourceFile, configuredRegions: nil)
-  // }
 }

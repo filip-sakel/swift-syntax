@@ -64,10 +64,10 @@ extension SourceFileSyntax {
 
 extension SourceFileSyntax {
   fileprivate final class _ConfiguredExtensionVisitor: ActiveSyntaxVisitor {
-    var extensionDecls = [ExtensionDeclSyntax]()
+    var extensionDecls = Set<ExtensionDeclSyntax>()
 
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
-      extensionDecls.append(node)
+      extensionDecls.insert(node)
       return .visitChildren
     }
     // Don't go to nested scopes
@@ -80,10 +80,10 @@ extension SourceFileSyntax {
     }
   }
   fileprivate final class _ExtensionVisitor: SyntaxVisitor {
-    var extensionDecls = [ExtensionDeclSyntax]()
+    var extensionDecls = Set<ExtensionDeclSyntax>()
 
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
-      extensionDecls.append(node)
+      extensionDecls.insert(node)
       return .visitChildren
     }
     // Don't go to nested scopes
@@ -96,7 +96,7 @@ extension SourceFileSyntax {
     }
   }
 
-  func findExtensions(configuredRegions: ConfiguredRegions?) -> [ExtensionDeclSyntax] {
+  func findExtensions(configuredRegions: ConfiguredRegions?) -> Set<ExtensionDeclSyntax> {
     if let configuredRegions {
       let visitor = _ConfiguredExtensionVisitor(viewMode: .all, configuredRegions: configuredRegions)
       visitor.walk(self)
@@ -123,7 +123,7 @@ extension SymbolTable3 {
   func findAllExtensions(
     accessibleFrom lookupFile: SourceFileSyntax,
     configuredRegions: ConfiguredRegions?
-  ) -> [SourceFileSyntax: [ExtensionDeclSyntax]] {
+  ) -> [SourceFileSyntax: Set<ExtensionDeclSyntax>] {
     // TODO: This should be imported *decls*, e.g., import struct Swift.Int
     let imports = lookupFile.findImportDecls(using: configuredRegions)
     let importedModules = imports.flatMap({ $0.path.compactMap({ Identifier(validating: $0.name) }) })
@@ -145,7 +145,7 @@ extension SymbolTable3 {
     var results = [lookupFile: lookupFile.findExtensions(configuredRegions: configuredRegions)]
     // Look in this module
     for file in internalSources.values where file != lookupFile {
-      results[file, default: []].append(contentsOf: file.findExtensions(configuredRegions: configuredRegions))
+      results[file, default: []].formUnion(file.findExtensions(configuredRegions: configuredRegions))
     }
     // Look for imported modules (reversed order to account for shadowing)
     for module in importedModules.reversed() {
@@ -156,7 +156,7 @@ extension SymbolTable3 {
         )
       }
       for file in moduleSources.values {
-        results[file, default: []].append(contentsOf: file.findExtensions(configuredRegions: configuredRegions))
+        results[file, default: []].formUnion(file.findExtensions(configuredRegions: configuredRegions))
       }
     }
 

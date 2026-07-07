@@ -54,12 +54,23 @@ extension Result where Success == [TypeDeclSyntax] {
   @_spi(_QualifiedLookup) public init(
     mainDecl: NominalTypeDeclSyntax2,
     name: QualifiedTypeName,
-    originatingSyntax: TypeLikeSyntax
+    originatingSyntax: TypeLikeSyntax,
+    savingToTable symbolTable: SymbolTable3
   ) {
     self.mainDecl = mainDecl
     self.name = name
     self.originatingSyntax = originatingSyntax
+
+    // Save to the symbol table
+    symbolTable.registerNominal(mainDecl: mainDecl, redeclarations: [], qualifiedName: name)
   }
+
+  // fileprivate init(
+  //   _debugDescription mainDecl: NominalTypeDeclSyntax2,
+  //   name: QualifiedTypeName,
+  //   originatingSyntax: TypeLikeSyntax,
+  //   savingToTable symbolTable: SymbolTable3
+  // )
 
   public var debugDescription: String {
     "\(name) (\(mainDecl.kind))"
@@ -260,37 +271,38 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   }
 }
 
-extension TypeQualifierFailure: CustomDebugStringConvertible
-where
-  MinimalNominal == ResolvedNominalTypeReference,
-  ExtendedNominal == NominalType
-{
-  public var debugDescription: String {
-    return _describeDebug(
-      resolveMininalNominal: \.debugDescription,
-      resolveExtendedNominal: { extendedNominal in
-        let minimalNominal = ResolvedNominalTypeReference(
-          mainDecl: extendedNominal.mainDecl,
-          name: extendedNominal.qualifiedName,
-          originatingSyntax: TypeLikeSyntax(TypeSyntax(MissingTypeSyntax()))
-        )
-        return minimalNominal.debugDescription
-      }
-    )
-  }
-
-  /// Check if these failures are equal even if the syntax nodes slightly differ.
-  // @_spi(_QualifiedLookup) public _syntacticEquals(_ other: Failure) -> Bool {
-  //   // // If they're strictly equal
-  //   // if self == other { return true }
-  //
-  //   switch (self, other) {
-  //   case (.noTypeInScope, .noTypeInScope):
-  //     return true
-  //   case (.
-  //   }
-  // }
-}
+// extension TypeQualifierFailure: CustomDebugStringConvertible
+// where
+//   MinimalNominal == ResolvedNominalTypeReference,
+//   ExtendedNominal == NominalType
+// {
+//   // public var debugDescription: String {
+//   //   return _describeDebug(
+//   //     resolveMininalNominal: \.debugDescription,
+//   //     resolveExtendedNominal: { extendedNominal in
+//   //       let minimalNominal = ResolvedNominalTypeReference(
+//   //         mainDecl: extendedNominal.mainDecl,
+//   //         name: extendedNominal.qualifiedName,
+//   //         originatingSyntax: TypeLikeSyntax(TypeSyntax(MissingTypeSyntax())),
+//   //         savingToTable: nil
+//   //       )
+//   //       return minimalNominal.debugDescription
+//   //     }
+//   //   )
+//   // }
+//
+//   /// Check if these failures are equal even if the syntax nodes slightly differ.
+//   // @_spi(_QualifiedLookup) public _syntacticEquals(_ other: Failure) -> Bool {
+//   //   // // If they're strictly equal
+//   //   // if self == other { return true }
+//   //
+//   //   switch (self, other) {
+//   //   case (.noTypeInScope, .noTypeInScope):
+//   //     return true
+//   //   case (.
+//   //   }
+//   // }
+// }
 
 // TODO: Add .lookForSupertype, .lookForDynamicMember & implemenet internal/external module lookup
 
@@ -327,23 +339,25 @@ where
 
   let symbolTable: SymbolTable3
   let configuredRegions: ConfiguredRegions?
+  // TODO: Consider using an OrderedSet for more predictable performance
+  var requestedExtensions: Set<ExtensionDeclSyntax> = []
+
   let _verbose: Bool
   let _checkNominalInCompositionIsClassOrProtocol = true
 
-  // TODO: Should we allow just one source-file resolution at a time?
-  var extensionBindingRequest:
-    (
-      /// The file for which we're binding extensions
-      forFile: SourceFileSyntax,
-      /// The type syntax that initiated this request
-      requestSyntax: TypeLikeSyntax,
-      /// The type with all the extensions bound
-      currentNominal: NominalType,
-      /// All extensions we've bound so far
-      boundExtensions: []
-      remainingExtensions: [ExtensionDeclSyntax],
-
-    )? = nil
+  // var extensionBindingRequest:
+  //   (
+  //     /// The file for which we're binding extensions
+  //     forFile: SourceFileSyntax,
+  //     /// The type syntax that initiated this request
+  //     requestSyntax: TypeLikeSyntax,
+  //     /// The type with all the extensions bound
+  //     currentNominal: NominalType,
+  //     /// All extensions we've bound so far
+  //     boundExtensions: []
+  //     remainingExtensions: [ExtensionDeclSyntax],
+  //
+  //   )? = nil
   // [SourceFileSyntax: (
   //   requestSyntax: TypeLikeSyntax, currentNominal: NominalType, remainingExtensions: [ExtensionDeclSyntax]
   // )] = [:]
@@ -415,15 +429,17 @@ where
   //   NOTE: This is just the syntax; if we want to treat this as a nominal type (e.g.
   //    to store in a property), then we need to consider that `ProtoA` != ``
   public mutating func resolveSyntax(
-    typeSyntax: TypeSyntax
+    typeSyntax: TypeSyntax,
+    memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(request: "Resolve syntax `\(typeSyntax.trimmedDescription)`", describe: \._debugDescription) {
-      $0._resolveSyntax(typeSyntax: typeSyntax)
+      $0._resolveSyntax(typeSyntax: typeSyntax, memberDependencies: &memberDependencies)
     }
   }
 
   public mutating func _resolveSyntax(
     typeSyntax: TypeSyntax,
+    memberDependencies: inout [ExtensionBindingResult.Dependency],
     // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
     // requester: Requester,
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
@@ -458,19 +474,24 @@ where
     case .success(.typeIdentifier(.success(let component))):
       return resolveTypeReference(
         typeBaseComponent: ImplicitTypeReferenceComponent(from: component),
-        originatingSyntax: typeSyntax
+        originatingSyntax: typeSyntax,
+        memberDependencies: &memberDependencies
       )
     case .success(.member(let baseTypeSyntax, .success(let memberComponent))):
-      let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax)
+      let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax, memberDependencies: &memberDependencies)
       return resolveMember(
         baseType: baseTypeResult,
-        firstTypeMember: ImplicitTypeReferenceComponent(from: memberComponent)
+        firstTypeMember: ImplicitTypeReferenceComponent(from: memberComponent),
+        memberDependencies: &memberDependencies
       )
     case .success(.composition(let constituentTypes)):
       // TODO: Record assumption that `consituentTypes` is unique.
       var syntaxToTypes = [TypeSyntax: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>]()
       for constituentTypeSyntax in constituentTypes {
-        syntaxToTypes[constituentTypeSyntax] = resolveSyntax(typeSyntax: constituentTypeSyntax)
+        syntaxToTypes[constituentTypeSyntax] = resolveSyntax(
+          typeSyntax: constituentTypeSyntax,
+          memberDependencies: &memberDependencies
+        )
       }
       return reduceComposition(syntaxToTypes)
     case .failure(let failure):
@@ -676,13 +697,14 @@ where
   }
 
   fileprivate mutating func resolveExtendedTypeSyntax(
-    extensionDecl: ExtensionDeclSyntax
+    extensionDecl: ExtensionDeclSyntax,
+    memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<ResolvedNominalTypeReference, Failure> {
     withLogging(
       request: "Extended type syntax `\(extensionDecl.extendedType.trimmedDescription)`",
       describe: \._debugDescription
     ) {
-      $0._resolveExtendedTypeSyntax(extensionDecl: extensionDecl)
+      $0._resolveExtendedTypeSyntax(extensionDecl: extensionDecl, memberDependencies: &memberDependencies)
     }
   }
 
@@ -693,11 +715,12 @@ where
   /// (e.g. `Codable = Encodable & Decodable`). However, we don't diagnose
   /// things like extending an existential (e.g. `extension any Collection`).
   fileprivate mutating func _resolveExtendedTypeSyntax(
-    extensionDecl: ExtensionDeclSyntax
+    extensionDecl: ExtensionDeclSyntax,
+    memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<ResolvedNominalTypeReference, Failure> {
     // Throw if syntax resolution fails
     let lookupResult: MemberLookupResult<ResolvedNominalTypeReference>
-    switch resolveSyntax(typeSyntax: extensionDecl.extendedType) {
+    switch resolveSyntax(typeSyntax: extensionDecl.extendedType, memberDependencies: &memberDependencies) {
     case .success(let result):
       lookupResult = result
     case .failure(let failure):
@@ -722,7 +745,8 @@ where
 
   fileprivate mutating func resolveTypeReference(
     typeBaseComponent: ImplicitTypeReferenceComponent,
-    originatingSyntax: TypeSyntax
+    originatingSyntax: TypeSyntax,
+    memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
       request: "Type reference `\(typeBaseComponent.debugDescription)`",
@@ -730,7 +754,8 @@ where
     ) {
       $0._resolveTypeReference(
         typeBaseComponent: typeBaseComponent,
-        originatingSyntax: originatingSyntax
+        originatingSyntax: originatingSyntax,
+        memberDependencies: &memberDependencies
       )
     }
   }
@@ -738,7 +763,8 @@ where
   fileprivate mutating func _resolveTypeReference(
     // _ typeReference: PartiallyResolvedTypeIdentifier,
     typeBaseComponent: ImplicitTypeReferenceComponent,
-    originatingSyntax: TypeSyntax
+    originatingSyntax: TypeSyntax,
+    memberDependencies: inout [ExtensionBindingResult.Dependency]
       // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
       // requester: Requester,
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
@@ -800,6 +826,7 @@ where
         enclosingTypeResult = resolveTypeDecl(
           baseTypeDecl: typeDecl,
           baseTypeLikeSyntax: typeBaseComponent.introducingSyntax,
+          memberDependencies: &memberDependencies,
           // memberChain: memberChainPrefix + typeReference.memberChain.map(ImplicitTypeReferenceComponent.init(from:)),
           // originatingSyntax: originatingSyntax
         )
@@ -820,7 +847,7 @@ where
         // One of the lookup results will be to look for `A` in `extension Int`.
         // The enclosing type is `Swift::Int.(MyFile.swift)::A`. Then, to find `A.B` we'll
         // just append `.A` to the member chain. Hence, we look for `.A.B` in `Swift::Int`
-        switch resolveExtendedTypeSyntax(extensionDecl: extensionDecl) {
+        switch resolveExtendedTypeSyntax(extensionDecl: extensionDecl, memberDependencies: &memberDependencies) {
         case .success(let type):
           enclosingTypeResult = Result.success(MemberLookupResult.memberResults([type]))
         case .failure(let failure):
@@ -830,7 +857,7 @@ where
       case .lookForGenericParameters(let extensionDecl):
         // Resolve extended type
         let baseType: ResolvedNominalTypeReference
-        switch resolveExtendedTypeSyntax(extensionDecl: extensionDecl) {
+        switch resolveExtendedTypeSyntax(extensionDecl: extensionDecl, memberDependencies: &memberDependencies) {
         case .success(let type):
           baseType = type
         case .failure(let failure):
@@ -839,7 +866,7 @@ where
 
         // Check for generic parameters
         // TODO: Should we diagnose
-        guard let genericParameter = baseType.mainDecl.findGenericParameters(withName: typeBaseComponent.name).first
+        guard baseType.mainDecl.findGenericParameters(withName: typeBaseComponent.name).first != nil
         else { continue }
         enclosingTypeResult = Result.failure(.genericParameterOrAssociatedType)
         lookForSelectedMember = false
@@ -870,7 +897,8 @@ where
       // Look for the member
       let memberTypeResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveMember(
         baseType: Result.success(enclosingType),
-        firstTypeMember: typeBaseComponent
+        firstTypeMember: typeBaseComponent,
+        memberDependencies: &memberDependencies
       )
 
       // Get the type member
@@ -894,7 +922,8 @@ where
 
   fileprivate mutating func resolveTypeDecl(
     baseTypeDecl: TypeDeclSyntax,
-    baseTypeLikeSyntax: TypeLikeSyntax
+    baseTypeLikeSyntax: TypeLikeSyntax,
+    memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
       request: "Decl \(baseTypeDecl.kind) `\(baseTypeDecl.name.trimmedDescription)`",
@@ -902,7 +931,8 @@ where
     ) {
       $0._resolveTypeDecl(
         baseTypeDecl: baseTypeDecl,
-        baseTypeLikeSyntax: baseTypeLikeSyntax
+        baseTypeLikeSyntax: baseTypeLikeSyntax,
+        memberDependencies: &memberDependencies
       )
     }
   }
@@ -924,8 +954,9 @@ where
   fileprivate mutating func _resolveTypeDecl(
     baseTypeDecl: TypeDeclSyntax,
     baseTypeLikeSyntax: TypeLikeSyntax,
-    // memberChain: [ImplicitTypeReferenceComponent],
-    // originatingSyntax: TypeSyntax
+    memberDependencies: inout [ExtensionBindingResult.Dependency]
+      // memberChain: [ImplicitTypeReferenceComponent],
+      // originatingSyntax: TypeSyntax
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     // log(
     //   "[For syntax \(originatingSyntax)] Resolving decl kind \(baseTypeDecl.kind) `\(baseTypeDecl.trimmedDescription)` with chain \(memberChain)"
@@ -941,7 +972,10 @@ where
         "Partially resolved to type alias = \(typeAlias.initializer.value)."
       )
 
-      let aliasedResult = resolveSyntax(typeSyntax: typeAlias.initializer.value)
+      let aliasedResult = resolveSyntax(
+        typeSyntax: typeAlias.initializer.value,
+        memberDependencies: &memberDependencies
+      )
       // Map error so that callers don't think this type decl has an issue (the type alias is diagnosed separately)
       return aliasedResult.mapError(Failure.invalidAliasedType(_:))
     } else { /* else if it's an associated type or generic parameter */
@@ -979,7 +1013,8 @@ where
           ResolvedNominalTypeReference(
             mainDecl: nominalDecl,
             name: qualifiedTypeName,
-            originatingSyntax: baseTypeLikeSyntax
+            originatingSyntax: baseTypeLikeSyntax,
+            savingToTable: symbolTable
           )
         ])
       )
@@ -989,14 +1024,18 @@ where
       // )
 
       // Resolve the base extension and resolve the type chain
-      let qualifiedBaseResult = resolveExtendedTypeSyntax(extensionDecl: partiallyResolvedName.base)
+      let qualifiedBaseResult = resolveExtendedTypeSyntax(
+        extensionDecl: partiallyResolvedName.base,
+        memberDependencies: &memberDependencies
+      )
       let module: Identifier? = nil  // TODO: Find the actual module
       switch qualifiedBaseResult {
       case .success(let resolvedExtendedBaseNominal):
         let resolvedBaseNominal = partiallyResolvedName.resolve(
           resolvedBase: resolvedExtendedBaseNominal,
           originatingSyntax: baseTypeLikeSyntax,
-          module: module
+          module: module,
+          savingToTable: symbolTable
         )
         return Result.success(
           MemberLookupResult.memberResults([resolvedBaseNominal])
@@ -1009,19 +1048,21 @@ where
 
   fileprivate mutating func resolveMember(
     baseType: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>,
-    firstTypeMember: ImplicitTypeReferenceComponent
+    firstTypeMember: ImplicitTypeReferenceComponent,
+    memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
       request: "Member `\(firstTypeMember.debugDescription)`",
       describe: \._debugDescription
     ) {
-      $0._resolveMember(baseType: baseType, firstTypeMember: firstTypeMember)
+      $0._resolveMember(baseType: baseType, firstTypeMember: firstTypeMember, memberDependencies: &memberDependencies)
     }
   }
 
   fileprivate mutating func _resolveMember(
     baseType: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>,
-    firstTypeMember: ImplicitTypeReferenceComponent
+    firstTypeMember: ImplicitTypeReferenceComponent,
+    memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     // // Return if we don't have type members
     // guard let firstTypeMember = memberChain.first else {
@@ -1087,7 +1128,6 @@ where
     var failures = [TypeLikeSyntax: Failure]()
     var nominalBaseTypes = [NominalType]()
     for baseType in baseTypes {
-      let (mainDecl, name) = (baseType.mainDecl, baseType.name)
       // We'll collect the result, nominal base type, and type syntax
       let memberResult:
         Result<(typeDecl: TypeDeclSyntax, result: MemberLookupResult<ResolvedNominalTypeReference>)?, Failure>
@@ -1105,15 +1145,9 @@ where
 
       // Bind extensions and construct a nominal type.
       // We ignore failures since they're from non-matching extensions and diagnosed separately
-      let (extensions, _) = bindExtensions(
-        matchingForName: name,
-        resolvedFrom: firstTypeMember.introducingSyntax
-      )
-      let nominalBaseType = NominalType(
-        qualifiedName: name,
-        mainDecl: mainDecl,
-        redeclarations: [],
-        extensions: extensions
+      let nominalBaseType = _resolveNominalType(
+        name: baseType.name,
+        originatingSyntax: firstTypeMember.introducingSyntax
       )
       nominalBaseTypes.append(nominalBaseType)
 
@@ -1179,8 +1213,9 @@ where
       memberResult = resolveTypeDecl(
         baseTypeDecl: memberTypeDecl,
         baseTypeLikeSyntax: firstTypeMember.introducingSyntax,
-        // memberChain: remainingMemberChain,
-        // originatingSyntax: originatingSyntax
+        memberDependencies: &memberDependencies
+          // memberChain: remainingMemberChain,
+          // originatingSyntax: originatingSyntax
       ).map({ result in Optional((typeDecl: memberTypeDecl, result: result)) })
     }
 
@@ -1225,37 +1260,19 @@ where
   /// There are three paths:
   /// 1. The symbol table hasn't resolved the extensions accessibles from this source file
   ///    We need to bind all said extensions
-  /// 2. We're currently binding the given type
+  /// 2. We're already binding extensions by servicing another request
   /// 3. The symbol table has a cached/resolved version
   fileprivate mutating func _resolveNominalType(
     name: QualifiedTypeName,
     originatingSyntax: TypeLikeSyntax
-  ) -> Result<NominalType, Failure> {
+  ) -> NominalType {
     // The type must already be in the symbol table (even with no extensions bound)
+    // Should be guaranteed by `symbolTable` parameter in `ResolvedNominalTypeReference` initializer.
     guard let currentNominal = symbolTable.typeState[name] else {
       fatalError(
         "[SwiftLexicalLookup] Internal error: Tried resolving type whose name isn't in the symbol table to a nominal type."
       )
     }
-
-    // If we're already trying to bind this type, return the "in-progress" type
-    if let bindingRequest = extensionBindingRequest {
-      // If
-      guard bindingRequest.currentNominal.qualifiedName == name else {
-        return .success(currentNominal)
-      }
-      return .success(bindingRequest.currentNominal)
-    }
-
-    // // Extract the current nominal to start the binding process
-    // let currentNominal: NominalType
-    // switch typeState {
-    // case .resolved(let current):
-    //   currentNominal = current
-    // case .bindingPotentialExtensions(_, let currentNominal, _, _):
-    //   // If we're binding extensions, return the current version
-    //   return Result.success(currentNominal)
-    // }
 
     // Find all the extensions we need to bind
     //
@@ -1268,72 +1285,183 @@ where
       configuredRegions: configuredRegions
     )
 
-    // Find what extensions we haven't bound yet
-    let unboundExtensions = accessibleExtensions.filter({ (file, extensions) in
-      currentNominal.extensions[file] == nil
-    })
+    // Detect if there's an existing binding request (before requesting more extensions)
+    let startsExtensionBinding = self.requestedExtensions.isEmpty
 
-    // If we've already bound everything, our type is ready
-    if unboundExtensions.isEmpty { return .success(currentNominal) }
-
-    // Start the binding process for each file
-    for file in
-    self.extensionBindingRequest = (
-      requestSyntax: originatingSyntax,
-      currentNominal: currentNominal,
-      remainingExtensions:
-    )
-  }
-
-  mutating func bindExtensions(
-    matchingForName nameQuery: QualifiedTypeName,
-    resolvedFrom originatingSyntax: TypeLikeSyntax
-      // TODO: We don't technically need the `failures` result for the API; only for debugging.
-  ) -> NominalType {  // (matches: [SourceFileSyntax: [ExtensionDeclSyntax]], failures: [ExtensionDeclSyntax: Failure]) {
-    let currentNominal: NominalType
-    switch symbolTable.typeState[nameQuery] {
-    case TypeResolutionState.resolved(let resolved):
-      // Check if
-    case TypeResolutionState.bindingPotentialExtension(
-      resolved: NominalType,
-      stochasticMembers: [Identifier: [TypeDeclSyntax]]
-    ):
-
+    // Queue up the extensions that need binding
+    for (file, extensionDecls) in accessibleExtensions {
+      // Skip if the file has already been resolved
+      guard let unresolvedFileExtensions = symbolTable.unresolvedExtensions[file] else { continue }
+      // Add the unresolved extensions in the file
+      self.requestedExtensions.formUnion(extensionDecls.intersection(unresolvedFileExtensions))
     }
-    // FIXME: Get current nominal from symbol table & remember if we're
-    // binding extensions; if so, add a dependence with our result
-    // Perhaps do within bindExtensions and then get the nominal type
-    // with (keeping out erroneous, ergo unbound, extensions)
-    //
-    // TODO: Wrap the type syntax in a SymbolTableSyntax<TypeSyntax> that guarantees this
-    guard let file = originatingSyntax.root.as(SourceFileSyntax.self) else {
-      fatalError(
-        "[SwiftLexicalLookup] Internal error: Unexpectedly had to resolve type syntax whose root isn't a source file."
+
+    // If there's an existing request, it will take care of the rest
+    guard startsExtensionBinding else {
+      // Even if not all extensions are loaded, we queued up all extensions that
+      // need to be processed, so we'll get invalidated appropriately.
+      return currentNominal
+    }
+
+    // It's up to us to bind all required extensions
+    while let extensionDecl = self.requestedExtensions.first {
+      // Resolve, tracking dependencies
+      //
+      // Note: We don't add these dependencies to our dependencies since
+      // this is considered a completely separate type resolution. We
+      // track these dependencies in the symbol table's corresponding
+      // extension state.
+      var extensionDependencies = [ExtensionBindingResult.Dependency]()
+      let extendedTypeResult = resolveExtendedTypeSyntax(
+        extensionDecl: extensionDecl,
+        memberDependencies: &extensionDependencies
       )
-    }
-    let allExtensionDecls: [SourceFileSyntax: [ExtensionDeclSyntax]] = symbolTable.findAllExtensions(
-      accessibleFrom: file,
-      configuredRegions: configuredRegions
-    )
-    var matches = [SourceFileSyntax: [ExtensionDeclSyntax]]()
-    var failures = [ExtensionDeclSyntax: Failure]()
-    for (file, extensionDecls) in allExtensionDecls {
-      for extensionDecl in extensionDecls {
-        let extendedType: ResolvedNominalTypeReference
 
-        // Resolve the extended type (cached by ``resolveSyntax``)
-        switch resolveExtendedTypeSyntax(extensionDecl: extensionDecl) {
-        case .success(let nominalType):
-          extendedType = nominalType
+      // Register in the symbol table
+      let bindingResult: Result<SymbolTable3.InvalidatedExtensions, SymbolTable3.ExtensionBindingFailure> =
+        symbolTable.bindExtension(
+          extensionDecl,
+          // Only get the name
+          to: extendedTypeResult.map(\.name),
+          dependencies: extensionDependencies
+        )
+
+      // Handle failures
+      var invalidatedExtensions: [ExtensionDeclSyntax]
+      switch bindingResult {
+      case .success(let success):
+        invalidatedExtensions = success
+      case .failure(let failure):
+        // Ensure we handle future failure types
+        switch failure {
+        // TODO: Reduce possible failures (e.g. nonRegisteredSyntaxRoot should go)
+        // (e.g. invalidated/binding modes may be able to simplify)
+        //
+        // Explanation:
+        // .nonRegisteredSyntaxRoot: We got this extension from the symbol table, which gets extensions from files
+        // .cannotFixNonInvalidated: We request binding, not fixing invalidated extensions, so this shouldn't happen
+        // .cannotBindInvalidated: We track invalidated extensions separately so this shoudln't happen
+        // .alreadyResolved: The queueing step should not have enqueued already-resolved extensions
+        // .boundToUnresolvedName: We checked for this at the start of this function
+        // .bindingBeforeFixingInvalidatedExtensions: The loop below should fix invalidated extensions after each pass.
+        case .nonRegisteredSyntaxRoot, .cannotFixNonInvalidated, .cannotBindInvalidated, .alreadyResolved,
+          .boundToUnresolvedName, .bindingBeforeFixingInvalidatedExtensions:
+          fatalError(
+            "[SwiftLexicalLookup] Internal error: Unexpected failure when attempting to bind extension: \(failure); extension: \(extensionDecl.trimmedDescription)"
+          )
+        }
+      }
+
+      // Fix invalidated extensions
+      while let brokenExtensionDecl = invalidatedExtensions.first {
+        // Re-resolve with dependency tracking
+        var brokenExtensionDependencies = [ExtensionBindingResult.Dependency]()
+        let extendedTypeResult = resolveExtendedTypeSyntax(
+          extensionDecl: brokenExtensionDecl,
+          memberDependencies: &brokenExtensionDependencies
+        )
+
+        // Register in the symbol table
+        let nestedBindingResult: Result<SymbolTable3.InvalidatedExtensions, SymbolTable3.ExtensionBindingFailure> =
+          symbolTable.fixInvalidatedExtension(
+            extensionDecl,
+            // Only get the name
+            to: extendedTypeResult.map(\.name),
+            dependencies: extensionDependencies
+          )
+
+        // Process failures
+        let nestedInvalidatedExtensions: SymbolTable3.InvalidatedExtensions
+        switch nestedBindingResult {
+        case .success(let success):
+          nestedInvalidatedExtensions = success
         case .failure(let failure):
-          failures[extensionDecl] = failure
-          continue
+          // Ensure we handle future failure types
+          switch failure {
+          // TODO: Reduce possible failures (e.g. nonRegisteredSyntaxRoot should go)
+          // (e.g. invalidated/binding modes may be able to simplify)
+          //
+          // Explanation:
+          // .nonRegisteredSyntaxRoot: We got this extension from the symbol table, which gets extensions from files
+          // .cannotFixNonInvalidated: We're processing extensions returned by `SymbolTable`'s
+          //   `bindExtension` and `fixInvalidatedExtension` which should be invalidated.
+          // .cannotBindInvalidated: We requested fixing; not binding.
+          // .alreadyResolved: The queueing step should not have enqueued already-resolved extensions
+          // .boundToUnresolvedName: We checked for this at the start of this function
+          // .bindingBeforeFixingInvalidatedExtensions: We're fixing invalidated extensions, so this shouldn't happen.
+          case .nonRegisteredSyntaxRoot, .cannotFixNonInvalidated, .cannotBindInvalidated, .alreadyResolved,
+            .boundToUnresolvedName, .bindingBeforeFixingInvalidatedExtensions:
+            fatalError(
+              "[SwiftLexicalLookup] Internal error: Unexpected failure when attempting to fix invalidated extension: \(failure); extension: \(extensionDecl.trimmedDescription)"
+            )
+          }
         }
 
-        if extendedType.name == nameQuery { matches[file, default: []].append(extensionDecl) }
+        // Enqueue invalidated extensions
+        invalidatedExtensions.append(contentsOf: nestedInvalidatedExtensions)
       }
     }
 
-    return (matches, failures)
+    // After binding all extensions, get the new nominal type
+    guard let finalizedNominal = symbolTable.typeState[name] else {
+      // We checked the nominal type is regsitered at the start.
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Nominal type unexpectedly removed from symbol table after binding extensions."
+      )
+    }
+
+    return finalizedNominal
   }
+
+  //   mutating func bindExtensions(
+  //     matchingForName nameQuery: QualifiedTypeName,
+  //     resolvedFrom originatingSyntax: TypeLikeSyntax
+  //       // TODO: We don't technically need the `failures` result for the API; only for debugging.
+  //   ) -> NominalType {  // (matches: [SourceFileSyntax: [ExtensionDeclSyntax]], failures: [ExtensionDeclSyntax: Failure]) {
+  //     let currentNominal: NominalType
+  //     switch symbolTable.typeState[nameQuery] {
+  //     case TypeResolutionState.resolved(let resolved):
+  //       // Check if
+  //     case TypeResolutionState.bindingPotentialExtension(
+  //       resolved: NominalType,
+  //       stochasticMembers: [Identifier: [TypeDeclSyntax]]
+  //     ):
+  //
+  //     }
+  //     // FIXME: Get current nominal from symbol table & remember if we're
+  //     // binding extensions; if so, add a dependence with our result
+  //     // Perhaps do within bindExtensions and then get the nominal type
+  //     // with (keeping out erroneous, ergo unbound, extensions)
+  //     //
+  //     // TODO: Wrap the type syntax in a SymbolTableSyntax<TypeSyntax> that guarantees this
+  //     guard let file = originatingSyntax.root.as(SourceFileSyntax.self) else {
+  //       fatalError(
+  //         "[SwiftLexicalLookup] Internal error: Unexpectedly had to resolve type syntax whose root isn't a source file."
+  //       )
+  //     }
+  //     let allExtensionDecls: [SourceFileSyntax: [ExtensionDeclSyntax]] = symbolTable.findAllExtensions(
+  //       accessibleFrom: file,
+  //       configuredRegions: configuredRegions
+  //     )
+  //     var matches = [SourceFileSyntax: [ExtensionDeclSyntax]]()
+  //     var failures = [ExtensionDeclSyntax: Failure]()
+  //     for (file, extensionDecls) in allExtensionDecls {
+  //       for extensionDecl in extensionDecls {
+  //         let extendedType: ResolvedNominalTypeReference
+  //
+  //         // Resolve the extended type (cached by ``resolveSyntax``)
+  //         switch resolveExtendedTypeSyntax(extensionDecl: extensionDecl) {
+  //         case .success(let nominalType):
+  //           extendedType = nominalType
+  //         case .failure(let failure):
+  //           failures[extensionDecl] = failure
+  //           continue
+  //         }
+  //
+  //         if extendedType.name == nameQuery { matches[file, default: []].append(extensionDecl) }
+  //       }
+  //     }
+  //
+  //     return (matches, failures)
+  //   }
 }
