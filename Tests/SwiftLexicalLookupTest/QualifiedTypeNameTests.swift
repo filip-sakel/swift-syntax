@@ -884,6 +884,14 @@ final class TestQualifiedTypeName: XCTestCase {
   // extension A { typealias A = Inner }
   // ```
   //
+  // Example C (corrected?)
+  // ```swiftc
+  // struct C {}
+  // struct A { typealias B = C }
+  // extension A.B {} // Bind here
+  // extension A { struct C {} }
+  // ```
+  //
   // Example D (with comments explaining rationale)
   //
   // ```swift
@@ -942,6 +950,24 @@ final class TestQualifiedTypeName: XCTestCase {
   //          b. Introducing no members
   // // Assuming this turns out to be valid, what happens if we add an `extension A.Inner.Outer { typealias `Self` = Int }`
   //
+  // Example F
   //
+  // ```swift
+  // struct A {}
+  // struct B { typealias C = A } // error: type alias 'C' references itself
+  // extension B.C {} // <- Bind here
+  // struct D { typealias E = B.C }
+  // extension B { typealias A = D.E }
+  // ```
+  //
+  // Example G
+  // ```swift
+  // struct A {}
+  // struct B { typealias C = A }
+  // extension B.C {} // <- Bind here
+  //           `- warning: warning: extending a protocol composition is not supported; extending 'A' instead
+  // struct D { typealias E = B }
+  // extension B { typealias A = D.E }
+  // ```
 
 }

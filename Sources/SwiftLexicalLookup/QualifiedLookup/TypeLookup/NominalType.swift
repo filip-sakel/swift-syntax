@@ -32,11 +32,109 @@ import SwiftSyntax
   /// That's because access control modifiers in extensions are basically
   /// a shorthand for writing said modifier in front of every member of
   /// the extension.
+  ///
+  /// Note that some extensions get invalidated. There are three cases:
+  /// 1. We had an error and we may potentially succeed
+  ///    In the following, we only succeed if this extension doesn't
+  ///    introduce more ambiguities:
+  ///    a. noTypeInScope
+  ///       E.g.
+  ///       ```swift
+  ///       struct A { typealias B = C }
+  ///       extension A.B {} // <- Bind here
+  ///       extension A { struct C {} }
+  ///       ```
+  ///       Trying to bind `extension A.B` initially returns `noTypeInScope`
+  ///       because we can't find `C`. Then we process `extension A` which
+  ///       introduces a type `C`, after which, the error resolves.
+  ///    b. noTypeMember
+  ///       E.g.
+  ///       ```swift
+  ///       struct A {}
+  ///       extension A.B {} // <- Bind here
+  ///       extension A { struct B {} }
+  ///       ```
+  ///       Trying to bind `extension A.B` we get `noTypeMember`, but then
+  ///       after binding `extension A` we have a type member `B`, so
+  ///       we can successfully bind `extension A.B`.
+  ///    c. invalidAliasedType
+  ///       Recursively calls others.
+  /// 2. We had an error and may update the diagnostic
+  ///    a. cannotExtendNonNominal
+  ///       We can never update a non-nominal but we may need to update the diagnostic.
+  ///       ```swift
+  ///       struct A { typealias B = () -> Bool }
+  ///       extension A.B {} // <- Bind here
+  ///       extension A { struct B {} }
+  ///       ```
+  ///       Here, trying to bind `extension A.B` will initially complain
+  ///       that we're trying to extend a non-nominal (function) type.
+  ///       However, binding the second extension, we get an ambiguity error
+  ///       since there are two `A.B` types.
+  ///    b. invalidComposition
+  ///       We can never extend a composition, but we could get a different diagnostic.
+  ///       E.g.
+  ///       ```swift
+  ///       struct A { protocol B {} }
+  ///       extension A.B & A {} // <- Bind here
+  ///       extension A { struct B {} }
+  ///       ```
+  ///       When first binding `extension A.B & A`, we complain that
+  ///       the composition is invalid since `A` is a struct. But after
+  ///       binding `extension A`, we complain that `A.B` is ambiguous.
+  ///    b. other (parser error)
+  ///       We can't fix that here.
+  ///
+  /// TODO: Finish up examples for the rest of the errors.
+  ///
   /// TODO: Think about `@_private` Naive question: ""Does this hold true for @_private() imports,i.e., are only the imported
   /// file's extensions gonna appear, or do we transitively get the entire
   /// imported module."" I think @_private is only valid for files within the current
   /// module so that doesn't apply.
-  let extensions: [SymbolTable3.Module: [ExtensionDeclSyntax]]
+  ///
+  /// TODO: Should invalidated extensions be removed from the nominal while we're recomputing.
+  /// 1. If the extension was previously an error, it wasn't in a nominal's extensions anyway
+  /// 2. If the extension was valid and we invalidate, we either resolve to an error or rebind
+  ///    to a type where at least one unqualified lookup yields an type from a more inner scope.
+  ///    a. Key insight: This means that cycles don't form unless an extension introduces members
+  ///       on which its extended type relies.
+  ///       The argument is as follows:
+  ///       Type resolution consists of unqualified lookup and qualified lookup, where
+  ///       unqualified/qualified lookup may involve redirection through type aliases
+  ///       and nested qualified lookup.
+  ///       what if we change inner result, resolve extension that changes outer result
+  ///       struct D {}
+  ///       struct B2 {}
+  ///       struct A { typealias B = B2 }
+  ///       extension A.B { typealias C = D }
+  ///       extension A.B.C { typealias E = A  } // initially (File.swift)::D
+  ///       // extension A.B { struct D {} } // Changes `extension A.B.C` resolution
+  ///       extension A.B.C.E { struct B2 {}  }
+  ///    b. If we have a type member, and an extension introduces a redeclaration,
+  ///       which then invalidates an extension relying on said type member, then
+  ///       the invalidated extension carries both declaring extensions' dependencies
+  ///       transitively.
+  ///       TODO: How does this interact with valid/erroneous extensions? I.e., what
+  ///       should invalidated extensions be removed from the LUT while invalidating?
+  ///       I think so because nothing we've calculated this far should rely on these
+  ///       extensions according to the dependency-conflict rule
+  ///
+  ///
+  ///    c. Example of valid invalidation
+  ///         ```swift
+  ///         struct C {}
+  ///         struct A { typealias B = C }
+  ///         extension A.C {} // <- Bind here
+  ///         extension A { struct C {} }
+  ///         ```
+  ///       Trying to bind `extension A.C` first, we resolve to `(MyFile.swift)::C`.
+  ///       However, after binding `extension A`, then `extension A.C` now rebinds
+  ///       to `(MyFile.swift)::A.(MyFile.swift)::C`.
+  ///
+  ///
+  internal var extensions: [SymbolTable3.Module: Set<ExtensionDeclSyntax>]
+
+  // var typeLookupTable: [Identifier: [TypeDeclSyntax]]
 
   // let extensions: [SourceFileSyntax: [ExtensionDeclSyntax]]
 }
@@ -48,10 +146,15 @@ extension NominalType {
       fatalError("[SwiftLexicalLookup] Internal error: mainDecl is not attached to a SourceFileSyntax")
     }
     var results = [mainDeclFile: [DeclGroupSyntaxType(exactly: mainDecl)]]
-    for (file, extensionDecls) in extensions {
-      results[file, default: []].append(
-        contentsOf: extensionDecls.map(DeclGroupSyntaxType.init(exactly:))
-      )
+    for (_, extensionDecls) in extensions {
+      for extensionDecl in extensionDecls {
+        guard let file = extensionDecl.root.as(SourceFileSyntax.self) else {
+          fatalError(
+            "[SwiftLexicalLookup] Internal error: Should have checked extension declaration has source-file root before being bound to a nominal type."
+          )
+        }
+        results[file, default: []].append(DeclGroupSyntaxType(exactly: extensionDecl))
+      }
     }
     return results
   }
