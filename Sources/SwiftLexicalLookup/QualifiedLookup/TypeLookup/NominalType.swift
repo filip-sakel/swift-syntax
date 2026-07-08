@@ -20,7 +20,7 @@ import SwiftSyntax
   /// The main declaration of this type
   let mainDecl: NominalTypeDeclSyntax
   /// Invalid redeclarations that use the same name
-  let redeclarations: [NominalTypeDeclSyntax]
+  fileprivate(set) var redeclarations: Set<NominalTypeDeclSyntax>
   /// All extensions organized by the module in which they were declared.
   /// Only the modules included in this query are included.
   ///
@@ -137,6 +137,16 @@ import SwiftSyntax
   // var typeLookupTable: [Identifier: [TypeDeclSyntax]]
 
   // let extensions: [SourceFileSyntax: [ExtensionDeclSyntax]]
+}
+
+extension NominalType {
+  consuming func withRedeclaration(
+    _ otherNominalDecl: NominalTypeDeclSyntax
+  ) -> NominalType {
+    var copy = self
+    copy.redeclarations.insert(otherNominalDecl)
+    return copy
+  }
 }
 
 extension NominalType {

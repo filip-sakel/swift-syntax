@@ -292,17 +292,30 @@ extension DeclGroupSyntax {
 
 // MARK: Registering Nominal
 extension SymbolTable3 {
+  // TODO: Does this behavior even make sense? Shouldn't redeclarations just get handled separately.
   func registerNominal(
-    mainDecl: NominalTypeDeclSyntax,
-    redeclarations: [NominalTypeDeclSyntax],
-    qualifiedName: QualifiedTypeName
+    qualifiedName: QualifiedTypeName,
+    mainDecl: NominalTypeDeclSyntax
   ) {
-    typeState[qualifiedName] = NominalType(
-      qualifiedName: qualifiedName,
-      mainDecl: mainDecl,
-      redeclarations: redeclarations,
-      extensions: [:]
-    )
+    let newNominal: NominalType
+    if let existingNominal = typeState[qualifiedName], existingNominal.mainDecl != mainDecl {
+      // Type already exists with different main decl; this is a redeclaration
+      assertionFailure("[SwiftLexicalLookup] Internal error: Didn't expect redeclaration to be registered implicitly.")
+      newNominal = existingNominal.withRedeclaration(mainDecl)
+    } else if let existingNominal = typeState[qualifiedName] {
+      // Main declaration matches existing type; don't modify
+      newNominal = existingNominal
+    } else {
+      // Create new type
+      newNominal = NominalType(
+        qualifiedName: qualifiedName,
+        mainDecl: mainDecl,
+        redeclarations: [],
+        extensions: [:]
+      )
+    }
+
+    typeState[qualifiedName] = newNominal
   }
 }
 
@@ -627,5 +640,21 @@ extension SymbolTable3 {
 
     // Return which extensions broke
     return .success(invalidatedExtensions)
+  }
+}
+
+// MARK: Debug Print
+
+// extension ExtensionBindingState: CustomDebugStringConvertible {
+//
+// }
+
+extension SymbolTable3: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    let typesDescription = typeState.values.map(\.debugDescription)
+    let extensionsDescription = extensionState.map({ (extensionDecl, extensionState) in
+      "\(extensionDecl._memberlessDescription): \(extensionState)"
+    })
+    return "SymbolTable3(types: \(typesDescription), extensionState: \(extensionsDescription)"
   }
 }

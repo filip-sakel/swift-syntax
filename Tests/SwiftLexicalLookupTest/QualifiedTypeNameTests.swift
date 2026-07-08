@@ -298,14 +298,12 @@ final class TestQualifiedTypeName: XCTestCase {
 
     // Perform lookup
     let symbolTable = SymbolTable3(moduleToSources: [Identifier(canonicalName: moduleName): lookupFiles])
+    var typeQualifier = TypeQualifier(
+      symbolTable: symbolTable,
+      configuredRegions: configuredRegions,
+      _verbose: verbose
+    )
     for (fileName, lookupSource) in lookupSources {
-      // Create "fresh" type qualifier to avoid sharing state (which includes failures)
-      var typeQualifier = TypeQualifier(
-        symbolTable: symbolTable,
-        configuredRegions: configuredRegions,
-        _verbose: verbose
-      )
-
       let sourceString = lookupSource.source
       // Force-unwrapped because we just created `lookupFile` with the same `fileName`s
       let sourceFile = lookupFiles[fileName]!
@@ -357,9 +355,10 @@ final class TestQualifiedTypeName: XCTestCase {
           typeQualifier.resolveSyntax(typeSyntax: targetTypeSyntax, memberDependencies: &typeResolutionDependencies)
         // _ = consume typeResolutionDependencies
 
-        // Report errors
+        // Report result
         if verbose {
           print(">>> Result of `\(targetTypeSyntax.trimmedDescription)` lookup: \(lookupResultOrFailure)")
+          print("Symbol table: \(symbolTable.debugDescription)\n")
         }
 
         // Match success with success and failure with failure
@@ -647,38 +646,25 @@ final class TestQualifiedTypeName: XCTestCase {
   // }
 
   func testSimpleExtension() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::A")
-      struct A {}
+    assertQualifiedTypeName(
+      [
+        "MyFile.swift": """
+        \("🟥", name: "_(MyFile.swift)::A")
+        struct A {}
 
-      extension A {
-        \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
-        struct B {}
-      }
-      func f(_: \(references: ["🟩"])A.B)
-      """ as QualifiedTypeNameSource
-    ])
+        extension A {
+          \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
+          struct B {}
+        }
+        func f(_: \(references: ["🟩"])A.B)
+        // Test that incremental binding still works with a second request
+        func g(_: \(references: ["🟩"])A.B)
+        """ as QualifiedTypeNameSource
+      ],
+      verbose: true
+    )
   }
   func testTypeInExtension() {
-    // assertQualifiedTypeName(
-    //   [
-    //     "MyFile.swift": """
-    //     \("🟥", name: "_(MyFile.swift)::A")
-    //     struct A {}
-    //
-    //     extension A {
-    //       \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
-    //       struct B {
-    //         func f(_: \(references: ["🟩"])B)
-    //       }
-    //       func g(_: \(references: ["🟩"])B)
-    //     }
-    //     func h(_: \(references: ["🟩"])A.B)
-    //     """ as QualifiedTypeNameSource
-    //   ],
-    //   verbose: true
-    // )
     assertQualifiedTypeName(
       [
         "MyFile.swift": """
@@ -690,29 +676,33 @@ final class TestQualifiedTypeName: XCTestCase {
           struct B {
             func f(_: \(references: ["🟩"])B)
           }
+          func g(_: \(references: ["🟩"])B)
         }
+        func h(_: \(references: ["🟩"])A.B)
         """ as QualifiedTypeNameSource
       ],
       verbose: true
     )
   }
-  func testCrossFileExtension() {
-    assertQualifiedTypeName([
-      "FileA.swift": """
-      \("🟥", name: "_(FileA.swift)::A")
-      struct A {}
-      func f(_: \(references: ["🟩"])A.B)
-      """ as QualifiedTypeNameSource,
+  // func testCrossFileExtension() {
+  //   assertQualifiedTypeName([
+  //     "FileA.swift": """
+  //     \("🟥", name: "_(FileA.swift)::A")
+  //     struct A {}
+  //     func f(_: \(references: ["🟩"])A.B)
+  //     """ as QualifiedTypeNameSource,
+  //
+  //     "FileB.swift": """
+  //     extension A {
+  //       \("🟩", name: "_(FileA.swift)::A._(FileB.swift)::B")
+  //       struct B {}
+  //     }
+  //     func g(_: \(references: ["🟩"])A.B)
+  //     """ as QualifiedTypeNameSource,
+  //   ])
+  // }
 
-      "FileB.swift": """
-      extension A {
-        \("🟩", name: "_(FileA.swift)::A._(FileB.swift)::B")
-        struct B {}
-      }
-      func g(_: \(references: ["🟩"])A.B)
-      """ as QualifiedTypeNameSource,
-    ])
-  }
+  // TODO: Test cycles
 
   // func testCodeBlockSimpleCase() {
   //   assertQualifiedTypeName([

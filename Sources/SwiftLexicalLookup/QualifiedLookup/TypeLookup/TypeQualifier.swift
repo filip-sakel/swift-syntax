@@ -84,7 +84,7 @@ extension ResolvedNominalTypeReference {
     self.originatingSyntax = originatingSyntax
 
     // Save to the symbol table
-    symbolTable.registerNominal(mainDecl: mainDecl, redeclarations: [], qualifiedName: name)
+    symbolTable.registerNominal(qualifiedName: name, mainDecl: mainDecl)
   }
 
   @_spi(_QualifiedLookupTests) public static func _mockMarkerType(
