@@ -864,7 +864,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       let lookForSelectedMember: Bool
 
       switch lookupResult {
-      case .lookInsideType(let typeDecl, let findSelectedMember):
+      case .lookForType(let typeDecl, let findSelectedMember):
         enclosingTypeResult = resolveTypeDecl(
           baseTypeDecl: typeDecl,
           baseTypeLikeSyntax: typeBaseComponent.introducingSyntax,
@@ -873,7 +873,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
           // originatingSyntax: originatingSyntax
         )
         lookForSelectedMember = findSelectedMember
-      case .lookInsideExtension(let extensionDecl, let findSelectedMember):
+      case .lookForExtension(let extensionDecl, let findSelectedMember):
         // We might have to look inside an extension
         // For instance:
         //   extension Int {

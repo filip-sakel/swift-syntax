@@ -49,7 +49,7 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
   ///    `.A` to see if `A` has any member types named `Self`.
   /// 2. The second request will be to resolve `struct A` with no selected member
   ///    (i.e. type `A` itself)
-  case lookInsideType(TypeDeclSyntax, lookForSelectedMember: Bool)
+  case lookForType(TypeDeclSyntax, lookForSelectedMember: Bool)
 
   /// Resolve the extension's extended type look for the desired member if
   /// ``lookForSelectedMember`` is `true`.
@@ -65,7 +65,7 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
   ///    `.Self` to see if `A` has any member types named `Self`.
   /// 2. The second request will be to resolve `extension A` with no selected member
   ///    (i.e. the extended type `A` itself)
-  case lookInsideExtension(ExtensionDeclSyntax, lookForSelectedMember: Bool)
+  case lookForExtension(ExtensionDeclSyntax, lookForSelectedMember: Bool)
   /// E.g.
   /// ```swift
   /// extension Array {
@@ -84,12 +84,12 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
       return ".lookInImports(\(imports.map(\.name)))"
     case .lookInModule:
       return "lookInModule"
-    case .lookInsideExtension(let extensionDecl, let lookForSelectedMember):
+    case .lookForExtension(let extensionDecl, let lookForSelectedMember):
       return
-        ".lookInsideExtension(\(extensionDecl.trimmedDescription), lookForSelectedMember: \(lookForSelectedMember))"
-    case .lookInsideType(let type, let lookForSelectedMember):
+        ".lookForExtension(\(extensionDecl.trimmedDescription), lookForSelectedMember: \(lookForSelectedMember))"
+    case .lookForType(let type, let lookForSelectedMember):
       return
-        ".lookInsideType(\(type.trimmedDescription), lookForSelectedMember: \(lookForSelectedMember)))"
+        ".lookForType(\(type.trimmedDescription), lookForSelectedMember: \(lookForSelectedMember)))"
     }
   }
 }
@@ -136,12 +136,12 @@ extension SyntaxProtocol {
             // TODO: Should probably be DeclGroupSyntax to begin with
             guard let declGroup = decl.as(DeclGroupSyntaxType.self) else { return nil }
             if let nominalDecl = declGroup.as(NominalTypeDeclSyntax.self) {
-              return UnqualifiedTypeLookupResult.lookInsideType(
+              return UnqualifiedTypeLookupResult.lookForType(
                 TypeDeclSyntax(nominalDecl),
                 lookForSelectedMember: false
               )
             } else if let extensionDecl = declGroup.as(ExtensionDeclSyntax.self) {
-              return UnqualifiedTypeLookupResult.lookInsideExtension(extensionDecl, lookForSelectedMember: false)
+              return UnqualifiedTypeLookupResult.lookForExtension(extensionDecl, lookForSelectedMember: false)
             } else {
               assertionFailure(
                 "[SwiftLexicalLookup] Internal error: Expected declaration group to either be a nominal type or extension declaration."
@@ -156,7 +156,7 @@ extension SyntaxProtocol {
             // Note: We handle extensions above
             guard let typeDecl = TypeDeclSyntax(decl) else { return nil }
 
-            return UnqualifiedTypeLookupResult.lookInsideType(typeDecl, lookForSelectedMember: false)
+            return UnqualifiedTypeLookupResult.lookForType(typeDecl, lookForSelectedMember: false)
           // Identifiers, `self`, `newValue`, `error`, and `oldValue` can't be type decls.
           // Also, equivalent names always refers to identifiers in switch cases
           case .identifier, .implicit(.`self`), .implicit(.newValue), .implicit(.oldValue),
@@ -168,9 +168,9 @@ extension SyntaxProtocol {
         // TODO: Should probably already be a `DeclGroupSyntaxType`
         guard let declGroup = DeclGroupSyntaxType(decl) else { return [] }
         if let nominalDecl = declGroup.as(NominalTypeDeclSyntax.self) {
-          return [UnqualifiedTypeLookupResult.lookInsideType(TypeDeclSyntax(nominalDecl), lookForSelectedMember: true)]
+          return [UnqualifiedTypeLookupResult.lookForType(TypeDeclSyntax(nominalDecl), lookForSelectedMember: true)]
         } else if let extensionDecl = declGroup.as(ExtensionDeclSyntax.self) {
-          return [UnqualifiedTypeLookupResult.lookInsideExtension(extensionDecl, lookForSelectedMember: true)]
+          return [UnqualifiedTypeLookupResult.lookForExtension(extensionDecl, lookForSelectedMember: true)]
         } else {
           assertionFailure(
             "[SwiftLexicalLookup] Internal error: Expected declaration group to either be a nominal type or extension declaration."
