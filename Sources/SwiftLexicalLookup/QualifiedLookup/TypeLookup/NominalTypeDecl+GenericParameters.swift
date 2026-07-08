@@ -12,7 +12,7 @@
 
 import SwiftSyntax
 
-extension NominalTypeDeclSyntax2 {
+extension NominalTypeDeclSyntax {
   /// Find the given generic parameter in this nominal-type declaration.
   /// Empty for protocols (they only have associated types)
   func findGenericParameters(withName name: Identifier?) -> [GenericParameterSyntax] {

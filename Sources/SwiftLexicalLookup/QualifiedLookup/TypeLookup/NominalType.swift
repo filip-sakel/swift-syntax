@@ -18,9 +18,9 @@ import SwiftSyntax
   /// Globally unique name
   @_spi(_QualifiedLookupTests) public let qualifiedName: QualifiedTypeName
   /// The main declaration of this type
-  let mainDecl: NominalTypeDeclSyntax2
+  let mainDecl: NominalTypeDeclSyntax
   /// Invalid redeclarations that use the same name
-  let redeclarations: [NominalTypeDeclSyntax2]
+  let redeclarations: [NominalTypeDeclSyntax]
   /// All extensions organized by the module in which they were declared.
   /// Only the modules included in this query are included.
   ///

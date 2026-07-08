@@ -557,7 +557,7 @@ extension ValueDeclSyntax {
 
 // Protocols
 extension ValueDeclSyntax {
-  init(fromProtocol syntax: borrowing some NominalTypeDeclSyntax) {
+  init(fromProtocol syntax: borrowing some NonProtocolNominalTypeDeclSyntax) {
     // We know this cast is going to succeed. Go through `init(_: SyntaxData)` just to double-check and
     // verify the kind matches in debug builds and get maximum performance in release builds.
     self = Syntax(syntax).cast(ValueDeclSyntax.self)

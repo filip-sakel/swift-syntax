@@ -13,13 +13,13 @@
 import SwiftSyntax
 
 @_spi(Experimental)
-public protocol NominalTypeDeclSyntax: LookInMembersScopeSyntax, DeclGroupSyntax, NamedDeclSyntax,
+public protocol NonProtocolNominalTypeDeclSyntax: LookInMembersScopeSyntax, DeclGroupSyntax, NamedDeclSyntax,
   WithGenericParametersScopeSyntax
 {
   var genericParameterClause: GenericParameterClauseSyntax? { get }
 }
 
-extension NominalTypeDeclSyntax {
+extension NonProtocolNominalTypeDeclSyntax {
   @_spi(Experimental) public var lookupMembersPosition: AbsolutePosition {
     name.positionAfterSkippingLeadingTrivia
   }
@@ -52,14 +52,16 @@ extension SyntaxProtocol {
   /// Check whether the non-type erased version of this syntax node conforms to
   /// `BracedSyntax`.
   /// Note that this will incur an existential conversion.
-  @_spi(Experimental) public func isProtocol(_: NominalTypeDeclSyntax.Protocol) -> Bool {
+  @_spi(Experimental) public func isProtocol(_: NonProtocolNominalTypeDeclSyntax.Protocol) -> Bool {
     return self.asProtocol(BracedSyntax.self) != nil
   }
 
   /// Return the non-type erased version of this syntax node if it conforms to
   /// `BracedSyntax`. Otherwise return `nil`.
   /// Note that this will incur an existential conversion.
-  @_spi(Experimental) public func asProtocol(_: NominalTypeDeclSyntax.Protocol) -> NominalTypeDeclSyntax? {
-    return Syntax(self).asProtocol(SyntaxProtocol.self) as? NominalTypeDeclSyntax
+  @_spi(Experimental) public func asProtocol(
+    _: NonProtocolNominalTypeDeclSyntax.Protocol
+  ) -> NonProtocolNominalTypeDeclSyntax? {
+    return Syntax(self).asProtocol(SyntaxProtocol.self) as? NonProtocolNominalTypeDeclSyntax
   }
 }

@@ -195,7 +195,7 @@ extension ResolvedNominalTypeReference {
     let originatingSyntax: TypeSyntax = "\(raw: marker)"
 
     // We should only get type declarations
-    let typeDecl = NominalTypeDeclSyntax2(rawTypeDecl)!
+    let typeDecl = NominalTypeDeclSyntax(rawTypeDecl)!
     return ResolvedNominalTypeReference._mockMarkerType(
       mainDecl: typeDecl,
       originatingSyntax: originatingSyntax
@@ -244,7 +244,7 @@ final class TestQualifiedTypeName: XCTestCase {
 
     // Find the expected nominal-type declaration and qualified-name string for each marker.
     var markerToType = [
-      Character: (nominalDecl: NominalTypeDeclSyntax2, name: String, file: StaticString, line: UInt)
+      Character: (nominalDecl: NominalTypeDeclSyntax, name: String, file: StaticString, line: UInt)
     ]()
     for (fileName, lookupSource) in lookupSources {
       let sourceString = lookupSource.source
@@ -262,7 +262,7 @@ final class TestQualifiedTypeName: XCTestCase {
         }
 
         // We expect the parent to be a nominal-type declaration
-        guard let nominalDecl = introducerToken.parent?.as(NominalTypeDeclSyntax2.self) else {
+        guard let nominalDecl = introducerToken.parent?.as(NominalTypeDeclSyntax.self) else {
           XCTFail(
             "Invalid marker placement: The parent of the token after the expectation isn't a nominal-type declaration; instead got parent kind '\(String(reflecting: introducerToken.parent?.kind))'.",
             file: file,
@@ -351,7 +351,7 @@ final class TestQualifiedTypeName: XCTestCase {
 
         // Find the minimal-nominal type
         let expectedMarkers: [Character]
-        let declsToNames: [NominalTypeDeclSyntax2: String]
+        let declsToNames: [NominalTypeDeclSyntax: String]
         var typeResolutionDependencies = [ExtensionBindingResult.Dependency]()
         let lookupResultOrFailure: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeQualifier.Failure> =
           typeQualifier.resolveSyntax(typeSyntax: targetTypeSyntax, memberDependencies: &typeResolutionDependencies)
@@ -367,7 +367,7 @@ final class TestQualifiedTypeName: XCTestCase {
         case (.success(.memberResults(let markers)), .success(.memberResults(let nominalTypes))):
           expectedMarkers = markers
           // Map tuple to results
-          var namesToDeclsTemporary = [NominalTypeDeclSyntax2: String]()
+          var namesToDeclsTemporary = [NominalTypeDeclSyntax: String]()
           for nominalType in nominalTypes {
             let nameDescription = describeQualifiedName(nominalType.name)
             guard namesToDeclsTemporary[nominalType.mainDecl] == nil else { continue assertionLoop }
@@ -665,21 +665,18 @@ final class TestQualifiedTypeName: XCTestCase {
     //   ],
     //   verbose: true
     // )
-    assertQualifiedTypeName(
-      [
-        "MyFile.swift": """
-        \("🟥", name: "_(MyFile.swift)::A")
-        struct A {}
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::A")
+      struct A {}
 
-        extension A {
-          \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
-          struct B {}
-        }
-        func h(_: \(references: ["🟩"])A.B)
-        """ as QualifiedTypeNameSource
-      ],
-      verbose: true
-    )
+      extension A {
+        \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
+        struct B {}
+      }
+      func h(_: \(references: ["🟩"])A.B)
+      """ as QualifiedTypeNameSource
+    ])
   }
 
   // func testCodeBlockSimpleCase() {

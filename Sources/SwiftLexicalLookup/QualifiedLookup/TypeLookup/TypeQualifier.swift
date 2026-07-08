@@ -47,12 +47,12 @@ extension Result where Success == [TypeDeclSyntax] {
 /// The minimal defining components of a nominal type: the main declaration and the qualified name.
 /// Unlike ``NominalType``, doesn't include extensions.
 @_spi(_QualifiedLookup) public struct ResolvedNominalTypeReference: Sendable, Hashable, CustomDebugStringConvertible {
-  public let mainDecl: NominalTypeDeclSyntax2
+  public let mainDecl: NominalTypeDeclSyntax
   public let name: QualifiedTypeName
   public let originatingSyntax: TypeLikeSyntax
 
   private init(
-    mainDecl: NominalTypeDeclSyntax2,
+    mainDecl: NominalTypeDeclSyntax,
     name: QualifiedTypeName,
     originatingSyntax: TypeLikeSyntax
   ) {
@@ -74,7 +74,7 @@ extension Result where Success == [TypeDeclSyntax] {
 }
 extension ResolvedNominalTypeReference {
   @_spi(_QualifiedLookup) public init(
-    mainDecl: NominalTypeDeclSyntax2,
+    mainDecl: NominalTypeDeclSyntax,
     name: QualifiedTypeName,
     originatingSyntax: TypeLikeSyntax,
     savingToTable symbolTable: SymbolTable3
@@ -88,7 +88,7 @@ extension ResolvedNominalTypeReference {
   }
 
   @_spi(_QualifiedLookupTests) public static func _mockMarkerType(
-    mainDecl: NominalTypeDeclSyntax2,
+    mainDecl: NominalTypeDeclSyntax,
     originatingSyntax: TypeSyntax
   ) -> ResolvedNominalTypeReference {
     ResolvedNominalTypeReference(
@@ -1006,8 +1006,8 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
     // We mainly handle nominal types; type aliases are trivially recursive, and we skip
     // associated types and generic parameters
-    let nominalDecl: NominalTypeDeclSyntax2
-    if let nominalTypeDecl = baseTypeDecl.as(NominalTypeDeclSyntax2.self) {
+    let nominalDecl: NominalTypeDeclSyntax
+    if let nominalTypeDecl = baseTypeDecl.as(NominalTypeDeclSyntax.self) {
       nominalDecl = nominalTypeDecl
     } else if let typeAlias = baseTypeDecl.as(TypeAliasDeclSyntax.self) {
       log(
@@ -1041,7 +1041,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       )
     case .failure(.invalidIdentifier(let invalidIdentifier)):
       // TODO: Decide if this is too granular and we shud have a more general `.invalidContext` instead.
-      return .failure(.other(NominalTypeDeclSyntax2.ChainResolutionFailure.invalidIdentifier(invalidIdentifier)))
+      return .failure(.other(NominalTypeDeclSyntax.ChainResolutionFailure.invalidIdentifier(invalidIdentifier)))
     }
 
     switch typeChain {

@@ -373,22 +373,22 @@ import SwiftSyntax
   }
 }
 
-@_spi(Experimental) extension ActorDeclSyntax: NominalTypeDeclSyntax {
+@_spi(Experimental) extension ActorDeclSyntax: NonProtocolNominalTypeDeclSyntax {
   @_spi(Experimental) public var scopeDebugName: String {
     "ActorDeclScope"
   }
 }
-@_spi(Experimental) extension ClassDeclSyntax: NominalTypeDeclSyntax {
+@_spi(Experimental) extension ClassDeclSyntax: NonProtocolNominalTypeDeclSyntax {
   @_spi(Experimental) public var scopeDebugName: String {
     "ClassDeclScope"
   }
 }
-@_spi(Experimental) extension StructDeclSyntax: NominalTypeDeclSyntax {
+@_spi(Experimental) extension StructDeclSyntax: NonProtocolNominalTypeDeclSyntax {
   @_spi(Experimental) public var scopeDebugName: String {
     "StructDeclScope"
   }
 }
-@_spi(Experimental) extension EnumDeclSyntax: NominalTypeDeclSyntax {
+@_spi(Experimental) extension EnumDeclSyntax: NonProtocolNominalTypeDeclSyntax {
   @_spi(Experimental) public var scopeDebugName: String {
     "EnumDeclScope"
   }

@@ -13,7 +13,7 @@
 import SwiftSyntax
 
 /// A nominal type declaration (struct, enum, class, actor, protocol).
-@_spi(_QualifiedLookup) public struct NominalTypeDeclSyntax2: SyntaxProtocol, Hashable {
+@_spi(_QualifiedLookup) public struct NominalTypeDeclSyntax: SyntaxProtocol, Hashable {
   public private(set) var _syntaxNode: Syntax
 
   public init?(_ node: __shared some SyntaxProtocol) {
@@ -36,7 +36,7 @@ import SwiftSyntax
   }
 }
 
-extension NominalTypeDeclSyntax2: DeclGroupSyntax {
+extension NominalTypeDeclSyntax: DeclGroupSyntax {
   private func _getGroupProp<T>(_ prop: KeyPath<any DeclGroupSyntax & NamedDeclSyntax, T>) -> T {
     switch _syntaxNode.as(SyntaxEnum.self) {
     case .structDecl(let declGroup):

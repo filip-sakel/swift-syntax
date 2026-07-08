@@ -247,7 +247,7 @@ public class SymbolTable {
   ) {
     // Look for declaration groups:
     //   1. nominal types (structs, enums, classes, actors)
-    if let nominalType = decl.asProtocol((any NominalTypeDeclSyntax).self),
+    if let nominalType = decl.asProtocol((any NonProtocolNominalTypeDeclSyntax).self),
       let typeName = nominalType.name.identifier
     {
       types[typeName, default: []].append(DeclGroupSyntaxType(exactly: nominalType))
@@ -620,7 +620,7 @@ extension SymbolTable {
     // TODO: Look at how potential access control influences lookup
     // TODO: Look at how to handle `lookFor[..]` queries
     var extendedLookup = [CanonicalType: [QualifiedLookupResult]]()
-    var mainDecls = [CanonicalType: [any NominalTypeDeclSyntax]]()
+    var mainDecls = [CanonicalType: [any NonProtocolNominalTypeDeclSyntax]]()
     for (canonicalType, results) in nestedTypeMainDecls {
       for result in results {
         switch result {
@@ -630,7 +630,7 @@ extension SymbolTable {
           mainDecls[canonicalType, default: []].append(
             contentsOf: decls.lazy.map({
               // Ensure look up gave us nominal declarations
-              guard let nominalType = $0.asProtocol((any NominalTypeDeclSyntax).self) else {
+              guard let nominalType = $0.asProtocol((any NonProtocolNominalTypeDeclSyntax).self) else {
                 fatalError(
                   "[SwiftLexicalLookup] Internal assertion failure: Expected only nominal types after performing type-only lookup."
                 )

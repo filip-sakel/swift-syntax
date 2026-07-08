@@ -37,11 +37,11 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
   // let members: [(mainDecl: NominalTypeDeclSyntax2, name: Identifier)]
   /// The main declaration of the partially resolved type or `nil` if the
   /// type is not yet resolved (``memberNames`` is empty).
-  let mainDecl: NominalTypeDeclSyntax2?
+  let mainDecl: NominalTypeDeclSyntax?
   let sourceFile: SourceFileSyntax
 
   // IMPORTANT: Base and members must share the same fileSyntax root.
-  init(base: ExtensionDeclSyntax, members: [(mainDecl: NominalTypeDeclSyntax2, name: Identifier)]) {
+  init(base: ExtensionDeclSyntax, members: [(mainDecl: NominalTypeDeclSyntax, name: Identifier)]) {
     // precondition(base.root == members.root, "Invalid root")
     guard let sourceFile = base.root.as(SourceFileSyntax.self) else {
       preconditionFailure("Invalid root, not source file")
@@ -156,7 +156,7 @@ extension SyntaxProtocol {
   // }
 }
 
-extension NominalTypeDeclSyntax2 {
+extension NominalTypeDeclSyntax {
   enum ChainResolutionFailure: Error {
     // We can only perform chain resolution in nodes nested within a file
     case noSourceFileRoot(root: Syntax)
@@ -185,7 +185,7 @@ extension NominalTypeDeclSyntax2 {
 
       while let currentAncestor = ancestor {
         // Nominal types go to the front of the "chain"
-        if let nominalTypeDecl = currentAncestor.as(NominalTypeDeclSyntax2.self) {
+        if let nominalTypeDecl = currentAncestor.as(NominalTypeDeclSyntax.self) {
           try members.insert((mainDecl: nominalTypeDecl, name: parseName(nominalTypeDecl.name)), at: 0)
         }
         // Extensions can't be resolved right now.

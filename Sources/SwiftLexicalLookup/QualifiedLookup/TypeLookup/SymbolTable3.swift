@@ -293,8 +293,8 @@ extension DeclGroupSyntax {
 // MARK: Registering Nominal
 extension SymbolTable3 {
   func registerNominal(
-    mainDecl: NominalTypeDeclSyntax2,
-    redeclarations: [NominalTypeDeclSyntax2],
+    mainDecl: NominalTypeDeclSyntax,
+    redeclarations: [NominalTypeDeclSyntax],
     qualifiedName: QualifiedTypeName
   ) {
     typeState[qualifiedName] = NominalType(

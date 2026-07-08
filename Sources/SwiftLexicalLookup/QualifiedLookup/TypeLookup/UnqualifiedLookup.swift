@@ -135,7 +135,7 @@ extension SyntaxProtocol {
           case .implicit(.`Self`(let decl)):
             // TODO: Should probably be DeclGroupSyntax to begin with
             guard let declGroup = decl.as(DeclGroupSyntaxType.self) else { return nil }
-            if let nominalDecl = declGroup.as(NominalTypeDeclSyntax2.self) {
+            if let nominalDecl = declGroup.as(NominalTypeDeclSyntax.self) {
               return UnqualifiedTypeLookupResult.lookInsideType(
                 TypeDeclSyntax(nominalDecl),
                 lookForSelectedMember: false
@@ -167,7 +167,7 @@ extension SyntaxProtocol {
       case .lookForMembers(let decl):
         // TODO: Should probably already be a `DeclGroupSyntaxType`
         guard let declGroup = DeclGroupSyntaxType(decl) else { return [] }
-        if let nominalDecl = declGroup.as(NominalTypeDeclSyntax2.self) {
+        if let nominalDecl = declGroup.as(NominalTypeDeclSyntax.self) {
           return [UnqualifiedTypeLookupResult.lookInsideType(TypeDeclSyntax(nominalDecl), lookForSelectedMember: true)]
         } else if let extensionDecl = declGroup.as(ExtensionDeclSyntax.self) {
           return [UnqualifiedTypeLookupResult.lookInsideExtension(extensionDecl, lookForSelectedMember: true)]

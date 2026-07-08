@@ -12,30 +12,6 @@
 
 import SwiftSyntax
 
-@_spi(_QualifiedLookup) public protocol TypeLikeSyntaxProtocol: SyntaxProtocol {}
-
-@_spi(_QualifiedLookup) extension TypeSyntax: TypeLikeSyntaxProtocol {}
-@_spi(_QualifiedLookup) extension NominalTypeDeclSyntax2: TypeLikeSyntaxProtocol {}
-
-@_spi(_QualifiedLookup) public struct TypeLikeSyntax: Sendable, Hashable, TypeLikeSyntaxProtocol {
-  public private(set) var _syntaxNode: Syntax
-
-  public init?(_ node: __shared some SyntaxProtocol) {
-    guard node.is(TypeSyntax.self) || node.is(NominalTypeDeclSyntax2.self) else { return nil }
-    _syntaxNode = Syntax(node)
-  }
-
-  public init(_ typeLikeSyntax: TypeLikeSyntaxProtocol) {
-    self._syntaxNode = typeLikeSyntax._syntaxNode
-  }
-
-  // TODO: Are we allowed to have non-primitive node types??
-  public static let structure = SyntaxNodeStructure.choices([
-    SyntaxNodeStructure.SyntaxChoice.node(TypeSyntax.self),
-    SyntaxNodeStructure.SyntaxChoice.node(NominalTypeDeclSyntax2.self),
-  ])
-}
-
 /// A type reference component either derived from source or implicitly generated.
 ///
 /// E.g. In `let a: Int.MyType`, `MyType` is a source-derived reference. However,
