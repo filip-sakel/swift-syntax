@@ -85,7 +85,7 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
     let resolvedMainDecl = mainDecl ?? resolvedBase.mainDecl
 
     // Resolve the name
-    switch resolvedBase.name {
+    switch resolvedBase.qualifiedName {
     case .topLevel(let globalType):
       let qualifier: QualifiedTypeNameGlobalType.Qualifier =
         if let module {

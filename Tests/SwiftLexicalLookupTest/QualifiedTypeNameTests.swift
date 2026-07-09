@@ -370,7 +370,7 @@ final class TestQualifiedTypeName: XCTestCase {
           // Map tuple to results
           var namesToDeclsTemporary = [NominalTypeDeclSyntax: String]()
           for nominalType in nominalTypes {
-            let nameDescription = describeQualifiedName(nominalType.name)
+            let nameDescription = describeQualifiedName(nominalType.qualifiedName)
             guard namesToDeclsTemporary[nominalType.mainDecl] == nil else { continue assertionLoop }
             namesToDeclsTemporary[nominalType.mainDecl] = nameDescription
           }
@@ -396,7 +396,7 @@ final class TestQualifiedTypeName: XCTestCase {
             resolveExtendedNominal: markerToQualifiedName
           )
           let failureDescription = failure._describeDebug(
-            resolveMininalNominal: { describeQualifiedName($0.name) },
+            resolveMininalNominal: { describeQualifiedName($0.qualifiedName) },
             resolveExtendedNominal: { describeQualifiedName($0.qualifiedName) }
           )
           XCTAssertEqual(

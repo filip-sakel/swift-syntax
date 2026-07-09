@@ -48,7 +48,7 @@ extension Result where Success == [TypeDeclSyntax] {
 /// Unlike ``NominalType``, doesn't include extensions.
 @_spi(_QualifiedLookup) public struct ResolvedNominalTypeReference: Sendable, Hashable, CustomDebugStringConvertible {
   public let mainDecl: NominalTypeDeclSyntax
-  public let name: QualifiedTypeName
+  public let qualifiedName: QualifiedTypeName
   public let originatingSyntax: TypeLikeSyntax
 
   private init(
@@ -57,12 +57,12 @@ extension Result where Success == [TypeDeclSyntax] {
     originatingSyntax: TypeLikeSyntax
   ) {
     self.mainDecl = mainDecl
-    self.name = name
+    self.qualifiedName = name
     self.originatingSyntax = originatingSyntax
   }
 
   public var debugDescription: String {
-    "\(name) (\(mainDecl.kind))"
+    "\(qualifiedName) (\(mainDecl.kind))"
   }
 }
 extension ResolvedNominalTypeReference {
@@ -73,7 +73,7 @@ extension ResolvedNominalTypeReference {
     savingToTable symbolTable: SymbolTable3
   ) {
     self.mainDecl = mainDecl
-    self.name = name
+    self.qualifiedName = name
     self.originatingSyntax = originatingSyntax
 
     // Save to the symbol table
@@ -942,7 +942,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       // Bind extensions and construct a nominal type.
       // We ignore failures since they're from non-matching extensions and diagnosed separately
       let nominalBaseType = resolveNominalType(
-        name: baseType.name,
+        name: baseType.qualifiedName,
         originatingSyntax: baseType.originatingSyntax
       )
       nominalBaseTypes.append(nominalBaseType)
@@ -995,7 +995,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       // First, group the decls by extension
       memberDependencies.append(
         ExtensionBindingResult.Dependency(
-          baseTypeName: baseType.name,
+          baseTypeName: baseType.qualifiedName,
           typeMember: typeMember.name,
           resolvedDecls: memberTypeDecls
         )
@@ -1073,14 +1073,13 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   /// Resolve a qualified-type name to a nominal type with all accessible
   /// extensions bound.
   fileprivate mutating func resolveNominalType(
-    name: QualifiedTypeName,
-    originatingSyntax: TypeLikeSyntax
+    typeReference: ResolvedNominalTypeReference
   ) -> NominalType {
     withLogging(
-      request: "Extended nominal`\(name)`",
+      request: "Extended nominal`\(typeReference.qualifiedName)`",
       describe: \.debugDescription
     ) {
-      $0._resolveNominalType(name: name, originatingSyntax: originatingSyntax)
+      $0._resolveNominalType(typeReference: typeReference)
     }
   }
 
@@ -1088,8 +1087,9 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   fileprivate mutating func _resolveNominalType(
     // TODO: What if we just take a `ResolvedNominalTypeReference` instead
     // and register types like that?
-    name: QualifiedTypeName,
-    originatingSyntax: TypeLikeSyntax
+    // name: QualifiedTypeName,
+    // originatingSyntax: TypeLikeSyntax
+    typeReference: ResolvedNominalTypeReference
   ) -> NominalType {
     // There are three paths:
     // 1. The symbol table hasn't resolved the extensions accessibles from this source file
@@ -1099,7 +1099,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
     // The type must already be in the symbol table (even with no extensions bound)
     // Should be guaranteed by `symbolTable` parameter in `ResolvedNominalTypeReference` initializer.
-    guard let currentNominal = symbolTable.typeState[name] else {
+    guard let currentNominal = symbolTable.typeState[typeReference.qualifiedName] else {
       fatalError(
         "[SwiftLexicalLookup] Internal error: Tried resolving type whose name isn't in the symbol table to a nominal type."
       )
@@ -1108,7 +1108,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     // Find all the extensions we need to bind
     //
     // First, get the file of the originatingSyntax
-    guard let sourceFile = originatingSyntax.root.as(SourceFileSyntax.self) else {
+    guard let sourceFile = typeReference.originatingSyntax.root.as(SourceFileSyntax.self) else {
       fatalError("[SwiftLexicalLookup] Internal error: Unexpectedly couldn't file source file of originating syntax")
     }
     let accessibleExtensions = symbolTable.findAllExtensions(
@@ -1177,7 +1177,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
             $0.symbolTable.bindExtension(
               extensionDecl,
               // Only get the name
-              to: extendedTypeResult.map(\.name),
+              to: extendedTypeResult.map(\.qualifiedName),
               dependencies: extensionDependencies
             )
 
@@ -1234,7 +1234,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
           symbolTable.fixInvalidatedExtension(
             extensionDecl,
             // Only get the name
-            to: extendedTypeResult.map(\.name),
+            to: extendedTypeResult.map(\.qualifiedName),
             dependencies: invalidatedExtensionDependencies
           )
 
@@ -1271,7 +1271,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     }
 
     // After binding all extensions, get the new nominal type
-    guard let finalizedNominal = symbolTable.typeState[name] else {
+    guard let finalizedNominal = symbolTable.typeState[typeReference.qualifiedName] else {
       // We checked the nominal type is regsitered at the start.
       fatalError(
         "[SwiftLexicalLookup] Internal error: Nominal type unexpectedly removed from symbol table after binding extensions."
