@@ -526,14 +526,17 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
         firstTypeMember: ImplicitTypeReferenceComponent(from: memberComponent),
         memberDependencies: &memberDependencies
       )
-    case .success(.composition(let constituentTypes)):
+    case .success(.composition(let childTypes)):
       // TODO: Record assumption that `consituentTypes` is unique.
-      var syntaxToTypes = [TypeSyntax: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>]()
-      for constituentTypeSyntax in constituentTypes {
-        syntaxToTypes[constituentTypeSyntax] = resolveSyntax(
-          typeSyntax: constituentTypeSyntax,
+      var syntaxToTypes = [
+        (childSyntax: TypeSyntax, childResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>)
+      ]()
+      for childTypeSyntax in childTypes {
+        let childResult = resolveSyntax(
+          typeSyntax: childTypeSyntax,
           memberDependencies: &memberDependencies
         )
+        syntaxToTypes.append((childTypeSyntax, childResult))
       }
       return reduceComposition(syntaxToTypes)
     case .failure(let failure):
@@ -633,7 +636,10 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   }
 
   func reduceComposition(
-    _ syntaxToTypes: [TypeSyntax: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>]
+    _ syntaxToTypes: [(
+      childSyntax: TypeSyntax,
+      childResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
+    )]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     // Composition case
 
