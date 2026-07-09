@@ -51,10 +51,10 @@ extension Result where Success == [TypeDeclSyntax] {
   public let qualifiedName: QualifiedTypeName
   public let originatingSyntax: TypeLikeSyntax
 
-  private init(
+  @_spi(_QualifiedLookup) public init(
     mainDecl: NominalTypeDeclSyntax,
     name: QualifiedTypeName,
-    originatingSyntax: TypeLikeSyntax
+    originatingSyntax: TypeLikeSyntax,
   ) {
     self.mainDecl = mainDecl
     self.qualifiedName = name
@@ -66,20 +66,6 @@ extension Result where Success == [TypeDeclSyntax] {
   }
 }
 extension ResolvedNominalTypeReference {
-  @_spi(_QualifiedLookup) public init(
-    mainDecl: NominalTypeDeclSyntax,
-    name: QualifiedTypeName,
-    originatingSyntax: TypeLikeSyntax,
-    savingToTable symbolTable: SymbolTable3
-  ) {
-    self.mainDecl = mainDecl
-    self.qualifiedName = name
-    self.originatingSyntax = originatingSyntax
-
-    // Save to the symbol table
-    symbolTable.registerNominal(qualifiedName: name, mainDecl: mainDecl)
-  }
-
   @_spi(_QualifiedLookupTests) public static func _mockMarkerType(
     mainDecl: NominalTypeDeclSyntax,
     originatingSyntax: TypeSyntax
@@ -815,8 +801,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
           ResolvedNominalTypeReference(
             mainDecl: nominalDecl,
             name: qualifiedTypeName,
-            originatingSyntax: originatingSyntax,
-            savingToTable: symbolTable
+            originatingSyntax: originatingSyntax
           )
         ])
       )
@@ -832,8 +817,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
         let resolvedBaseNominal = partiallyResolvedName.resolve(
           resolvedBase: resolvedExtendedBaseNominal,
           originatingSyntax: originatingSyntax,
-          module: module,
-          savingToTable: symbolTable
+          module: module
         )
         return Result.success(
           MemberLookupResult.memberResults([resolvedBaseNominal])
@@ -941,10 +925,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
       // Bind extensions and construct a nominal type.
       // We ignore failures since they're from non-matching extensions and diagnosed separately
-      let nominalBaseType = resolveNominalType(
-        name: baseType.qualifiedName,
-        originatingSyntax: baseType.originatingSyntax
-      )
+      let nominalBaseType = resolveNominalType(typeReference: baseType)
       nominalBaseTypes.append(nominalBaseType)
 
       // Perform direct type lookup and mark dependency
@@ -1097,11 +1078,19 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     // 2. We're already binding extensions by servicing another request
     // 3. The symbol table has a cached/resolved version
 
-    // The type must already be in the symbol table (even with no extensions bound)
-    // Should be guaranteed by `symbolTable` parameter in `ResolvedNominalTypeReference` initializer.
-    guard let currentNominal = symbolTable.typeState[typeReference.qualifiedName] else {
+    // Get the nominal type from the symbol table (or register accordingly)
+    let currentNominalResult = symbolTable.registerNominalTypeReference(
+      qualifiedName: typeReference.qualifiedName,
+      mainDecl: typeReference.mainDecl
+    )
+    // Handle reregistration (we should diagnose reregistrations and not save them in the table)
+    let currentNominal: NominalType
+    switch currentNominalResult {
+    case .success(let success):
+      currentNominal = success
+    case .failure(SymbolTable3.NominalRegistrationFailure.invalidReregistration(existingMainDecl: _)):
       fatalError(
-        "[SwiftLexicalLookup] Internal error: Tried resolving type whose name isn't in the symbol table to a nominal type."
+        "[SwiftLexicalLookup] Internal error: Unexpectedly found nominal type `\(typeReference.qualifiedName)` registered under a different main declaration."
       )
     }
 

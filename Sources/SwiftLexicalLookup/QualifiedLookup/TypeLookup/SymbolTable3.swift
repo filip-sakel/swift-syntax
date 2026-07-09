@@ -297,16 +297,22 @@ extension DeclGroupSyntax {
 
 // MARK: Registering Nominal
 extension SymbolTable3 {
-  // TODO: Does this behavior even make sense? Shouldn't redeclarations just get handled separately.
-  func registerNominal(
+  // TODO: Could be a struct.
+  enum NominalRegistrationFailure: Error {
+    case invalidReregistration(existingMainDecl: NominalTypeDeclSyntax)
+  }
+
+  /// Register the given qualified name with the given main declaration.
+  func registerNominalTypeReference(
     qualifiedName: QualifiedTypeName,
     mainDecl: NominalTypeDeclSyntax
-  ) {
+  ) -> Result<NominalType, NominalRegistrationFailure> {
     let newNominal: NominalType
     if let existingNominal = typeState[qualifiedName], existingNominal.mainDecl != mainDecl {
       // Type already exists with different main decl; this is a redeclaration
-      assertionFailure("[SwiftLexicalLookup] Internal error: Didn't expect redeclaration to be registered implicitly.")
-      newNominal = existingNominal.withRedeclaration(mainDecl)
+      return .failure(
+        NominalRegistrationFailure.invalidReregistration(existingMainDecl: existingNominal.mainDecl)
+      )
     } else if let existingNominal = typeState[qualifiedName] {
       // Main declaration matches existing type; don't modify
       newNominal = existingNominal
@@ -320,7 +326,9 @@ extension SymbolTable3 {
       )
     }
 
+    // Register and return
     typeState[qualifiedName] = newNominal
+    return .success(newNominal)
   }
 }
 

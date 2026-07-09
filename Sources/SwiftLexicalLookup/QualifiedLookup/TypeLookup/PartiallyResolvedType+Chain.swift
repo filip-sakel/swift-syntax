@@ -75,7 +75,6 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
     resolvedBase: ResolvedNominalTypeReference,
     originatingSyntax: TypeLikeSyntax,
     module: Identifier?,
-    savingToTable symbolTable: SymbolTable3
   ) -> ResolvedNominalTypeReference {
     // Get the type's main declaration.
     //
@@ -104,8 +103,7 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
         name: QualifiedTypeName.topLevel(
           globalType.addingComponents(memberComponents)
         ),
-        originatingSyntax: originatingSyntax,
-        savingToTable: symbolTable
+        originatingSyntax: originatingSyntax
       )
     case .nestedScope(let scope, let type):
       return ResolvedNominalTypeReference(
@@ -114,8 +112,7 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
           scope: scope,
           type: type.addingComponents(memberNames)
         ),
-        originatingSyntax: originatingSyntax,
-        savingToTable: symbolTable
+        originatingSyntax: originatingSyntax
       )
     }
   }
