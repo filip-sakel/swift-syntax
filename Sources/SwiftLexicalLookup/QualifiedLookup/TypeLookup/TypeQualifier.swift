@@ -61,13 +61,6 @@ extension Result where Success == [TypeDeclSyntax] {
     self.originatingSyntax = originatingSyntax
   }
 
-  // fileprivate init(
-  //   _debugDescription mainDecl: NominalTypeDeclSyntax2,
-  //   name: QualifiedTypeName,
-  //   originatingSyntax: TypeLikeSyntax,
-  //   savingToTable symbolTable: SymbolTable3
-  // )
-
   public var debugDescription: String {
     "\(name) (\(mainDecl.kind))"
   }
@@ -156,18 +149,6 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   /// TODO: Convert to tuple array
   case invalidMembers([TypeLikeSyntax: Self])
 
-  // /// The extension in which the type we're looking up is
-  // /// defined returned an error.
-  // ///
-  // /// extension Codable {
-  // ///   struct MyStruct {
-  // ///     func f(_: MyStruct) {} // <- Look up here
-  // ///   }
-  // /// }
-  // /// In this case, `Codable`, i.e., `Encodable & Decodable` isn't nominal
-  // /// and can't be extended.
-  // case invalidBaseExtension(ExtensionDeclSyntax, failure: Failure)
-
   /// The base type which we need to derive a qualified name is invalid.
   ///
   /// Causes:
@@ -214,6 +195,10 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   /// All evaluated syntax must have a ``SourceFileSyntax`` root that's
   /// registered in the provided symbol table.
   case syntaxNotInSymbolTable(rootKind: SyntaxKind)
+
+  /// Cannot resolve type syntax nested inside a disabled `#if`
+  /// (given the symbol table's configured regions).
+  case syntaxInDisabledRegion
 
   /// Produce a simplified description for debugging.
   ///
@@ -298,42 +283,11 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       return ".ambiguousTypeDecl([\(ambiguousDeclsDescription)])"
     case .syntaxNotInSymbolTable(let rootKind):
       return ".syntaxNotInSymbolTable(rootKind: \(rootKind))"
+    case .syntaxInDisabledRegion:
+      return ".syntaxInDisabledRegion"
     }
   }
 }
-
-// extension TypeQualifierFailure: CustomDebugStringConvertible
-// where
-//   MinimalNominal == ResolvedNominalTypeReference,
-//   ExtendedNominal == NominalType
-// {
-//   // public var debugDescription: String {
-//   //   return _describeDebug(
-//   //     resolveMininalNominal: \.debugDescription,
-//   //     resolveExtendedNominal: { extendedNominal in
-//   //       let minimalNominal = ResolvedNominalTypeReference(
-//   //         mainDecl: extendedNominal.mainDecl,
-//   //         name: extendedNominal.qualifiedName,
-//   //         originatingSyntax: TypeLikeSyntax(TypeSyntax(MissingTypeSyntax())),
-//   //         savingToTable: nil
-//   //       )
-//   //       return minimalNominal.debugDescription
-//   //     }
-//   //   )
-//   // }
-//
-//   /// Check if these failures are equal even if the syntax nodes slightly differ.
-//   // @_spi(_QualifiedLookup) public _syntacticEquals(_ other: Failure) -> Bool {
-//   //   // // If they're strictly equal
-//   //   // if self == other { return true }
-//   //
-//   //   switch (self, other) {
-//   //   case (.noTypeInScope, .noTypeInScope):
-//   //     return true
-//   //   case (.
-//   //   }
-//   // }
-// }
 
 // TODO: Add .lookForSupertype, .lookForDynamicMember & implemenet internal/external module lookup
 
@@ -375,88 +329,20 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
   public typealias Failure = TypeQualifierFailure<ResolvedNominalTypeReference, NominalType>
 
-  // public private(set) var failures = [TypeSyntax: [Failure]]()
-  // var boundExtensions = [ExtensionDeclSyntax: ResolvedNominalTypeReference]()
-
   let symbolTable: SymbolTable3
-  let configuredRegions: ConfiguredRegions?
   var requestedExtensions: OrderedSet<ExtensionDeclSyntax> = []
 
   let _verbose: Bool
-  /// How many `withLogging` calls we can nest. Useful for debugging infinite loops.
-  let _logNestingLimit: Int? = 20
+  /// The number of `withLogging` calls we can nest. Useful for debugging infinite loops
+  /// that otherwise fill up standard output and become illegible.
+  let _logNestingLimit: Int?
   let _checkNominalInCompositionIsClassOrProtocol = true
 
-  // var extensionBindingRequest:
-  //   (
-  //     /// The file for which we're binding extensions
-  //     forFile: SourceFileSyntax,
-  //     /// The type syntax that initiated this request
-  //     requestSyntax: TypeLikeSyntax,
-  //     /// The type with all the extensions bound
-  //     currentNominal: NominalType,
-  //     /// All extensions we've bound so far
-  //     boundExtensions: []
-  //     remainingExtensions: [ExtensionDeclSyntax],
-  //
-  //   )? = nil
-  // [SourceFileSyntax: (
-  //   requestSyntax: TypeLikeSyntax, currentNominal: NominalType, remainingExtensions: [ExtensionDeclSyntax]
-  // )] = [:]
-
-  public init(symbolTable: SymbolTable3, configuredRegions: ConfiguredRegions?, _verbose: Bool) {
+  public init(symbolTable: SymbolTable3, _verbose: Bool, _logNestingLimit: Int? = nil) {
     self.symbolTable = symbolTable
-    self.configuredRegions = configuredRegions
     self._verbose = _verbose
+    self._logNestingLimit = _logNestingLimit
   }
-
-  // fileprivate mutating func _reduceResults(
-  //   _ results: [TypeSyntax: Result<MemberLookupResult<MinimalNominal>, Failure>]
-  // ) -> Result<MemberLookupResult<MinimalNominal>, Failure> {
-  //   if results.isEmpty {}
-  //   // Forward empty results
-  //   guard let (_, firstResult) = results.first else {
-  //     return Result.success(MemberLookupResult.memberResults([]))
-  //   }
-  //   // Forward single result (the rest of the functions handles compositions)
-  //   guard results.count == 1 else {
-  //     return firstResult
-  //   }
-  //
-  //   // Handle compositions
-  //   //
-  //   // We handled tuples/functions above. Now, we assume we have a list of nominals.
-  //   var nominalTypes = [MinimalNominal]()
-  //   var invalidTypes = [TypeSyntax: [Failure]]()
-  //
-  //   for (typeSyntax, result) in results {
-  //     // Simply log failures as other type results might succeed
-  //     let lookupResult: MemberLookupResult<MinimalNominal>
-  //     switch result {
-  //     case .success(let result):
-  //       lookupResult = result
-  //     case .failure(let failure):
-  //       self.failures[typeSyntax, default: []].append(.other(failure))
-  //       continue
-  //     }
-  //
-  //     switch lookupResult {
-  //     // Cannot compose tuple/function types
-  //     case .function, .tuple:
-  //       invalidTypes[typeSyntax, default: []].append(Failure.cannotComposeNonClassOrProtocol(resolved: lookupResult))
-  //     // Otherwise, combine members
-  //     case .memberResults(let newTypes):
-  //       nominalTypes.append(contentsOf: newTypes)
-  //     }
-  //   }
-  //
-  //   guard invalidTypes.isEmpty else {
-  //     return Result.failure(.invalidChildren(invalidTypes))
-  //   }
-  //
-  //   return Result.success(MemberLookupResult.memberResults(nominalTypes))
-  // }
-  //
 
   // TODO: Add per-scope canonicalized cache so that:
   //   func f() {
@@ -481,22 +367,24 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
   public mutating func _resolveSyntax(
     typeSyntax: TypeSyntax,
-    memberDependencies: inout [ExtensionBindingResult.Dependency],
-    // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
-    // requester: Requester,
+    memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     // We assert the syntax *entered* into the API is in the symbol table.
-    // TODO: Consider how this plays out with `#if`
+    // TODO: Consider how this plays out with `#if`, e.g., what if we're in a disabled region
     guard
       let fileRoot = typeSyntax.root.as(SourceFileSyntax.self),
       symbolTable.moduleMap[fileRoot] != nil
     else {
       return .failure(.syntaxNotInSymbolTable(rootKind: typeSyntax.root.kind))
     }
+    // Further, if given `configuredRegions`, ensure the given syntax is active.
+    if let configuredRegions = symbolTable.configuredRegions,
+      configuredRegions.isActive(typeSyntax) != .active
+    {
+      return .failure(Failure.syntaxInDisabledRegion)
+    }
 
-    // // Resolve type references (or return tuple/function)
-    // let typeReferenceResults: [Result<PartiallyResolvedTypeIdentifier, LocalizedTypeResolutionFailure>]
-
+    // Partially resolve the type and handle each case accordingly
     let partialType: Result<PartiallyResolvedType, TypeResolutionFailure> = typeSyntax.partiallyResolve()
     switch partialType {
     case .success(.anyType):
@@ -544,95 +432,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     case .success(.member(base: _, .failure(let nameFailure))),
       .success(.typeIdentifier(.failure(let nameFailure))):
       return Result.failure(Failure.other(nameFailure))
-    // case .memberResults(let typeReferences):
-    //   typeReferenceResults = typeReferences
     }
-
-    // // Single-type case
-    // guard typeReferenceResults.count > 1 else {
-    //   log("Partially resolved \(typeSyntax.trimmedDescription) to type reference \(firstTypeReferenceResult)")
-    //   switch firstTypeReferenceResult {
-    //   case .success(let typeReference):
-    //     return resolveTypeReference(
-    //       typeBaseComponent: ImplicitTypeReferenceComponent(from: typeReference),
-    //       originatingSyntax: typeSyntax
-    //     )
-    //   case .failure(let resolutionFailure):
-    //     return .failure(Failure.other(resolutionFailure))
-    //   }
-    // }
-
-    // // Composition case
-    //
-    // // Look up the found type references
-    // log("Partially resolved \(typeSyntax.trimmedDescription) to type references \(typeReferenceResults)")
-    //
-    // // Collect valid types and failures
-    // var types = [ResolvedNominalTypeReference]()
-    // var failures = [TypeSyntax: Failure]()
-    // for typeReferenceResult in typeReferenceResults {
-    //   // Extract the type reference or log error
-    //   let typeReference: PartiallyResolvedTypeIdentifier
-    //   switch typeReferenceResult {
-    //   case .success(let success):
-    //     typeReference = success
-    //   case .failure(let localizedFailure):
-    //     // Log failure but continue in case others succeed
-    //     failures[typeSyntax] = Failure.other(localizedFailure)
-    //     continue
-    //   }
-    //
-    //   let childTypeSyntax = typeReference.lastComponent.introducingSyntax
-    //   switch resolveTypeReferences(typeReference, originatingSyntax: typeSyntax) {
-    //   // Only nominals are valid in compositions
-    //   // TODO: Diagnose composing metatype but distinguish from `& Any`
-    //   case .success(.memberResults(let nominals)):
-    //     if _checkNominalInCompositionIsClassOrProtocol {
-    //       switch (nominals.count, nominals.first?.mainDecl.kind) {
-    //       // If we have one nominal, check it's a protocol or class.
-    //       // If we have multiple, i.e., a composition, we've already  checked it recursively.
-    //       case (1, .protocolDecl), (1, .classDecl), (2..., _):
-    //         break
-    //       // If we have no nominals, e.g., `Int.Type`, or a single nominal that's not
-    //       // a struct/enum/actor, we throw an error
-    //       default:
-    //         failures[childTypeSyntax] = Failure.cannotComposeNonClassOrProtocol(
-    //           resolved: .memberResults(nominals)
-    //         )
-    //       }
-    //     }
-    //     types.append(contentsOf: nominals)
-    //   // Tuples/function
-    //   case .success(.function(let argumentCount)):
-    //     failures[childTypeSyntax] = Failure.cannotComposeNonClassOrProtocol(
-    //       resolved: .function(argumentCount: argumentCount)
-    //     )
-    //   case .success(.tuple(let labels)):
-    //     failures[childTypeSyntax] = Failure.cannotComposeNonClassOrProtocol(
-    //       resolved: .tuple(labels: labels)
-    //     )
-    //   // Ignore if this particular type didn't contain the type member.
-    //   // E.g.
-    //   //   protocol A { typealias T = Int }
-    //   //   protocol B {}
-    //   //   let ab: (A & B).T // ✅
-    //   case .failure(Failure.noTypeMember):
-    //     continue
-    //   case .failure(let resolutionFailure):
-    //     failures[childTypeSyntax] = Failure.invalidChild(resolutionFailure)
-    //   }
-    // }
-    //
-    // // Stop even if we only have one failure
-    // guard failures.isEmpty else {
-    //   log("Resolved \(typeSyntax.trimmedDescription) to failures \(failures)")
-    //   return Result.failure(Failure.invalidComposition(failures))
-    // }
-    //
-    // // TODO: Ensure we got at least one type member
-    //
-    // log("Resolved \(typeSyntax.trimmedDescription) to types \(types))")
-    // return Result.success(MemberLookupResult.memberResults(types))
   }
 
   func reduceComposition(
@@ -641,30 +441,11 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       childResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
     )]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
-    // Composition case
-
-    // Look up the found type references
-    // log("Partially resolved \(typeSyntax.trimmedDescription) to type references \(typeReferenceResults)")
-
     // Collect valid types and failures
     var anyTypeCounter = 0
     var types = [ResolvedNominalTypeReference]()
     var failures = [(TypeSyntax, Failure)]()
-    // for typeReferenceResult in typeReferenceResults {
     for (childTypeSyntax, childTypeResult) in syntaxToTypes {
-      // // Extract the type reference or log error
-      // let typeReference: PartiallyResolvedTypeIdentifier
-      // switch typeReferenceResult {
-      // case .success(let success):
-      //   typeReference = success
-      // case .failure(let localizedFailure):
-      //   // Log failure but continue in case others succeed
-      //   failures[typeSyntax] = Failure.other(localizedFailure)
-      //   continue
-      // }
-
-      // let childTypeSyntax = typeReference.lastComponent.introducingSyntax
-      // switch resolveTypeReference(typeBaseComponent: typeReference, originatingSyntax: typeSyntax) {
       switch childTypeResult {
       // Only nominals are valid in compositions
       // TODO: Diagnose composing metatype but distinguish from `& Any`
@@ -744,6 +525,12 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     return Result.success(MemberLookupResult.memberResults(types))
   }
 
+  /// Resolve the given type syntax from an extension declaration
+  /// to a single nominal type.
+  ///
+  /// Note that we only diagnose extending tuples/functions and compositions
+  /// (e.g. `Codable = Encodable & Decodable`). However, we don't diagnose
+  /// things like extending an existential (e.g. `extension any Collection`).
   fileprivate mutating func resolveExtendedTypeSyntax(
     extensionDecl: ExtensionDeclSyntax,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
@@ -756,12 +543,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     }
   }
 
-  /// Resolve the given type syntax from an extension declaration
-  /// to a single nominal type.
-  ///
-  /// Note that we only diagnose extending tuples/functions and compositions
-  /// (e.g. `Codable = Encodable & Decodable`). However, we don't diagnose
-  /// things like extending an existential (e.g. `extension any Collection`).
+  /// Implements `resolveExtendedTypeSyntax`
   fileprivate mutating func _resolveExtendedTypeSyntax(
     extensionDecl: ExtensionDeclSyntax,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
@@ -791,6 +573,14 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     }
   }
 
+  /// Resolves the given type reference (an optional module selector +
+  /// the type-name identifier) by performing unqualified lookup.
+  ///
+  /// E.g. The syntax `A & MyModule::B` will issue two `resolveTypeReference`
+  /// calls: one for `A` and one for `MyModule::B`. Type members are handled
+  /// in other functions.
+  ///
+  /// Note: We don't resolve generic parameters.
   fileprivate mutating func resolveTypeReference(
     typeBaseComponent: ImplicitTypeReferenceComponent,
     originatingSyntax: TypeSyntax,
@@ -808,19 +598,12 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     }
   }
 
+  /// Implements `resolveTypeReference`
   fileprivate mutating func _resolveTypeReference(
-    // _ typeReference: PartiallyResolvedTypeIdentifier,
     typeBaseComponent: ImplicitTypeReferenceComponent,
     originatingSyntax: TypeSyntax,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
-      // tailTypes: [PartiallyResolvedTypeIdentifier.Component],
-      // requester: Requester,
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
-    // log("[For syntax \(originatingSyntax.trimmedDescription)] Resolving ref '\(typeReference)'")
-
-    // Get the base type
-    // let (optionalModule, typeName) = (typeBaseComponent.module, typeBaseComponent.base.name)
-
     // Perfom unqualified lookup up to find the base type's declaration
     //
     // e.g.
@@ -853,14 +636,13 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       // be a child of ``originatingSyntax``.
       baseLookupResults = originatingSyntax.findUnqualifiedType(
         typeBaseComponent.name,
-        configuredRegions: configuredRegions
+        configuredRegions: symbolTable.configuredRegions
       )
     }
 
     log("Base lookup results: \(baseLookupResults)")
 
     // Find first matching type declaration
-    // TODO: Merge lookup/skip logic if possible
     for lookupResult in baseLookupResults {
       // The enclosing type
       let enclosingTypeResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
@@ -911,10 +693,12 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
           return Result.failure(Failure.invalidBaseType(failure))
         }
 
-        // Check for generic parameters
-        // TODO: Should we diagnose
-        guard baseType.mainDecl.findGenericParameters(withName: typeBaseComponent.name).first != nil
-        else { continue }
+        // Continue if we didn't find matching generic parameters.
+        guard baseType.mainDecl.findGenericParameters(withName: typeBaseComponent.name).first != nil else {
+          continue
+        }
+
+        // We don't resolve generic parameters (same as ``resolveTypeDecl``).
         enclosingTypeResult = Result.failure(.genericParameterOrAssociatedType)
         lookForSelectedMember = false
       case .lookInModule:
@@ -967,6 +751,11 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     return Result.failure(Failure.noTypeInScope)
   }
 
+  /// Resolve the given type declaration produced by the given `baseTypeDecl`.
+  /// This subrequest was initiated by a request to resolve a ``originatingSyntax``.
+  ///
+  /// This requests explicitly doesn't resolve associated types and generic-parameter
+  /// declarations.
   fileprivate mutating func resolveTypeDecl(
     baseTypeDecl: TypeDeclSyntax,
     baseTypeLikeSyntax: TypeLikeSyntax,
@@ -984,31 +773,12 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     }
   }
 
-  /// Resolve the given type declaration produced by the given `baseTypeLikeSyntax`.
-  /// Then, resolve the given members. This subrequest was initiated by a request
-  /// to resolve a ``originatingSyntax``.
-  ///
-  /// For instance:
-  ///   protocol A {}
-  ///   protocol B {}
-  ///   let ab: A & B // <- Initial look up here
-  /// In this example, we'll find the type references "A" and "B" produced by
-  /// the `A` and `B` type syntax in the variable declaration. Once we perform
-  /// unqualified lookup and figure out that "A" refers to `protocol A`, we call
-  /// `resolveTypeDecl` with `protocol A` as the base type declaration, `A` as
-  /// the type syntax (from the `let` declaration), with an empty member chain
-  /// and `A & B` as the originating syntax.
+  /// Implements `resolveTypeDecl`
   fileprivate mutating func _resolveTypeDecl(
     baseTypeDecl: TypeDeclSyntax,
     baseTypeLikeSyntax: TypeLikeSyntax,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
-      // memberChain: [ImplicitTypeReferenceComponent],
-      // originatingSyntax: TypeSyntax
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
-    // log(
-    //   "[For syntax \(originatingSyntax)] Resolving decl kind \(baseTypeDecl.kind) `\(baseTypeDecl.trimmedDescription)` with chain \(memberChain)"
-    // )
-
     // We mainly handle nominal types; type aliases are trivially recursive, and we skip
     // associated types and generic parameters
     let nominalDecl: NominalTypeDeclSyntax
@@ -1016,7 +786,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       nominalDecl = nominalTypeDecl
     } else if let typeAlias = baseTypeDecl.as(TypeAliasDeclSyntax.self) {
       log(
-        "Partially resolved to type alias = \(typeAlias.initializer.value)."
+        "Found aliased type `\(typeAlias.initializer.value)`"
       )
 
       let aliasedResult = resolveSyntax(
@@ -1026,9 +796,6 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       // Map error so that callers don't think this type decl has an issue (the type alias is diagnosed separately)
       return aliasedResult.mapError(Failure.invalidAliasedType(_:))
     } else { /* else if it's an associated type or generic parameter */
-      // log(
-      //   "[For syntax \(originatingSyntax) & \(baseTypeDecl.kind) '\(baseTypeDecl.name.trimmedDescription)'] Declaration type doesn't have members."
-      // )
       // No members for generic parameters and associated types
       return Result.failure(Failure.genericParameterOrAssociatedType)
     }
@@ -1051,10 +818,6 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
     switch typeChain {
     case .resolved(let qualifiedTypeName):
-      // log(
-      //   "[For syntax \(originatingSyntax) & \(baseTypeDecl.kind) '\(baseTypeDecl.name.trimmedDescription)'] Resolved to type chain \(qualifiedTypeName.debugDescription)"
-      // )
-
       return Result.success(
         MemberLookupResult.memberResults([
           ResolvedNominalTypeReference(
@@ -1066,10 +829,6 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
         ])
       )
     case .partiallyResolved(let partiallyResolvedName):
-      // log(
-      //   "[For syntax \(originatingSyntax) & \(baseTypeDecl.kind) '\(baseTypeDecl.name.trimmedDescription)'] Partially resolved to type chain \(partiallyResolvedName.debugDescription)."
-      // )
-
       // Resolve the base extension and resolve the type chain
       let qualifiedBaseResult = resolveExtendedTypeSyntax(
         extensionDecl: partiallyResolvedName.base,
@@ -1093,20 +852,13 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     }
   }
 
+  /// Resolves the given member reference of the provided, resolved base type,
+  /// recording our dependencies on qualified-lookup queries.
   fileprivate mutating func resolveMember(
     baseType: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>,
     firstTypeMember: ImplicitTypeReferenceComponent,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
-    // let possibleBaseNames: String
-    // switch baseType {
-    // case .success(let nonNominal):
-    //   possibleBaseName = nonNominal._description(describeMembers: { resolvedBaseTypes in
-    //     resolvedBaseTypes.map(\.name.debugDescription).joined(separator: ", ")
-    //   })
-    // case .failure:
-    //   possibleBaseName = "<error>"
-    // }
     withLogging(
       request: "Member `\(firstTypeMember.debugDescription)`",
       describe: \._debugDescription
@@ -1115,23 +867,12 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     }
   }
 
+  /// Implements `resolveMember`
   fileprivate mutating func _resolveMember(
     baseType: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>,
     firstTypeMember: ImplicitTypeReferenceComponent,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
-    // // Return if we don't have type members
-    // guard let firstTypeMember = memberChain.first else {
-    //   log(
-    //     "[For syntax \(originatingSyntax) & \(baseTypeDecl.kind) '\(baseTypeDecl.name.trimmedDescription)'] Resolved to \(baseLookupResult)."
-    //   )
-    //   return baseLookupResult
-    // }
-    // let remainingMemberChain = Array(memberChain.dropFirst())
-    // log(
-    //   "[For syntax \(originatingSyntax) & \(baseTypeDecl.kind) '\(baseTypeDecl.name.trimmedDescription)'] Partially resolved base to \(baseLookupResult._debugDescription) with next base \(firstTypeMember) with chain \(remainingMemberChain)."
-    // )
-
     // Get member type(s), or throw
     //
     // We throw because we can't resolve anything without the
@@ -1168,18 +909,17 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
     // Perform qualified type lookup and mark the dependencies
     //
-    // We collect all types so the type checker can check if members of
-    // compositions actually resolve to the same type. For instance:
+    // Note: We collect all types and failures. This approach allows the
+    // type checker can check if members of compositions actually resolve
+    // to the same type. For instance:
     //   protocol A { typealias T = Int }
     //   final class B { typealias T = [String].Index /* i.e. Int */ }
     //   protocol C { typealias T = Int }
     //   typealias ABC = A & B & C
     //   let a: ABC.T // ✅ T resolves to `Int` in both cases
     // Of course, if we change the class' alias to `typealias T = String`,
-    // the compiler will complain that `ABC.T` is ambiguous.
-    //
-    // Also, we collect all failures for better diagnostics, instead
-    // of diagnosing just one error at a time.
+    // the compiler will complain that `ABC.T` is ambiguous. Also, collecting
+    // all failures surfaces all errors at once for better diagnostics.
     var results = [TypeDeclSyntax: MemberLookupResult<ResolvedNominalTypeReference>]()
     var failures = [TypeLikeSyntax: Failure]()
     var nominalBaseTypes = [NominalType]()
@@ -1229,7 +969,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
         lookupPosition: lookupPosition,
         importedModules: [],
         moduleMap: symbolTable.moduleMap,
-        configuredRegions: configuredRegions,
+        configuredRegions: symbolTable.configuredRegions,
         _verbose: _verbose
       )
 
@@ -1305,8 +1045,8 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
     // If there are failures, give up.
     //
-    // We can see this in the compiler because writing the following, we only
-    // get an error for the alias:
+    // The compiler also gives up. For instance, if we write the following, we
+    // only get an error for the alias:
     //   protocol ValidProto { typealias IntAlias = Int }
     //
     //   typealias InvalidAlias = Int.Type.InvalidMember // ❌ No member 'InvalidMember'
@@ -1316,7 +1056,6 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     //   typealias Composition = ValidProto & Any
     //   let a: Composition.IntAlias = "" // ❌ Cannot value of type 'String' to specified type 'Int'
     guard failures.isEmpty else {
-      // TODO: Throw the right failure
       return Result.failure(Failure.invalidMembers(failures))
     }
 
@@ -1341,6 +1080,8 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     return Result.success(firstResult)
   }
 
+  /// Resolve a qualified-type name to a nominal type with all accessible
+  /// extensions bound.
   fileprivate mutating func resolveNominalType(
     name: QualifiedTypeName,
     originatingSyntax: TypeLikeSyntax
@@ -1353,15 +1094,18 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     }
   }
 
-  /// There are three paths:
-  /// 1. The symbol table hasn't resolved the extensions accessibles from this source file
-  ///    We need to bind all said extensions
-  /// 2. We're already binding extensions by servicing another request
-  /// 3. The symbol table has a cached/resolved version
   fileprivate mutating func _resolveNominalType(
+    // TODO: What if we just take a `ResolvedNominalTypeReference` instead
+    // and register types like that?
     name: QualifiedTypeName,
     originatingSyntax: TypeLikeSyntax
   ) -> NominalType {
+    // There are three paths:
+    // 1. The symbol table hasn't resolved the extensions accessibles from this source file
+    //    We need to bind all said extensions
+    // 2. We're already binding extensions by servicing another request
+    // 3. The symbol table has a cached/resolved version
+
     // The type must already be in the symbol table (even with no extensions bound)
     // Should be guaranteed by `symbolTable` parameter in `ResolvedNominalTypeReference` initializer.
     guard let currentNominal = symbolTable.typeState[name] else {
@@ -1378,7 +1122,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     }
     let accessibleExtensions = symbolTable.findAllExtensions(
       accessibleFrom: sourceFile,
-      configuredRegions: configuredRegions
+      configuredRegions: symbolTable.configuredRegions
     )
     log("Accessible extensions: \(accessibleExtensions.flatMap(\.value).map(\._memberlessDescription))")
 
@@ -1414,7 +1158,6 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     log("Initiating extension binding.")
 
     // It's up to us to bind all required extensions
-    // TODO: Consider how this might play out if `requestedExtensions` was an OrderedSet
     while let extensionDecl = self.requestedExtensions.first {
       // We remove at the end of the loop because we want nested syntax-resolution
       // requests to see that we're actively trying to bind this extension.
@@ -1476,7 +1219,6 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       )
 
       // Fix invalidated extensions
-      // TODO: Consider implementing `popFirst` or a queue
       while let invalidatedExtensionDecl = invalidatedExtensions.first {
         // TODO: Figure out if it's actually possible for an invalidated extension
         // to transitively reintroduce itself (i.e. if `invalidatedExtensions` could be
@@ -1547,56 +1289,4 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
     return finalizedNominal
   }
-
-  //   mutating func bindExtensions(
-  //     matchingForName nameQuery: QualifiedTypeName,
-  //     resolvedFrom originatingSyntax: TypeLikeSyntax
-  //       // TODO: We don't technically need the `failures` result for the API; only for debugging.
-  //   ) -> NominalType {  // (matches: [SourceFileSyntax: [ExtensionDeclSyntax]], failures: [ExtensionDeclSyntax: Failure]) {
-  //     let currentNominal: NominalType
-  //     switch symbolTable.typeState[nameQuery] {
-  //     case TypeResolutionState.resolved(let resolved):
-  //       // Check if
-  //     case TypeResolutionState.bindingPotentialExtension(
-  //       resolved: NominalType,
-  //       stochasticMembers: [Identifier: [TypeDeclSyntax]]
-  //     ):
-  //
-  //     }
-  //     // FIXME: Get current nominal from symbol table & remember if we're
-  //     // binding extensions; if so, add a dependence with our result
-  //     // Perhaps do within bindExtensions and then get the nominal type
-  //     // with (keeping out erroneous, ergo unbound, extensions)
-  //     //
-  //     // TODO: Wrap the type syntax in a SymbolTableSyntax<TypeSyntax> that guarantees this
-  //     guard let file = originatingSyntax.root.as(SourceFileSyntax.self) else {
-  //       fatalError(
-  //         "[SwiftLexicalLookup] Internal error: Unexpectedly had to resolve type syntax whose root isn't a source file."
-  //       )
-  //     }
-  //     let allExtensionDecls: [SourceFileSyntax: [ExtensionDeclSyntax]] = symbolTable.findAllExtensions(
-  //       accessibleFrom: file,
-  //       configuredRegions: configuredRegions
-  //     )
-  //     var matches = [SourceFileSyntax: [ExtensionDeclSyntax]]()
-  //     var failures = [ExtensionDeclSyntax: Failure]()
-  //     for (file, extensionDecls) in allExtensionDecls {
-  //       for extensionDecl in extensionDecls {
-  //         let extendedType: ResolvedNominalTypeReference
-  //
-  //         // Resolve the extended type (cached by ``resolveSyntax``)
-  //         switch resolveExtendedTypeSyntax(extensionDecl: extensionDecl) {
-  //         case .success(let nominalType):
-  //           extendedType = nominalType
-  //         case .failure(let failure):
-  //           failures[extensionDecl] = failure
-  //           continue
-  //         }
-  //
-  //         if extendedType.name == nameQuery { matches[file, default: []].append(extensionDecl) }
-  //       }
-  //     }
-  //
-  //     return (matches, failures)
-  //   }
 }

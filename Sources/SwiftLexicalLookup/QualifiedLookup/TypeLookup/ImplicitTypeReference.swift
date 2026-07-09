@@ -12,19 +12,8 @@
 
 import SwiftSyntax
 
-/// A type reference component either derived from source or implicitly generated.
-///
-/// E.g. In `let a: Int.MyType`, `MyType` is a source-derived reference. However,
-/// we can also have:
-///   struct A {
-///     struct B {
-///       struct C {
-///         func f(_: C) // <- Look up here
-///       }
-///     }
-///   }
-/// In this case, we look inside "A.B" to find `C`, so we implicitly generate the
-/// components `A` and `B`.
+/// A type reference component consists of an optional module selector, the
+/// identifier of the type, and the type-like syntax generating the reference.
 @_spi(_QualifiedLookupTests) public struct ImplicitTypeReferenceComponent: Sendable, CustomDebugStringConvertible {
   let module: Identifier?
   let name: Identifier

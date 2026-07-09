@@ -297,10 +297,12 @@ final class TestQualifiedTypeName: XCTestCase {
     }
 
     // Perform lookup
-    let symbolTable = SymbolTable3(moduleToSources: [Identifier(canonicalName: moduleName): lookupFiles])
+    let symbolTable = SymbolTable3(
+      moduleToSources: [Identifier(canonicalName: moduleName): lookupFiles],
+      configuredRegions: configuredRegions,
+    )
     var typeQualifier = TypeQualifier(
       symbolTable: symbolTable,
-      configuredRegions: configuredRegions,
       _verbose: verbose
     )
     for (fileName, lookupSource) in lookupSources {
@@ -598,7 +600,6 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testNonnominalComposition() {
-    // FIXME: There's some non-deterministic test failures where composition results get reordered.
     assertQualifiedTypeName(
       [
         "MyFile.swift": """
@@ -679,6 +680,7 @@ final class TestQualifiedTypeName: XCTestCase {
       """ as QualifiedTypeNameSource
     ])
   }
+
   func testSimpleRecursiveExtension() {
     assertQualifiedTypeName([
       "MyFile.swift": """
@@ -889,11 +891,16 @@ final class TestQualifiedTypeName: XCTestCase {
   // Fourth failing:
   //   typealias A = ~Sendable
 
+  // TODO: Shadowing tests. Local; same file; same-mdoule, etc.
+
   // TODO: Diagnose compositions with `anyType`
   // e.g.
   //   protocol MyProto: ~Copyable {}
   //   extension MyProto & ~Copyable {} // ❌ error: non-nominal type 'MyProto & ~Copyable' cannot be extended
   //   extension MyProto & Any {} // ⚠️ extending a protocol composition is not supported; extending 'MyProto' instead
+
+  // TODO: Test syntax resolution request in disabled `#if`
+  // TODO: Test syntax resolution requesr with `ConfiguredRegions` across multiple files
 
   // TODO: Dependent extension tests
   //

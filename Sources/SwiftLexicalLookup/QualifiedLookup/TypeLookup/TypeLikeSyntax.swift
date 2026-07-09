@@ -20,6 +20,18 @@ import SwiftSyntax
 
 /// Either ``TypeSyntax`` or a nominal type. Helps us track which syntax is
 /// responsible for a given type-resolution request.
+///
+/// E.g. In `let a: Int.MyType`, `MyType` is a source-derived reference. However,
+/// we can also have:
+///   struct A {
+///     struct B {
+///       struct C {
+///         func f(_: C) // <- Look up here
+///       }
+///     }
+///   }
+/// In this case, we look inside "A.B" to find `C`, so we implicitly generate the
+/// components `A` and `B`.
 @_spi(_QualifiedLookup) public struct TypeLikeSyntax: Sendable, Hashable, TypeLikeSyntaxProtocol {
   public private(set) var _syntaxNode: Syntax
 

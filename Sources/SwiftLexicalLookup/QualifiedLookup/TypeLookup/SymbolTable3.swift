@@ -243,6 +243,7 @@ extension Collection where Element == ExtensionBindingResult.Dependency {
 @_spi(_QualifiedLookup) public final class SymbolTable3 {
   public typealias Module = Identifier
   let moduleToSources: [Module: [String: SourceFileSyntax]]
+  let configuredRegions: ConfiguredRegions?
 
   // internal var typeSyntaxState: [TypeSyntax: TypeSyntaxResolutionState] = [:]
   // internal var typeState: [QualifiedTypeName: TypeResolutionState] = [:]
@@ -259,8 +260,12 @@ extension Collection where Element == ExtensionBindingResult.Dependency {
     return result
   }()
 
-  public init(moduleToSources: [Module: [String: SourceFileSyntax]]) {
+  public init(
+    moduleToSources: [Module: [String: SourceFileSyntax]],
+    configuredRegions: ConfiguredRegions?
+  ) {
     self.moduleToSources = moduleToSources
+    self.configuredRegions = configuredRegions
   }
 
   private(set) lazy var moduleMap: [SourceFileSyntax: Module] = {
