@@ -404,7 +404,6 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     case .success(.typeIdentifier(.success(let component))):
       return resolveTypeReference(
         typeComponent: ImplicitTypeReferenceComponent(from: component),
-        originatingSyntax: typeSyntax,
         memberDependencies: &memberDependencies
       )
     case .success(.member(let baseTypeSyntax, .success(let memberComponent))):
@@ -583,7 +582,6 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   /// Note: We don't resolve generic parameters.
   fileprivate mutating func resolveTypeReference(
     typeComponent: ImplicitTypeReferenceComponent,
-    originatingSyntax: TypeSyntax,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
@@ -592,7 +590,6 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     ) {
       $0._resolveTypeReference(
         typeComponent: typeComponent,
-        originatingSyntax: originatingSyntax,
         memberDependencies: &memberDependencies
       )
     }
@@ -601,7 +598,6 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   /// Implements `resolveTypeReference`
   fileprivate mutating func _resolveTypeReference(
     typeComponent: ImplicitTypeReferenceComponent,
-    originatingSyntax: TypeSyntax,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     // Perfom unqualified lookup up to find the base type's declaration
@@ -630,11 +626,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       // )
     } else {
       // Scoped unqualified lookup in this module
-      //
-      // Note: We use ``originatingSyntax`` because `typeReference.typeSyntax`
-      // is mostly used for producing diagnostics. However, the latter should
-      // be a child of ``originatingSyntax``.
-      lookupResults = originatingSyntax.findUnqualifiedType(
+      lookupResults = typeComponent.introducingSyntax.findUnqualifiedType(
         typeComponent.name,
         configuredRegions: symbolTable.configuredRegions
       )
