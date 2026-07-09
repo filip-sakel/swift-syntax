@@ -403,7 +403,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     //   return Result.success(MemberLookupResult.memberResults([]))
     case .success(.typeIdentifier(.success(let component))):
       return resolveTypeReference(
-        typeBaseComponent: ImplicitTypeReferenceComponent(from: component),
+        typeComponent: ImplicitTypeReferenceComponent(from: component),
         originatingSyntax: typeSyntax,
         memberDependencies: &memberDependencies
       )
@@ -411,7 +411,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax, memberDependencies: &memberDependencies)
       return resolveMember(
         baseType: baseTypeResult,
-        firstTypeMember: ImplicitTypeReferenceComponent(from: memberComponent),
+        typeMember: ImplicitTypeReferenceComponent(from: memberComponent),
         memberDependencies: &memberDependencies
       )
     case .success(.composition(let childTypes)):
@@ -582,16 +582,16 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   ///
   /// Note: We don't resolve generic parameters.
   fileprivate mutating func resolveTypeReference(
-    typeBaseComponent: ImplicitTypeReferenceComponent,
+    typeComponent: ImplicitTypeReferenceComponent,
     originatingSyntax: TypeSyntax,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
-      request: "Type reference `\(typeBaseComponent.debugDescription)`",
+      request: "Type reference `\(typeComponent.debugDescription)`",
       describe: \._debugDescription
     ) {
       $0._resolveTypeReference(
-        typeBaseComponent: typeBaseComponent,
+        typeComponent: typeComponent,
         originatingSyntax: originatingSyntax,
         memberDependencies: &memberDependencies
       )
@@ -600,7 +600,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
   /// Implements `resolveTypeReference`
   fileprivate mutating func _resolveTypeReference(
-    typeBaseComponent: ImplicitTypeReferenceComponent,
+    typeComponent: ImplicitTypeReferenceComponent,
     originatingSyntax: TypeSyntax,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
@@ -612,8 +612,8 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     //       struct B {} // <- Look up here
     //     }
     //   }
-    let baseLookupResults: [UnqualifiedTypeLookupResult]
-    if let module = typeBaseComponent.module {
+    let lookupResults: [UnqualifiedTypeLookupResult]
+    if let module = typeComponent.module {
       // Top-level unqualified lookup in external module
       //
       // Top-level means that we look for declarations at the file scope of the
@@ -634,30 +634,30 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       // Note: We use ``originatingSyntax`` because `typeReference.typeSyntax`
       // is mostly used for producing diagnostics. However, the latter should
       // be a child of ``originatingSyntax``.
-      baseLookupResults = originatingSyntax.findUnqualifiedType(
-        typeBaseComponent.name,
+      lookupResults = originatingSyntax.findUnqualifiedType(
+        typeComponent.name,
         configuredRegions: symbolTable.configuredRegions
       )
     }
 
-    log("Base lookup results: \(baseLookupResults)")
+    log("Lookup results: \(lookupResults)")
 
     // Find first matching type declaration
-    for lookupResult in baseLookupResults {
-      // The enclosing type
+    for lookupResult in lookupResults {
+      // The enclosing type, and whether to look for the selected member.
+      //
+      // `lookForSelectedMember` is false if we can return the enclosing type
+      // itself; true if we need to perform qualified lookup and return a type
+      // member.
       let enclosingTypeResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
-      // False if we can return the enclosing type itself; true if we need to
-      // perform qualified lookup and return a type member.
       let lookForSelectedMember: Bool
 
       switch lookupResult {
       case .lookForType(let typeDecl, let findSelectedMember):
         enclosingTypeResult = resolveTypeDecl(
-          baseTypeDecl: typeDecl,
-          baseTypeLikeSyntax: typeBaseComponent.introducingSyntax,
-          memberDependencies: &memberDependencies,
-          // memberChain: memberChainPrefix + typeReference.memberChain.map(ImplicitTypeReferenceComponent.init(from:)),
-          // originatingSyntax: originatingSyntax
+          typeDecl: typeDecl,
+          originatingSyntax: typeComponent.introducingSyntax,
+          memberDependencies: &memberDependencies
         )
         lookForSelectedMember = findSelectedMember
       case .lookForExtension(let extensionDecl, let findSelectedMember):
@@ -694,7 +694,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
         }
 
         // Continue if we didn't find matching generic parameters.
-        guard baseType.mainDecl.findGenericParameters(withName: typeBaseComponent.name).first != nil else {
+        guard baseType.mainDecl.findGenericParameters(withName: typeComponent.name).first != nil else {
           continue
         }
 
@@ -728,7 +728,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       // Look for the member
       let memberTypeResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveMember(
         baseType: Result.success(enclosingType),
-        firstTypeMember: typeBaseComponent,
+        typeMember: typeComponent,
         memberDependencies: &memberDependencies
       )
 
@@ -741,7 +741,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       case .failure(.noTypeMember):
         continue
       case .failure(let failure):
-        return Result.failure(Failure.invalidMembers([typeBaseComponent.introducingSyntax: failure]))
+        return Result.failure(Failure.invalidMembers([typeComponent.introducingSyntax: failure]))
       }
 
       return Result.success(memberType)
@@ -757,17 +757,17 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   /// This requests explicitly doesn't resolve associated types and generic-parameter
   /// declarations.
   fileprivate mutating func resolveTypeDecl(
-    baseTypeDecl: TypeDeclSyntax,
-    baseTypeLikeSyntax: TypeLikeSyntax,
+    typeDecl: TypeDeclSyntax,
+    originatingSyntax: TypeLikeSyntax,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
-      request: "Decl \(baseTypeDecl.kind) `\(baseTypeDecl.name.trimmedDescription)`",
+      request: "Decl \(typeDecl.kind) `\(typeDecl.name.trimmedDescription)`",
       describe: \._debugDescription
     ) {
       $0._resolveTypeDecl(
-        baseTypeDecl: baseTypeDecl,
-        baseTypeLikeSyntax: baseTypeLikeSyntax,
+        typeDecl: typeDecl,
+        originatingSyntax: originatingSyntax,
         memberDependencies: &memberDependencies
       )
     }
@@ -775,16 +775,16 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
   /// Implements `resolveTypeDecl`
   fileprivate mutating func _resolveTypeDecl(
-    baseTypeDecl: TypeDeclSyntax,
-    baseTypeLikeSyntax: TypeLikeSyntax,
+    typeDecl: TypeDeclSyntax,
+    originatingSyntax: TypeLikeSyntax,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     // We mainly handle nominal types; type aliases are trivially recursive, and we skip
     // associated types and generic parameters
     let nominalDecl: NominalTypeDeclSyntax
-    if let nominalTypeDecl = baseTypeDecl.as(NominalTypeDeclSyntax.self) {
+    if let nominalTypeDecl = typeDecl.as(NominalTypeDeclSyntax.self) {
       nominalDecl = nominalTypeDecl
-    } else if let typeAlias = baseTypeDecl.as(TypeAliasDeclSyntax.self) {
+    } else if let typeAlias = typeDecl.as(TypeAliasDeclSyntax.self) {
       log(
         "Found aliased type `\(typeAlias.initializer.value)`"
       )
@@ -823,7 +823,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
           ResolvedNominalTypeReference(
             mainDecl: nominalDecl,
             name: qualifiedTypeName,
-            originatingSyntax: baseTypeLikeSyntax,
+            originatingSyntax: originatingSyntax,
             savingToTable: symbolTable
           )
         ])
@@ -839,7 +839,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       case .success(let resolvedExtendedBaseNominal):
         let resolvedBaseNominal = partiallyResolvedName.resolve(
           resolvedBase: resolvedExtendedBaseNominal,
-          originatingSyntax: baseTypeLikeSyntax,
+          originatingSyntax: originatingSyntax,
           module: module,
           savingToTable: symbolTable
         )
@@ -856,27 +856,24 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   /// recording our dependencies on qualified-lookup queries.
   fileprivate mutating func resolveMember(
     baseType: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>,
-    firstTypeMember: ImplicitTypeReferenceComponent,
+    typeMember: ImplicitTypeReferenceComponent,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
-      request: "Member `\(firstTypeMember.debugDescription)`",
+      request: "Member `\(typeMember.debugDescription)`",
       describe: \._debugDescription
     ) {
-      $0._resolveMember(baseType: baseType, firstTypeMember: firstTypeMember, memberDependencies: &memberDependencies)
+      $0._resolveMember(baseType: baseType, typeMember: typeMember, memberDependencies: &memberDependencies)
     }
   }
 
   /// Implements `resolveMember`
   fileprivate mutating func _resolveMember(
     baseType: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>,
-    firstTypeMember: ImplicitTypeReferenceComponent,
+    typeMember: ImplicitTypeReferenceComponent,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
-    // Get member type(s), or throw
-    //
-    // We throw because we can't resolve anything without the
-    // member type reference.
+    // Get base type(s), or throw (can't resolve anything without the base)
     let rawBaseType: MemberLookupResult<ResolvedNominalTypeReference>
     switch baseType {
     case .success(let success): rawBaseType = success
@@ -896,30 +893,33 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     //   let y: Int.Type.MyType    // ❌ 'MyType' is not a member type of 'Swift.Int.Type'
     // TODO: Think about a helper for mapping non-member types
     case MemberLookupResult.memberResults([]):
-      return Result.failure(Failure.noTypeMember(member: firstTypeMember, in: MemberLookupResult.memberResults([])))
+      return Result.failure(Failure.noTypeMember(member: typeMember, in: MemberLookupResult.memberResults([])))
     case MemberLookupResult.anyType:
-      return Result.failure(Failure.noTypeMember(member: firstTypeMember, in: MemberLookupResult.anyType))
+      return Result.failure(Failure.noTypeMember(member: typeMember, in: MemberLookupResult.anyType))
     case MemberLookupResult.function(let argumentCount):
       return Result.failure(
-        Failure.noTypeMember(member: firstTypeMember, in: MemberLookupResult.function(argumentCount: argumentCount))
+        Failure.noTypeMember(member: typeMember, in: MemberLookupResult.function(argumentCount: argumentCount))
       )
     case MemberLookupResult.tuple(let labels):
-      return Result.failure(Failure.noTypeMember(member: firstTypeMember, in: MemberLookupResult.tuple(labels: labels)))
+      return Result.failure(Failure.noTypeMember(member: typeMember, in: MemberLookupResult.tuple(labels: labels)))
     }
 
     // Perform qualified type lookup and mark the dependencies
     //
-    // Note: We collect all types and failures. This approach allows the
-    // type checker can check if members of compositions actually resolve
-    // to the same type. For instance:
+    // Note: We collect all types and failures.
+    //
+    // This approach allows the type checker can check if members of
+    // compositions actually resolve to the same type. For instance:
     //   protocol A { typealias T = Int }
     //   final class B { typealias T = [String].Index /* i.e. Int */ }
     //   protocol C { typealias T = Int }
     //   typealias ABC = A & B & C
     //   let a: ABC.T // ✅ T resolves to `Int` in both cases
     // Of course, if we change the class' alias to `typealias T = String`,
-    // the compiler will complain that `ABC.T` is ambiguous. Also, collecting
-    // all failures surfaces all errors at once for better diagnostics.
+    // the compiler will complain that `ABC.T` is ambiguous.
+    //
+    // Also, collecting all failures surfaces all errors at once for better
+    // diagnostics.
     var results = [TypeDeclSyntax: MemberLookupResult<ResolvedNominalTypeReference>]()
     var failures = [TypeLikeSyntax: Failure]()
     var nominalBaseTypes = [NominalType]()
@@ -943,7 +943,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
           // No results; continue in case next one has a result.
           break
         case Result.failure(let failure):
-          failures[firstTypeMember.introducingSyntax] = failure
+          failures[typeMember.introducingSyntax] = failure
         }
       }
 
@@ -951,21 +951,21 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       // We ignore failures since they're from non-matching extensions and diagnosed separately
       let nominalBaseType = resolveNominalType(
         name: baseType.name,
-        originatingSyntax: firstTypeMember.introducingSyntax
+        originatingSyntax: baseType.originatingSyntax
       )
       nominalBaseTypes.append(nominalBaseType)
 
       // Perform direct type lookup and mark dependency
       // TODO: Figure out imported modules
-      let originatingSyntax = Syntax(firstTypeMember.introducingSyntax)
+      let originatingSyntax = Syntax(typeMember.introducingSyntax)
       guard let file = originatingSyntax.root.as(SourceFileSyntax.self) else {
         fatalError(
           "[SwiftLexicalLookup] Internal error: Unexpectedly had to resolve type syntax whose root isn't a source file."
         )
       }
       let lookupPosition = (file: file, position: originatingSyntax.position)
-      let typeDeclsResult = nominalBaseType.findMemberTypes(
-        component: firstTypeMember,
+      let memberTypeDeclsResult = nominalBaseType.findMemberTypes(
+        component: typeMember,
         lookupPosition: lookupPosition,
         importedModules: [],
         moduleMap: symbolTable.moduleMap,
@@ -975,7 +975,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
       // Handle failures
       let memberTypeDecls: [ExtensionDeclSyntax?: [TypeDeclSyntax]]
-      switch typeDeclsResult {
+      switch memberTypeDeclsResult {
       case .success(let typeDecls):
         memberTypeDecls = Dictionary(
           typeDecls,
@@ -1004,7 +1004,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       memberDependencies.append(
         ExtensionBindingResult.Dependency(
           baseTypeName: baseType.name,
-          typeMember: firstTypeMember.name,
+          typeMember: typeMember.name,
           resolvedDecls: memberTypeDecls
         )
       )
@@ -1035,11 +1035,9 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
       // Resolve this type declaration and add it to the results
       memberResult = resolveTypeDecl(
-        baseTypeDecl: memberTypeDecl,
-        baseTypeLikeSyntax: firstTypeMember.introducingSyntax,
+        typeDecl: memberTypeDecl,
+        originatingSyntax: typeMember.introducingSyntax,
         memberDependencies: &memberDependencies
-          // memberChain: remainingMemberChain,
-          // originatingSyntax: originatingSyntax
       ).map({ result in Optional((typeDecl: memberTypeDecl, result: result)) })
     }
 
@@ -1065,7 +1063,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     guard let (_, firstResult) = results.first else {
       return Result.failure(
         Failure.noTypeMember(
-          member: firstTypeMember,
+          member: typeMember,
           in: MemberLookupResult.memberResults(nominalBaseTypes)
         )
       )
@@ -1094,6 +1092,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     }
   }
 
+  /// Implements `resolveNominalType`
   fileprivate mutating func _resolveNominalType(
     // TODO: What if we just take a `ResolvedNominalTypeReference` instead
     // and register types like that?
