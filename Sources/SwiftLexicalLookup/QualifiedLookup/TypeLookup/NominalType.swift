@@ -20,7 +20,7 @@ import SwiftSyntax
   /// The main declaration of this type
   let mainDecl: NominalTypeDeclSyntax
   /// Invalid redeclarations that use the same name
-  fileprivate(set) var redeclarations: Set<NominalTypeDeclSyntax>
+  fileprivate(set) var redeclarations: OrderedSet<NominalTypeDeclSyntax>
   /// All extensions organized by the module in which they were declared.
   /// Only the modules included in this query are included.
   ///
@@ -132,7 +132,7 @@ import SwiftSyntax
   ///       to `(MyFile.swift)::A.(MyFile.swift)::C`.
   ///
   ///
-  internal var extensions: [SymbolTable3.Module: Set<ExtensionDeclSyntax>]
+  internal var extensions: [SymbolTable3.Module: OrderedSet<ExtensionDeclSyntax>]
 
   // var typeLookupTable: [Identifier: [TypeDeclSyntax]]
 
@@ -144,12 +144,15 @@ extension NominalType {
     _ otherNominalDecl: NominalTypeDeclSyntax
   ) -> NominalType {
     var copy = self
-    copy.redeclarations.insert(otherNominalDecl)
+    copy.redeclarations.append(otherNominalDecl)
     return copy
   }
 }
 
 extension NominalType {
+  /// Note that we only have one main declaration (nominal type). ALl other
+  /// declaration groups are extensions.
+  /// TODO: Should this be an ordered dict?
   fileprivate var _declGroups: [SourceFileSyntax: [DeclGroupSyntaxType]] {
     // TODO: Throw actual error
     guard let mainDeclFile = mainDecl.root.as(SourceFileSyntax.self) else {
@@ -175,14 +178,18 @@ extension NominalType {
     case selectedNonImportedModule(selectedModule: Identifier)
   }
 
-  /// Visit the members from the
-  fileprivate func _visitMembers(
+  /// Visit all declaration groups accessible from the provided position
+  /// with the given options.§
+  ///
+  /// - Postcondition: This method is guaranteed to visit just the accessible
+  ///   extensions and the single main declaration nominal type exactly once.
+  fileprivate func _visitAccessibleDeclGroups(
     selectedModule: Identifier? = nil,
     lookupPosition: (file: SourceFileSyntax, position: AbsolutePosition),
     importedModules: [Identifier],
     moduleMap: [SourceFileSyntax: Identifier],
     configuredRegions: ConfiguredRegions?,
-    visit: (ValueDeclSyntax) -> Void
+    visit: (_ declGroup: DeclGroupSyntaxType) -> Void
   ) -> Result<Void, MemberLookupFailure> {
     guard let lookupModule = moduleMap[lookupPosition.file] else {
       return .failure(.fileNotInModuleMap(lookupPosition.file))
@@ -192,8 +199,11 @@ extension NominalType {
     // other files in this module or external modules.
     var thisFile = [DeclGroupSyntaxType]()
     var otherInternalFiles = [DeclGroupSyntaxType]()
+    // TODO: Should this be an ordered dict?
     var externalModules = [Identifier: [DeclGroupSyntaxType]]()
 
+    // Note: The fact that `_declGroups` only contains one nominal type declaration
+    // (with the rest being extensions) upholds this function's postcondition.
     for (declFile, declGroups) in _declGroups {
       for declGroup in declGroups {
         // guard let declFile = declGroup.root.as(SourceFileSyntax.self) else {
@@ -217,11 +227,11 @@ extension NominalType {
     if let selectedModule, selectedModule == lookupModule {
       // Look in this file
       for declGroup in thisFile {
-        declGroup.visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
+        visit(declGroup)
       }
       // Look in other files in the module
       for declGroup in otherInternalFiles {
-        declGroup.visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
+        visit(declGroup)
       }
     }
     // If an external module is selected, look into that (if imported)
@@ -233,7 +243,7 @@ extension NominalType {
 
       // Look in selected module
       for declGroup in externalModules[selectedModule, default: []] {
-        declGroup.visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
+        visit(declGroup)
       }
     }
     // If no module is selected, look into this file, this module, and modules in reverse
@@ -241,16 +251,16 @@ extension NominalType {
     else /* selectedModule == nil */
     {
       for declGroup in thisFile {
-        declGroup.visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
+        visit(declGroup)
       }
       for declGroup in otherInternalFiles {
-        declGroup.visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
+        visit(declGroup)
       }
       // Look at imports in reversed order (later ones shadow earlier ones)
       // and visit each declaration group in that order
       for module in importedModules.reversed() {
         for declGroup in externalModules[module, default: []] {
-          declGroup.visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
+          visit(declGroup)
         }
       }
     }
@@ -258,6 +268,99 @@ extension NominalType {
     return .success(())
   }
 
+  /// Visit the members from the given `lookupPosition`.
+  // fileprivate func _visitMembers(
+  //   selectedModule: Identifier? = nil,
+  //   lookupPosition: (file: SourceFileSyntax, position: AbsolutePosition),
+  //   importedModules: [Identifier],
+  //   moduleMap: [SourceFileSyntax: Identifier],
+  //   configuredRegions: ConfiguredRegions?,
+  //   visit: (_ declGroupParent: DeclGroupSyntaxType, _ valueDecl: ValueDeclSyntax) -> Void
+  // ) -> Result<Void, MemberLookupFailure> {
+  //   guard let lookupModule = moduleMap[lookupPosition.file] else {
+  //     return .failure(.fileNotInModuleMap(lookupPosition.file))
+  //   }
+  //
+  //   // Organize declaration groups into ones declared in this file,
+  //   // other files in this module or external modules.
+  //   var thisFile = [DeclGroupSyntaxType]()
+  //   var otherInternalFiles = [DeclGroupSyntaxType]()
+  //   var externalModules = [Identifier: [DeclGroupSyntaxType]]()
+  //
+  //   for (declFile, declGroups) in _declGroups {
+  //     for declGroup in declGroups {
+  //       // guard let declFile = declGroup.root.as(SourceFileSyntax.self) else {
+  //       //   return .failure(.declNotAttachedToSourceFile(declGroup))
+  //       // }
+  //       guard let declModule = moduleMap[declFile] else {
+  //         return .failure(.fileNotInModuleMap(declFile))
+  //       }
+  //
+  //       if declFile == lookupPosition.file {
+  //         thisFile.append(declGroup)
+  //       } else if declModule == lookupModule {
+  //         otherInternalFiles.append(declGroup)
+  //       } else {
+  //         externalModules[declModule, default: []].append(declGroup)
+  //       }
+  //     }
+  //   }
+  //
+  //   // If this module is selected, look into that
+  //   if let selectedModule, selectedModule == lookupModule {
+  //     // Look in this file
+  //     for declGroup in thisFile {
+  //       declGroup.visitDirectMembers(
+  //         configuredRegions: configuredRegions,
+  //         visit: { visit(declGroup, $0) }
+  //       )
+  //     }
+  //     // Look in other files in the module
+  //     for declGroup in otherInternalFiles {
+  //       declGroup.visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
+  //     }
+  //   }
+  //   // If an external module is selected, look into that (if imported)
+  //   else if let selectedModule, selectedModule != lookupModule {
+  //     // Ensure selected module was imported
+  //     guard importedModules.contains(selectedModule) else {
+  //       return .failure(.selectedNonImportedModule(selectedModule: selectedModule))
+  //     }
+  //
+  //     // Look in selected module
+  //     for declGroup in externalModules[selectedModule, default: []] {
+  //       declGroup.visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
+  //     }
+  //   }
+  //   // If no module is selected, look into this file, this module, and modules in reverse
+  //   // order of the import list
+  //   else /* selectedModule == nil */
+  //   {
+  //     for declGroup in thisFile {
+  //       declGroup.visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
+  //     }
+  //     for declGroup in otherInternalFiles {
+  //       declGroup.visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
+  //     }
+  //     // Look at imports in reversed order (later ones shadow earlier ones)
+  //     // and visit each declaration group in that order
+  //     for module in importedModules.reversed() {
+  //       for declGroup in externalModules[module, default: []] {
+  //         declGroup.visitDirectMembers(configuredRegions: configuredRegions, visit: visit)
+  //       }
+  //     }
+  //   }
+  //
+  //   return .success(())
+  // }
+
+  /// Finds all the member types accessible from the given lookup position
+  /// filtering by the other parameters provided.
+  ///
+  /// - Returns: A list of pairs of extensions and nested type declaratoins.
+  ///
+  /// - Postcondition: Each extension declaration or the main declaration is
+  ///   guaranteed to appear just once.
   func findMemberTypes(
     component: ImplicitTypeReferenceComponent,
     lookupPosition: (file: SourceFileSyntax, position: AbsolutePosition),
@@ -265,36 +368,51 @@ extension NominalType {
     moduleMap: [SourceFileSyntax: Identifier],
     configuredRegions: ConfiguredRegions?,
     _verbose: Bool = false
-  ) -> Result<[TypeDeclSyntax], MemberLookupFailure> {
-    var typeDecls = [TypeDeclSyntax]()
+  ) -> Result<[(ExtensionDeclSyntax?, [TypeDeclSyntax])], MemberLookupFailure> {
+    var allTypeMembers = [(ExtensionDeclSyntax?, [TypeDeclSyntax])]()
 
-    let result = _visitMembers(
+    /// Visitor for `_visitAccessibleDeclGroups`
+    func declGroupVisitor(declGroup: DeclGroupSyntaxType) {
+      var groupTypeMembers = [TypeDeclSyntax]()
+      declGroup.visitDirectMembers(
+        configuredRegions: configuredRegions,
+        visit: { decl in
+          if _verbose {
+            print("[Direct lookup on \(qualifiedName)] Visiting decl: \(decl.trimmedDescription)")
+          }
+          // Get only types with matching names
+          guard
+            let typeDecl = decl.as(TypeDeclSyntax.self),
+            typeDecl.name.identifier == component.name
+          else {
+            return
+          }
+
+          groupTypeMembers.append(typeDecl)
+        }
+      )
+
+      // Convert decl group to extension (or `nil` for main declaration)
+      // Note: We know there's only one main declaration because of the
+      // postcondition of `_visitAccessibleDeclGroups`
+      let extensionOrMainDecl = declGroup.as(ExtensionDeclSyntax.self)
+      allTypeMembers.append((extensionOrMainDecl, groupTypeMembers))
+    }
+
+    let result = _visitAccessibleDeclGroups(
       selectedModule: component.module,
       lookupPosition: lookupPosition,
       importedModules: importedModules,
       moduleMap: moduleMap,
       configuredRegions: configuredRegions,
-      visit: { decl in
-        if _verbose {
-          print("[Direct lookup on \(qualifiedName)] Visiting decl: \(decl.trimmedDescription)")
-        }
-        // Get only types with matching names
-        guard
-          let typeDecl = decl.as(TypeDeclSyntax.self),
-          typeDecl.name.identifier == component.name
-        else {
-          return
-        }
-
-        typeDecls.append(typeDecl)
-      }
+      visit: declGroupVisitor(declGroup:)
     )
 
     if case .failure(let failure) = result {
       return .failure(failure)
     }
 
-    return .success(typeDecls)
+    return .success(allTypeMembers)
   }
 }
 

@@ -346,7 +346,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   mutating func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
     guard _verbose else { return }
     // Keep log text separately
-    let newLine = "\(logPrefix.map({ "[\($0)]" }).joined()) \(component) [\(file):\(line)]"
+    let newLine = "\(logPrefix.map({ "[\($0)]" }).joined()) \(component)\n"
     logText += newLine + "\n"
     // Print new line
     print(newLine)
@@ -362,7 +362,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     if let nestingLimit = self._logNestingLimit {
       precondition(
         logPrefix.count < nestingLimit,
-        "Exceeded log nesting limit, suggesting there's an infinite loop. If you think this is a mistake, you may change the limit in ``TypeQualifier``. Current output:\n\(logText)"
+        "Exceeded log nesting limit, suggesting there's an infinite loop. If you think this is a mistake, you may change the limit in ``TypeQualifier``"
       )
     }
     logPrefix.append(request)
@@ -380,12 +380,11 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 
   let symbolTable: SymbolTable3
   let configuredRegions: ConfiguredRegions?
-  // TODO: Consider using an OrderedSet for more predictable performance
-  var requestedExtensions: Set<ExtensionDeclSyntax> = []
+  var requestedExtensions: OrderedSet<ExtensionDeclSyntax> = []
 
   let _verbose: Bool
   /// How many `withLogging` calls we can nest. Useful for debugging infinite loops.
-  let _logNestingLimit: Int? = 10
+  let _logNestingLimit: Int? = 20
   let _checkNominalInCompositionIsClassOrProtocol = true
 
   // var extensionBindingRequest:
@@ -1161,7 +1160,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       return Result.failure(Failure.noTypeMember(member: firstTypeMember, in: MemberLookupResult.tuple(labels: labels)))
     }
 
-    // Perform qualified type lookup
+    // Perform qualified type lookup and mark the dependencies
     //
     // We collect all types so the type checker can check if members of
     // compositions actually resolve to the same type. For instance:
@@ -1178,10 +1177,18 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     var results = [TypeDeclSyntax: MemberLookupResult<ResolvedNominalTypeReference>]()
     var failures = [TypeLikeSyntax: Failure]()
     var nominalBaseTypes = [NominalType]()
+
     for baseType in baseTypes {
-      // We'll collect the result, nominal base type, and type syntax
+      // We'll collect the result, and type syntax
+      //
+      // We rely on definite initialization to ensure `memberResult` is
+      // initialized exactly one, ensuring each member produces exactly one
+      // result.
       let memberResult:
-        Result<(typeDecl: TypeDeclSyntax, result: MemberLookupResult<ResolvedNominalTypeReference>)?, Failure>
+        Result<
+          (typeDecl: TypeDeclSyntax, result: MemberLookupResult<ResolvedNominalTypeReference>)?,
+          Failure
+        >
       defer {
         switch memberResult {
         case Result.success((let memberTypeDecl, let memberResult)?):
@@ -1202,7 +1209,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       )
       nominalBaseTypes.append(nominalBaseType)
 
-      // Perform direct type lookup
+      // Perform direct type lookup and mark dependency
       // TODO: Figure out imported modules
       let originatingSyntax = Syntax(firstTypeMember.introducingSyntax)
       guard let file = originatingSyntax.root.as(SourceFileSyntax.self) else {
@@ -1220,31 +1227,19 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
         _verbose: _verbose
       )
 
-      // Get the referenced type decl (and address failures)
-      let memberTypeDecl: TypeDeclSyntax
+      // Handle failures
+      let memberTypeDecls: [ExtensionDeclSyntax?: [TypeDeclSyntax]]
       switch typeDeclsResult {
       case .success(let typeDecls):
-        // Skip this nominal type if it didn't contain said type member.
-        //
-        // E.g. In `(Encodable & Collection<Int>).Element`, `Encodable` may not have an `Element`
-        // type member.
-        guard let firstTypeDecl = typeDecls.first else {
-          memberResult = Result.success(nil)
-          continue
-        }
-        // Cannot have multiple type declarations named the same.
-        // E.g.
-        //   typealias A = Int
-        //   typealias A = Bool
-        //   let a: A // ❌ ambiguous
-        // TODO: Ensure we're not shadowing; I think
-        // we can only shadow type decls from external modules
-        guard typeDecls.count == 1 else {
-          memberResult = Result.failure(Failure.ambiguousTypeDecl(typeDecls))
-          continue
-        }
-
-        memberTypeDecl = firstTypeDecl
+        memberTypeDecls = Dictionary(
+          typeDecls,
+          uniquingKeysWith: { _, secondExtension in
+            // A postcondition in the function docs promises this.
+            fatalError(
+              "[SwiftLexicalLookup] Internal error: `findMemberTypes` should have only generated one extension."
+            )
+          }
+        )
       case .failure(.declNotAttachedToSourceFile), .failure(.fileNotInModuleMap):
         // We check that the root is a source file in the symbol table
         // at the top of ``resolveSyntax``.
@@ -1256,9 +1251,41 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
           "[SwiftLexicalLookup] Internal error: Unexpectedly requested direct lookup for a module that wasn't imported."
         )
       }
-      // log(
-      //   "[For syntax \(originatingSyntax) & \(baseTypeDecl.kind) '\(baseTypeDecl.name)' & qualified '\(name)'] Resolved type member \(firstTypeMember) to \(memberTypeDecl.trimmedDescription)."
-      // )
+
+      // Save the dependency
+      //
+      // First, group the decls by extension
+      memberDependencies.append(
+        ExtensionBindingResult.Dependency(
+          baseTypeName: baseType.name,
+          typeMember: firstTypeMember.name,
+          resolvedDecls: memberTypeDecls
+        )
+      )
+
+      // Process the results
+      let flatMemberTypes = memberTypeDecls.flatMap(\.value)
+      // 1. Skip this nominal type if it didn't contain said type member.
+      //
+      //    E.g. In `(Encodable & Collection<Int>).Element`, `Encodable` may not have an `Element`
+      // type member.
+      guard let firstTypeDecl = flatMemberTypes.first else {
+        memberResult = Result.success(nil)
+        continue
+      }
+      // 2. Cannot have multiple type declarations named the same.
+      //    E.g.
+      //      typealias A = Int
+      //      typealias A = Bool
+      //      let a: A // ❌ ambiguous
+      // TODO: Ensure we're not shadowing; I think
+      // we can only shadow type decls from external modules
+      guard flatMemberTypes.count == 1 else {
+        memberResult = Result.failure(Failure.ambiguousTypeDecl(flatMemberTypes))
+        continue
+      }
+      // There's just one; use that
+      let memberTypeDecl = firstTypeDecl
 
       // Resolve this type declaration and add it to the results
       memberResult = resolveTypeDecl(
@@ -1387,7 +1414,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       // requests to see that we're actively trying to bind this extension.
       defer { self.requestedExtensions.remove(extensionDecl) }
 
-      var invalidatedExtensions: Set<ExtensionDeclSyntax> = withLogging(
+      var invalidatedExtensions: OrderedSet<ExtensionDeclSyntax> = withLogging(
         request: "Binding `\(extensionDecl._memberlessDescription)`",
         describe: { (invalidatedExtensions: SymbolTable3.InvalidatedExtensions) in
           "Invalidated: \(invalidatedExtensions.map(\._memberlessDescription))"

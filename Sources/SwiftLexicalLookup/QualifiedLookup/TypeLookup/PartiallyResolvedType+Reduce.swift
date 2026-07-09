@@ -13,14 +13,25 @@
 import SwiftSyntax
 
 // TODO: Rename to `TypeReference`
-@_spi(_QualifiedLookup) public struct PartiallyResolvedTypeIdentifier: Sendable, CustomDebugStringConvertible {
-  public struct Component: Hashable, Sendable, CustomDebugStringConvertible {
+@_spi(_QualifiedLookupTests) public struct PartiallyResolvedTypeIdentifier: Sendable, CustomDebugStringConvertible {
+  @_spi(_QualifiedLookupTests) public struct Component: Hashable, Sendable, CustomDebugStringConvertible {
+
     let module: Identifier?
     let name: Identifier
     /// The `TypeSyntax` or `TokenSyntax` from which we derived this type reference component;
     /// used for targeted diagnostics.
     // public let introducingSyntax: TypeLikeSyntax
     public let introducingSyntax: TypeSyntax
+
+    @_spi(_QualifiedLookupTests) public init(
+      module: Identifier? = nil,
+      name: Identifier,
+      introducingSyntax: TypeSyntax
+    ) {
+      self.module = module
+      self.name = name
+      self.introducingSyntax = introducingSyntax
+    }
 
     public var debugDescription: String {
       let modulePrefix = if let module { "\(module.name)::" } else { "" }

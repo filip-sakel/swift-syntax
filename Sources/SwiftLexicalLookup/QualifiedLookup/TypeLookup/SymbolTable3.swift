@@ -112,11 +112,11 @@ import SwiftSyntax
   /// means the type member can resolve properly. More than one types,
   /// on the other hand, give us ambiguities.
   @_spi(_QualifiedLookup) public struct Dependency {
-    let resolvedType: QualifiedTypeName
+    let baseTypeName: QualifiedTypeName
     let typeMember: Identifier
     /// The resolved type declarations and the extensions in which they
     /// were declared (nil for main declaration)
-    var resolvedDecls: [ExtensionDeclSyntax?: TypeDeclSyntax]
+    var resolvedDecls: [ExtensionDeclSyntax?: [TypeDeclSyntax]]
   }
   /// An array of dependencies
   ///
@@ -140,11 +140,11 @@ import SwiftSyntax
 
 extension Collection where Element == ExtensionBindingResult.Dependency {
   fileprivate func _firstMatchingTypeMembers(
-    resolvedType: QualifiedTypeName,
+    resolvedTypeName: QualifiedTypeName,
     typeMembers: [Identifier: [TypeDeclSyntax]]
   ) -> (ExtensionBindingResult.Dependency, [TypeDeclSyntax])? {
     for dependency in self {
-      guard dependency.resolvedType == resolvedType else { continue }
+      guard dependency.baseTypeName == resolvedTypeName else { continue }
       guard let matchingType = typeMembers[dependency.typeMember] else { continue }
       return (dependency, matchingType)
     }
@@ -248,8 +248,8 @@ extension Collection where Element == ExtensionBindingResult.Dependency {
   // internal var typeState: [QualifiedTypeName: TypeResolutionState] = [:]
   internal private(set) var typeState: [QualifiedTypeName: NominalType] = [:]
   internal private(set) var extensionState: [ExtensionDeclSyntax: ExtensionBindingState] = [:]
-  internal private(set) lazy var unresolvedExtensions: [SourceFileSyntax: Set<ExtensionDeclSyntax>] = {
-    var result = [SourceFileSyntax: Set<ExtensionDeclSyntax>]()
+  internal private(set) lazy var unresolvedExtensions: [SourceFileSyntax: OrderedSet<ExtensionDeclSyntax>] = {
+    var result = [SourceFileSyntax: OrderedSet<ExtensionDeclSyntax>]()
     for (module, files) in moduleToSources {
       for (_, file) in files {
         // TODO: Implement configuredRegions
@@ -332,7 +332,7 @@ extension SymbolTable3 {
     case bindingBeforeFixingInvalidatedExtensions(invalidatedExtension: ExtensionDeclSyntax)
   }
 
-  typealias InvalidatedExtensions = Set<ExtensionDeclSyntax>
+  typealias InvalidatedExtensions = OrderedSet<ExtensionDeclSyntax>
 
   // /// Inserts the given extension moving it from `unresolvedExtensions` to `extensions`
   // /// and updating the nominal type's lookup table and extensions.
@@ -416,7 +416,7 @@ extension SymbolTable3 {
 
     // Compute the new extension state and what old extensions we've broken
     let newExtensionState: ExtensionBindingState
-    let invalidatedExtensions: Set<ExtensionDeclSyntax>
+    let invalidatedExtensions: OrderedSet<ExtensionDeclSyntax>
     switch result {
     case .success(let resolvedName):
       // Get nominal type
@@ -430,7 +430,7 @@ extension SymbolTable3 {
       // TODO: Factor these checks out
       // 1. Can't introduce members we depend on (without a cycle)
       if let (_, recursiveTypeMembers) = dependencies._firstMatchingTypeMembers(
-        resolvedType: resolvedName,
+        resolvedTypeName: resolvedName,
         typeMembers: typeMembers
       ) {
         newExtensionState = ExtensionBindingState.cannotDependOnIntroducedMembers(
@@ -466,7 +466,7 @@ extension SymbolTable3 {
           // Continue if there are no conflicts
           guard
             let (_, recursiveTypeMembers) = introducingExtensionResult.dependencies._firstMatchingTypeMembers(
-              resolvedType: resolvedName,
+              resolvedTypeName: resolvedName,
               typeMembers: typeMembers
             )
           else {
@@ -489,7 +489,7 @@ extension SymbolTable3 {
       // 3. Invalidate extension-binding results depending on the type members
       //    we're adding
       // TODO: Find more efficient way to do this
-      var invalidatedExtensionDecls = Set<ExtensionDeclSyntax>()
+      var invalidatedExtensionDecls = OrderedSet<ExtensionDeclSyntax>()
       for (extensionDecl, extensionState) in extensionState {
         // We can only break resolved extensions
         let extensionBindingResult: ExtensionBindingResult
@@ -515,7 +515,7 @@ extension SymbolTable3 {
         guard
           let (firstConflictingDependency, firstConflictingTypeDecls) = extensionBindingResult.dependencies
             ._firstMatchingTypeMembers(
-              resolvedType: resolvedName,
+              resolvedTypeName: resolvedName,
               typeMembers: typeMembers
             )
         else { continue }
@@ -530,7 +530,7 @@ extension SymbolTable3 {
           firstConflictingDependency: firstConflictingDependency,
           firstConflictingTypeDecls: firstConflictingTypeDecls
         )
-        invalidatedExtensionDecls.insert(extensionDecl)
+        invalidatedExtensionDecls.append(extensionDecl)
       }
       newExtensionState = ExtensionBindingState.resolved(
         ExtensionBindingResult(dependencies: [], resolution: .success(resolvedName))
@@ -540,7 +540,7 @@ extension SymbolTable3 {
       // Update ``NominalType``
       var newNominal: NominalType = currentNominal
       // Add extension
-      let insertResult = newNominal.extensions[module, default: []].insert(extensionDecl)
+      let insertResult = newNominal.extensions[module, default: []].append(extensionDecl)
       assert(
         insertResult.inserted,
         "[SwiftLexicalLookup] Internal error: Extension was already in `extensions` despite appearing in `unresolvedExtensions"

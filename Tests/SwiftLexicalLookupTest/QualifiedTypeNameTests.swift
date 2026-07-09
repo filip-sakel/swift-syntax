@@ -598,6 +598,7 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testNonnominalComposition() {
+    // FIXME: There's some non-deterministic test failures where composition results get reordered.
     assertQualifiedTypeName(
       [
         "MyFile.swift": """
@@ -646,43 +647,49 @@ final class TestQualifiedTypeName: XCTestCase {
   // }
 
   func testSimpleExtension() {
-    assertQualifiedTypeName(
-      [
-        "MyFile.swift": """
-        \("🟥", name: "_(MyFile.swift)::A")
-        struct A {}
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::A")
+      struct A {}
 
-        extension A {
-          \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
-          struct B {}
-        }
-        func f(_: \(references: ["🟩"])A.B)
-        // Test that incremental binding still works with a second request
-        func g(_: \(references: ["🟩"])A.B)
-        """ as QualifiedTypeNameSource
-      ],
-      verbose: true
-    )
+      extension A {
+        \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
+        struct B {}
+      }
+      func f(_: \(references: ["🟩"])A.B)
+      // Test that incremental binding still works with a second request
+      func g(_: \(references: ["🟩"])A.B)
+      """ as QualifiedTypeNameSource
+    ])
   }
   func testTypeInExtension() {
-    assertQualifiedTypeName(
-      [
-        "MyFile.swift": """
-        \("🟥", name: "_(MyFile.swift)::A")
-        struct A {}
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::A")
+      struct A {}
 
-        extension A {
-          \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
-          struct B {
-            func f(_: \(references: ["🟩"])B)
-          }
-          func g(_: \(references: ["🟩"])B)
+      extension A {
+        \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
+        struct B {
+          func f(_: \(references: ["🟩"])B)
         }
-        func h(_: \(references: ["🟩"])A.B)
-        """ as QualifiedTypeNameSource
-      ],
-      verbose: true
-    )
+        func g(_: \(references: ["🟩"])B)
+      }
+      func h(_: \(references: ["🟩"])A.B)
+      """ as QualifiedTypeNameSource
+    ])
+  }
+  func testSimpleRecursiveExtension() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::A")
+      struct A {}
+      extension A.B { struct A {} }
+      extension A { typealias B = A }
+
+      func f(_: \(failure: .noTypeMember(member: ImplicitTypeReferenceComponent(from: PartiallyResolvedTypeIdentifier.Component(module: nil, name: Identifier(canonicalName: "A"), introducingSyntax: "A")), in: MemberLookupResult.memberResults(["🟥"])))A.A)
+      """ as QualifiedTypeNameSource
+    ])
   }
   // func testCrossFileExtension() {
   //   assertQualifiedTypeName([

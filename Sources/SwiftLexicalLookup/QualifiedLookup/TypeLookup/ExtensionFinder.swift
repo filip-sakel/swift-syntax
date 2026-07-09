@@ -65,10 +65,10 @@ extension SourceFileSyntax {
 extension SourceFileSyntax {
   /// Helper visitor for `findExtensions`
   fileprivate final class _ExtensionVisitor: SyntaxVisitor {
-    var extensionDecls = Set<ExtensionDeclSyntax>()
+    var extensionDecls = OrderedSet<ExtensionDeclSyntax>()
 
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
-      extensionDecls.insert(node)
+      extensionDecls.append(node)
       return .visitChildren
     }
     // Don't go into to nested scopes; just the source file
@@ -87,10 +87,10 @@ extension SourceFileSyntax {
   /// Same as `_ExtensionVisitor`, but only visits active nodes according to
   /// the given configured regions.
   fileprivate final class _ConfiguredExtensionVisitor: ActiveSyntaxVisitor {
-    var extensionDecls = Set<ExtensionDeclSyntax>()
+    var extensionDecls = OrderedSet<ExtensionDeclSyntax>()
 
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
-      extensionDecls.insert(node)
+      extensionDecls.append(node)
       return .visitChildren
     }
     // Don't go into to nested scopes; just the source file
@@ -109,7 +109,7 @@ extension SourceFileSyntax {
 
   /// Finds all top-level extensions, visiting only active nodes if
   /// ``configuredRegions`` is provided.
-  func findExtensions(configuredRegions: ConfiguredRegions?) -> Set<ExtensionDeclSyntax> {
+  func findExtensions(configuredRegions: ConfiguredRegions?) -> OrderedSet<ExtensionDeclSyntax> {
     if let configuredRegions {
       let visitor = _ConfiguredExtensionVisitor(viewMode: .all, configuredRegions: configuredRegions)
       visitor.walk(self)
@@ -136,7 +136,7 @@ extension SymbolTable3 {
   func findAllExtensions(
     accessibleFrom lookupFile: SourceFileSyntax,
     configuredRegions: ConfiguredRegions?
-  ) -> [SourceFileSyntax: Set<ExtensionDeclSyntax>] {
+  ) -> [SourceFileSyntax: OrderedSet<ExtensionDeclSyntax>] {
     // TODO: This should be imported *decls*, e.g., import struct Swift.Int
     let imports = lookupFile.findImportDecls(using: configuredRegions)
     let importedModules = imports.flatMap({ $0.path.compactMap({ Identifier(validating: $0.name) }) })

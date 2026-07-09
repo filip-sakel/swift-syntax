@@ -25,12 +25,12 @@ import SwiftSyntax
 ///   }
 /// In this case, we look inside "A.B" to find `C`, so we implicitly generate the
 /// components `A` and `B`.
-@_spi(_QualifiedLookup) public struct ImplicitTypeReferenceComponent: Sendable, CustomDebugStringConvertible {
+@_spi(_QualifiedLookupTests) public struct ImplicitTypeReferenceComponent: Sendable, CustomDebugStringConvertible {
   let module: Identifier?
   let name: Identifier
   let introducingSyntax: TypeLikeSyntax
 
-  init(from sourceComponent: PartiallyResolvedTypeIdentifier.Component) {
+  @_spi(_QualifiedLookupTests) public init(from sourceComponent: PartiallyResolvedTypeIdentifier.Component) {
     self.module = sourceComponent.module
     self.name = sourceComponent.name
     self.introducingSyntax = TypeLikeSyntax(sourceComponent.introducingSyntax)
