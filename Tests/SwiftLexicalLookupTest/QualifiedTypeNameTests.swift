@@ -211,18 +211,14 @@ extension ResolvedNominalTypeReference {
 }
 
 final class TestQualifiedTypeName: XCTestCase {
-  // override func setUp() {
-  //   self.executionTimeAllowance = 1
-  // }
-  //
-
   func assertQualifiedTypeName(
     _ lookupSources: [String: QualifiedTypeNameSource],
     moduleName: StaticString = "MyModule",
     configuredRegions: ConfiguredRegions? = nil,
     file: StaticString = #file,
     line: UInt = #line,
-    verbose: Bool = false
+    verbose: Bool = false,
+    assertSymbolTableState: (borrowing SymbolTable3) -> Void = { _ in }
   ) {
     // Parse each source file
     let lookupFiles: [String: SourceFileSyntax] = lookupSources.mapValues({ lookupSource in
@@ -471,19 +467,18 @@ final class TestQualifiedTypeName: XCTestCase {
         }
       }
     }
+    // Assert symbolTable state after lookup
+    assertSymbolTableState(symbolTable)
   }
 
   func testSimpleCase() {
-    // TODO: Add test to ensure unqualified lookup gave us a type with the right name.
-    // e.g., struct B {
-    //   func f(_: A) {} // <- Lookup here shouldn't give us `B` with `lookForMembers == false`
-    // }
     assertQualifiedTypeName(
       [
         "MyFile.swift": """
         \("🟥", name: "_(MyFile.swift)::A")
         struct A {
           static func f() -> \(reference: "🟥")A {}
+          static func g() -> \(failure: .noTypeInScope)B {}
         }
         """ as QualifiedTypeNameSource
       ]
@@ -619,10 +614,10 @@ final class TestQualifiedTypeName: XCTestCase {
   func testSimpleComposition() {
     assertQualifiedTypeName([
       "MyFile.swift": """
+      typealias C = \(references: ["🟥", "🟩"])A & B
+
       \("🟥", name: "_(MyFile.swift)::A")
       protocol A {}
-
-      typealias C = \(references: ["🟥", "🟩"])A & B
 
       \("🟩", name: "_(MyFile.swift)::B")
       protocol B {}
@@ -651,6 +646,26 @@ final class TestQualifiedTypeName: XCTestCase {
       func g(_: \(result: .anyType)(Any & Any) & Any)
       """ as QualifiedTypeNameSource
     ])
+  }
+  func testSimpleMetatype() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      struct A {}
+      func f(_: \(result: .memberResults([]))A.Type)
+      """ as QualifiedTypeNameSource
+    ])
+  }
+  func testSimpleProtocolTypes() {
+    // FIXME: Fix segmentation fault
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::A")
+      protocol A {}
+
+      func f(_: \(references: ["🟥"])some A)
+      """ as QualifiedTypeNameSource
+    ], verbose: true)
+      // func g(_: \(references: ["🟥"])any A)
   }
   func testAnyTypeComposition() {
     assertQualifiedTypeName([
