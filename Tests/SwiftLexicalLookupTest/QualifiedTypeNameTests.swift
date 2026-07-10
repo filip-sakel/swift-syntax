@@ -656,16 +656,15 @@ final class TestQualifiedTypeName: XCTestCase {
     ])
   }
   func testSimpleProtocolTypes() {
-    // FIXME: Fix segmentation fault
     assertQualifiedTypeName([
       "MyFile.swift": """
       \("🟥", name: "_(MyFile.swift)::A")
       protocol A {}
 
       func f(_: \(references: ["🟥"])some A)
+      func g(_: \(references: ["🟥"])any A)
       """ as QualifiedTypeNameSource
-    ], verbose: true)
-      // func g(_: \(references: ["🟥"])any A)
+    ])
   }
   func testAnyTypeComposition() {
     assertQualifiedTypeName([

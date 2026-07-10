@@ -338,8 +338,9 @@ extension TypeSyntaxProtocol {
         typeSyntax: TypeSyntax(memberType)
       )
       return Result.success(PartiallyResolvedType.member(base: memberType.baseType, memberComponent: parsedResult))
+
     // Base cases that don't produce types
-    case .metatypeType, .namedOpaqueReturnType:
+    case .metatypeType, .namedOpaqueReturnType, .classRestrictionType:
       return Result.success(PartiallyResolvedType.composition([]))
     case .suppressedType(let suppressedType):
       // Don't diagnose here since suprressed types can be aliased, e.g.:
@@ -395,16 +396,14 @@ extension TypeSyntaxProtocol {
 
     // Recursive cases
     case .attributedType(let attributedType):
-      return attributedType.partiallyResolve()
+      return attributedType.baseType.partiallyResolve()
     case .someOrAnyType(let someOrAnyTypeType):
-      return someOrAnyTypeType.partiallyResolve()
-    case .classRestrictionType(let classRestrictionType):
-      return classRestrictionType.partiallyResolve()
+      return someOrAnyTypeType.constraint.partiallyResolve()
     // TODO: Explain pack element & expansion types
     case .packElementType(let packElementType):
-      return packElementType.partiallyResolve()
+      return packElementType.pack.partiallyResolve()
     case .packExpansionType(let packExpansionType):
-      return packExpansionType.partiallyResolve()
+      return packExpansionType.repetitionPattern.partiallyResolve()
     case .compositionType(let compositionType):
       return Result.success(PartiallyResolvedType.composition(compositionType.elements.map(\.type)))
     // // Add all types and failures from composition types
