@@ -597,6 +597,9 @@ final class TestQualifiedTypeName: XCTestCase {
     assertQualifiedTypeName(
       [
         "MyFile.swift": """
+        struct A<T> {
+          func f(_: \(failure: .genericParameterOrAssociatedType)T)
+        }
         protocol B {
           associatedtype U
           func g(_: \(failure: .invalidMembers([("U", .genericParameterOrAssociatedType)]))U)
@@ -605,9 +608,7 @@ final class TestQualifiedTypeName: XCTestCase {
       ],
       verbose: true
     )
-    // struct A<T> {
-    //   func f(_: \(failure: .genericParameterOrAssociatedType)T)
-    // }
+
   }
 
   // MARK: Aliases

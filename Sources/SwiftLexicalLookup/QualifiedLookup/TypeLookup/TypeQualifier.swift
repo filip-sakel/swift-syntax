@@ -1254,6 +1254,12 @@ extension TypeQualifierFailure {
       )
     }
 
+    // Skip extension binding for local declarations.
+    //
+    // For instance, there's no way to extend `A` in `func f() { struct A {} }`
+    // since extensions may only be declared at the top level.
+    guard case .topLevel = typeReference.qualifiedName else { return currentNominal }
+
     // Find all the extensions we need to bind
     //
     // First, get the file of the originatingSyntax

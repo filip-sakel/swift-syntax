@@ -78,34 +78,23 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
 
   var debugDescription: String {
     switch self {
-    case .lookForGenericParameters(let extensionDecl):
-      return ".lookForGenericParameters(in: \(extensionDecl.trimmedDescription))"
-    case .lookInImports(let imports):
-      return ".lookInImports(\(imports.map(\.name)))"
-    case .lookInModule:
-      return "lookInModule"
     case .lookForExtension(let extensionDecl, let lookForSelectedMember):
       return
         ".lookForExtension(\(extensionDecl.trimmedDescription), lookForSelectedMember: \(lookForSelectedMember))"
     case .lookForType(let type, let lookForSelectedMember):
       return
         ".lookForType(\(type.trimmedDescription), lookForSelectedMember: \(lookForSelectedMember)))"
+    case .lookForGenericParameters(let extensionDecl):
+      return ".lookForGenericParameters(in: \(extensionDecl.trimmedDescription))"
+    case .lookInModule:
+      return "lookInModule"
+    case .lookInImports(let imports):
+      return ".lookInImports(\(imports.map(\.name)))"
     }
   }
 }
 
-// @_spi(_QualifiedLookup) public enum UnqualifiedResult {
-//   case lookIn(PartiallyResolvedType, includeGenericParams: Bool)
-// }
-
 extension SyntaxProtocol {
-  // func findUnqualifiedType1(identifier: Identifier?, name: Identifier?) -> TypeDeclSyntax? {
-  //   // Get next parent
-  //   var genericOrAssociated = [GenericParameterSyntax]()
-  //   var parentNames = [TypeDeclSyntax]()
-  //
-  // }
-
   func findUnqualifiedType(
     _ typeName: Identifier,
     configuredRegions: ConfiguredRegions?
@@ -157,9 +146,17 @@ extension SyntaxProtocol {
             guard let typeDecl = TypeDeclSyntax(decl) else { return nil }
 
             return UnqualifiedTypeLookupResult.lookForType(typeDecl, lookForSelectedMember: false)
-          // Identifiers, `self`, `newValue`, `error`, and `oldValue` can't be type decls.
-          // Also, equivalent names always refers to identifiers in switch cases
-          case .identifier, .implicit(.`self`), .implicit(.newValue), .implicit(.oldValue),
+          case .identifier(let identifierSyntax, accessibleAfter: _):
+            // The only `TypeDeclSyntax` "identifiers" are generic parameters.
+            guard let genericParameter = identifierSyntax.as(GenericParameterSyntax.self) else { return nil }
+            return UnqualifiedTypeLookupResult.lookForType(
+              TypeDeclSyntax(genericParameter),
+              lookForSelectedMember: false
+            )
+          // `self`, `newValue`, `error`, and `oldValue` can't be type decls.
+          // Also, `equivalentNames` always refers to variable identifiers in
+          // switch cases
+          case .implicit(.`self`), .implicit(.newValue), .implicit(.oldValue),
             .implicit(.error), .equivalentNames:
             return nil
           }
