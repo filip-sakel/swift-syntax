@@ -594,20 +594,17 @@ final class TestQualifiedTypeName: XCTestCase {
 
   // MARK: Generic Parameters & Associated Types
   func testSimpleGenericParameters() {
-    assertQualifiedTypeName(
-      [
-        "MyFile.swift": """
-        struct A<T> {
-          func f(_: \(failure: .genericParameterOrAssociatedType)T)
-        }
-        protocol B {
-          associatedtype U
-          func g(_: \(failure: .invalidMembers([("U", .genericParameterOrAssociatedType)]))U)
-        }
-        """ as QualifiedTypeNameSource
-      ],
-      verbose: true
-    )
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      struct A<T> {
+        func f(_: \(failure: .genericParameterOrAssociatedType)T)
+      }
+      protocol B {
+        associatedtype U
+        func g(_: \(failure: .invalidMembers([("U", .genericParameterOrAssociatedType)]))U)
+      }
+      """ as QualifiedTypeNameSource
+    ])
 
   }
 
@@ -752,14 +749,6 @@ final class TestQualifiedTypeName: XCTestCase {
         """ as QualifiedTypeNameSource
       ]
     )
-
-    // // Non-nominal types don't have type members
-    // typealias C = \(failure: .noTupleOrFunctionTypeMembers)(Int, Bool).MyType
-    // typealias D = \(failure: .noTupleOrFunctionTypeMembers)((Int) -> Bool).MyType
-    // // Ensure errors propagate
-    // struct MyStruct {}
-    // typealias E = \(failure: .cannotComposeTupleOrFunction)A.MyType
-    // typealias F = \(failure: .noTupleOrFunctionTypeMembers)A & MyStruct
   }
 
   func testDuplicateComposition() {
@@ -781,6 +770,29 @@ final class TestQualifiedTypeName: XCTestCase {
   //     """ as QualifiedTypeNameSource
   //   ])
   // }
+
+  // MARK: Non-Nominal Members
+  func testNonNominalMembers() {
+    // A member "MyType"
+    let myTypeMember = ImplicitTypeReferenceComponent(
+      from: PartiallyResolvedTypeIdentifier.Component(
+        module: nil,
+        name: Identifier(canonicalName: "MyType"),
+        introducingSyntax: "MyType"
+      )
+    )
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      struct A {}
+      struct B {}
+
+      // Tuples, functions, and metatypes don't have type members
+      var x: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.tuple(labels: [nil, nil])))(A, B).MyType
+      var y: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.function(argumentCount: 1)))((A) -> B).MyType
+      var z: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.memberResults([])))A.Type.MyType
+      """ as QualifiedTypeNameSource
+    ])
+  }
 
   // MARK: Extensions
 
