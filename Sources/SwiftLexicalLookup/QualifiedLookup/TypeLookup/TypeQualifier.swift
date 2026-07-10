@@ -750,13 +750,17 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       // Whether we have to look for a member or not, we can't succeed without
       // knowing the enclosing type
       let enclosingType: MemberLookupResult<ResolvedNominalTypeReference>
-      switch enclosingTypeResult {
-      case .success(let result):
+      switch (enclosingTypeResult, lookForSelectedMember) {
+      case (.success(let result), _):
         enclosingType = result
       // Continue to next scope if unqualified lookup didn't find the type in this scope
-      case .failure(.noTypeInScope):
+      case (.failure(.noTypeInScope), _):
         continue
-      case .failure(let failure):
+      // Return failure directly if we're not looking for the selected member
+      case (.failure(let failure), false):
+        return Result.failure(failure)
+      // Otherwise, wrap in a '.invalidBaseType'
+      case (.failure(let failure), true):
         return Result.failure(Failure.invalidBaseType(failure))
       }
 
