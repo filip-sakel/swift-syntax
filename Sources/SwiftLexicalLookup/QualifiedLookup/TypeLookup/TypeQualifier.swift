@@ -132,8 +132,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   ///
   /// func f(_: (A & B).T)
   /// ```
-  /// TODO: Convert to tuple array
-  case invalidMembers([TypeLikeSyntax: Self])
+  case invalidMembers([(TypeLikeSyntax, Self)])
 
   /// The base type which we need to derive a qualified name is invalid.
   ///
@@ -289,6 +288,37 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   }
 }
 
+extension TypeQualifierFailure {
+  /// Looks recursively into this failure to pull out and
+  /// ``.cyclicalTypeReference`` diagnostic.
+  fileprivate var _recursivelyNestedCycle: [TypeSyntax]? {
+    switch self {
+    // Base case
+    case .cyclicalTypeReference(let cycle):
+      return cycle
+
+    // No nested ``TypeQualifierFailure`` => nil
+    case .noTypeInScope, .cannotComposeNonClassOrProtocol(_), .noTypeMember(member: _, in: _),
+      .cannotExtendNonNominal(nonnominal: _), .other(_), .genericParameterOrAssociatedType,
+      .ambiguousTypeDecl(_), .syntaxNotInSymbolTable(rootKind: _), .syntaxInDisabledRegion:
+      return nil
+
+    // Simple recursion
+    case .invalidAliasedType(let nestedFailure),
+      .invalidBaseType(let nestedFailure):
+      return nestedFailure._recursivelyNestedCycle
+
+    // Only return a `_nestedCycle` if we have exactly one result.
+    case .invalidMembers(let nestedFailures):
+      guard let (_, nestedFailure) = nestedFailures.first, nestedFailures.count == 1 else { return nil }
+      return nestedFailure._recursivelyNestedCycle
+    case .invalidComposition(let nestedFailures):
+      guard let (_, nestedFailure) = nestedFailures.first, nestedFailures.count == 1 else { return nil }
+      return nestedFailure._recursivelyNestedCycle
+    }
+  }
+}
+
 // TODO: Add .lookForSupertype, .lookForDynamicMember & implemenet internal/external module lookup
 
 /// Finds the main declaration and qualified name of the nominal types
@@ -377,8 +407,23 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     visitedTypeSyntax: OrderedSet<TypeSyntax>
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     // Ensure we're not forming a cycle
-    guard !visitedTypeSyntax.contains(typeSyntax) else {
-      return .failure(Failure.cyclicalTypeReference(cycle: visitedTypeSyntax.elements))
+    if let existingSyntaxIndex = visitedTypeSyntax.firstIndex(of: typeSyntax) {
+      // We might have valid references before the actual cycle; chop those off
+      // to isolate the cycle.
+      //
+      // E.g.:
+      //   typealias A = B
+      //   typealias B = A
+      //   func f(_: A) // <- Lookup here
+      // Starting from `A`, `visitedTypeSyntax` would be:
+      //   [
+      //     A // from f(_: A),
+      //     B // from typealias A = B
+      //     A // from typealias B = A
+      //   ]
+      // And we isolate to the cycle [B, A]
+      let isolatedCycle = Array(visitedTypeSyntax[existingSyntaxIndex...])
+      return .failure(Failure.cyclicalTypeReference(cycle: isolatedCycle))
     }
     // // Record this type syntax for cycle detection
     // visitedTypeSyntax.append(typeSyntax)
@@ -784,7 +829,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
       case .failure(.noTypeMember):
         continue
       case .failure(let failure):
-        return Result.failure(Failure.invalidMembers([typeComponent.introducingSyntax: failure]))
+        return Result.failure(Failure.invalidMembers([(typeComponent.introducingSyntax, failure)]))
       }
 
       return Result.success(memberType)
@@ -831,17 +876,33 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     if let nominalTypeDecl = typeDecl.as(NominalTypeDeclSyntax.self) {
       nominalDecl = nominalTypeDecl
     } else if let typeAlias = typeDecl.as(TypeAliasDeclSyntax.self) {
+      let aliasedTypeSyntax = typeAlias.initializer.value
       log(
-        "Found aliased type `\(typeAlias.initializer.value)`"
+        "Found aliased type `\(aliasedTypeSyntax)`"
       )
 
-      let aliasedResult = resolveSyntax(
+      let aliasedResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> = resolveSyntax(
         typeSyntax: typeAlias.initializer.value,
         memberDependencies: &memberDependencies,
         visitedTypeSyntax: visitedTypeSyntax
       )
-      // Map error so that callers don't think this type decl has an issue (the type alias is diagnosed separately)
-      return aliasedResult.mapError(Failure.invalidAliasedType(_:))
+      // Wrap in a failure unless we're part of a cycle
+      switch aliasedResult {
+      case .success(let success):
+        return Result.success(success)
+      case .failure(let failure):
+        // If we're part of the cycle, return the cycle
+        //
+        // Note: Although `_recursivelyNestedCycle` is recursive, each type
+        // alias should unwrap the cyclicalTypeReference, basically resulting
+        // in a constant-time operation.
+        if let nestedCycle = failure._recursivelyNestedCycle, nestedCycle.contains(aliasedTypeSyntax) {
+          return Result.failure(Failure.cyclicalTypeReference(cycle: nestedCycle))
+        }
+        // Wrapping the failure indicates the type alias itself isn't the
+        // problem; the referenced type is the problem (diagnosed separately).
+        return Result.failure(Failure.invalidAliasedType(failure))
+      }
     } else { /* else if it's an associated type or generic parameter */
       // No members for generic parameters and associated types
       return Result.failure(Failure.genericParameterOrAssociatedType)
@@ -973,7 +1034,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     // Also, collecting all failures surfaces all errors at once for better
     // diagnostics.
     var results = [TypeDeclSyntax: MemberLookupResult<ResolvedNominalTypeReference>]()
-    var failures = [TypeLikeSyntax: Failure]()
+    var failures = [(TypeLikeSyntax, Failure)]()
     var nominalBaseTypes = [NominalType]()
 
     for baseType in baseTypes {
@@ -995,7 +1056,7 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
           // No results; continue in case next one has a result.
           break
         case Result.failure(let failure):
-          failures[typeMember.introducingSyntax] = failure
+          failures.append((typeMember.introducingSyntax, failure))
         }
       }
 

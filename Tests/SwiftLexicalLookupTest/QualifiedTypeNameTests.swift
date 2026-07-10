@@ -17,6 +17,13 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
+// Convenience `String` initializer for `TypeLikeSyntax`
+extension TypeLikeSyntax: ExpressibleByStringLiteral {
+  public init(stringLiteral value: StringLiteralType) {
+    self.init(TypeSyntax(stringLiteral: value))
+  }
+}
+
 /// Source code annotated with qualified-lookup expectations.
 ///
 /// Examples at `assertTypeMemberLookup` documentation.
@@ -555,12 +562,56 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testSimpleCycle() {
-    // FIXME: Fix error or investigate why we get `.invalidBaseType`
     assertQualifiedTypeName([
       "MyFile.swift": """
       typealias A = \(failure: .cyclicalTypeReference(cycle: ["B", "A"]))B
       typealias B = A
-      func f(_: \(failure: .cyclicalTypeReference(cycle: ["A", "B", "A"]))A)
+      func f(_: \(failure: .cyclicalTypeReference(cycle: ["B", "A"]))A)
+      """ as QualifiedTypeNameSource
+    ])
+  }
+
+  func testAliasesToCycle() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      // Cycle
+      typealias A = \(failure: .cyclicalTypeReference(cycle: ["B", "A"]))B
+      typealias B = A
+      // Non-cyclical references
+      typealias C = B
+      typealias D = C
+      func f(_: \(failure: .invalidAliasedType(.invalidAliasedType(.cyclicalTypeReference(cycle: ["A", "B"]))))D)
+      """ as QualifiedTypeNameSource
+    ])
+  }
+
+  func testExtensionOfCycle() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      // Cycle
+      typealias A = \(failure: .cyclicalTypeReference(cycle: ["B", "A"]))B
+      typealias B = A
+
+      extension A {
+        struct C {
+          func f(_: \(failure: .invalidBaseType(.invalidBaseType(.cyclicalTypeReference(cycle: ["B", "A"]))))C)
+          func g(_: \(failure: .invalidBaseType(.invalidBaseType(.cyclicalTypeReference(cycle: ["B", "A"]))))Self)
+        }
+        func h(_: \(failure: .invalidBaseType(.cyclicalTypeReference(cycle: ["B", "A"])))C)
+      }
+      """ as QualifiedTypeNameSource
+    ])
+  }
+
+  func testNestedCycle() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::A")
+      struct A { typealias Element = B.Element }
+      struct B { typealias Element = A.Element }
+
+      func f(_: \(references: ["🟥"])A)
+      func g(_: \(failure: .invalidMembers([("A.Element", .cyclicalTypeReference(cycle: ["B.Element", "A.Element"]))]))A.Element)
       """ as QualifiedTypeNameSource
     ])
   }
