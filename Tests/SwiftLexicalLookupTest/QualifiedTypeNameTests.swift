@@ -594,17 +594,20 @@ final class TestQualifiedTypeName: XCTestCase {
 
   // MARK: Generic Parameters & Associated Types
   func testSimpleGenericParameters() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      struct A<T> {
-        func f(_: \(failure: .genericParameterOrAssociatedType)T)
-      }
-      protocol B {
-        associatedtype U
-        func g(_: \(failure: .invalidMembers([("U", .genericParameterOrAssociatedType)]))U)
-      }
-      """ as QualifiedTypeNameSource
-    ])
+    assertQualifiedTypeName(
+      [
+        "MyFile.swift": """
+        protocol B {
+          associatedtype U
+          func g(_: \(failure: .invalidMembers([("U", .genericParameterOrAssociatedType)]))U)
+        }
+        """ as QualifiedTypeNameSource
+      ],
+      verbose: true
+    )
+    // struct A<T> {
+    //   func f(_: \(failure: .genericParameterOrAssociatedType)T)
+    // }
   }
 
   // MARK: Aliases

@@ -12,7 +12,7 @@
 
 import SwiftSyntax
 
-enum ChainResult: CustomDebugStringConvertible {
+enum ChainResolution: CustomDebugStringConvertible {
   case resolved(QualifiedTypeName)
   case partiallyResolved(PartiallyResolvedNominalTypeChain)
 
@@ -162,7 +162,7 @@ extension NominalTypeDeclSyntax {
   }
 
   /// referencing this type from the given lookup loationFind the type chain of this source location. External module or `nil` for this module (internal).
-  func findTypeChain(module: Identifier?) -> Result<ChainResult, ChainResolutionFailure> {
+  func findTypeChain(module: Identifier?) -> Result<ChainResolution, ChainResolutionFailure> {
     /// Parse the token into a valid identifier or throw
     func parseName(_ token: TokenSyntax) throws(ChainResolutionFailure) -> Identifier {
       guard let identifier = Identifier(validating: token) else {
@@ -187,7 +187,7 @@ extension NominalTypeDeclSyntax {
         }
         // Extensions can't be resolved right now.
         else if let extensionDecl = currentAncestor.as(ExtensionDeclSyntax.self) {
-          return ChainResult.partiallyResolved(
+          return ChainResolution.partiallyResolved(
             PartiallyResolvedNominalTypeChain(base: extensionDecl, members: members)
           )
         }
@@ -209,7 +209,7 @@ extension NominalTypeDeclSyntax {
             )
           }
 
-          return ChainResult.resolved(
+          return ChainResolution.resolved(
             QualifiedTypeName.topLevel(
               globalType
             )
@@ -226,7 +226,7 @@ extension NominalTypeDeclSyntax {
             )
           }
 
-          return ChainResult.resolved(
+          return ChainResolution.resolved(
             QualifiedTypeName.nestedScope(
               scope: scope,
               type: nestedType

@@ -13,33 +13,33 @@
 import SwiftIfConfig
 import SwiftSyntax
 
-extension Result where Success: CustomDebugStringConvertible {
+extension Result where Success: CustomDebugStringConvertible, Failure: CustomDebugStringConvertible {
   fileprivate var _debugDescription: String {
     switch self {
     case .success(let success):
       return ".success(\(success.debugDescription))"
     case .failure(let error):
-      return ".error(\(String(reflecting: error)))"
+      return ".error(\(error.debugDescription))"
     }
   }
 }
-extension Result where Success: SyntaxProtocol {
+extension Result where Success: SyntaxProtocol, Failure: CustomDebugStringConvertible {
   fileprivate var _debugSyntaxDescription: String {
     switch self {
     case .success(let success):
       return ".success(\(success.trimmedDescription))"
     case .failure(let error):
-      return ".error(\(String(reflecting: error)))"
+      return ".error(\(error.debugDescription))"
     }
   }
 }
-extension Result where Success == [TypeDeclSyntax] {
+extension Result where Success == [TypeDeclSyntax], Failure: CustomDebugStringConvertible {
   fileprivate var _debugSyntaxDescription: String {
     switch self {
     case .success(let success):
       return ".success(\(success.map(\.trimmedDescription)))"
     case .failure(let error):
-      return ".error(\(String(reflecting: error)))"
+      return ".error(\(error.debugDescription))"
     }
   }
 }
@@ -196,7 +196,9 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   /// The cycle consists of all the type syntax reference we resolved
   /// to get to the cycle (minus the starting syntax).
   case cyclicalTypeReference(cycle: [TypeSyntax])
+}
 
+extension TypeQualifierFailure {
   /// Produce a simplified description for debugging.
   ///
   /// Namely, for syntax nodes we use `.trimmedDescription` and for `ResolvedNominalTypeReference`
@@ -285,6 +287,16 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
     case .cyclicalTypeReference(let cycle):
       return ".cyclicalTypeReference(\(cycle.map(\.trimmedDescription)))"
     }
+  }
+}
+
+extension TypeQualifierFailure: CustomDebugStringConvertible
+where MinimalNominal == ResolvedNominalTypeReference, ExtendedNominal == NominalType {
+  public var debugDescription: String {
+    _describeDebug(
+      resolveMininalNominal: \.qualifiedName.debugDescription,
+      resolveExtendedNominal: \.qualifiedName.debugDescription
+    )
   }
 }
 
@@ -769,12 +781,11 @@ extension TypeQualifierFailure {
         // One of the lookup results will be to look for `A` in `extension Int`.
         // The enclosing type is `Swift::Int.(MyFile.swift)::A`. Then, to find `A.B` we'll
         // just append `.A` to the member chain. Hence, we look for `.A.B` in `Swift::Int`
-        switch resolveExtendedTypeSyntax(extensionDecl: extensionDecl, memberDependencies: &memberDependencies) {
-        case .success(let type):
-          enclosingTypeResult = Result.success(MemberLookupResult.memberResults([type]))
-        case .failure(let failure):
-          return .failure(failure)
-        }
+        let extendedNominal = resolveExtendedTypeSyntax(
+          extensionDecl: extensionDecl,
+          memberDependencies: &memberDependencies
+        )
+        enclosingTypeResult = extendedNominal.map({ MemberLookupResult.memberResults([$0]) })
         lookForSelectedMember = findSelectedMember
       case .lookForGenericParameters(let extensionDecl):
         // Resolve extended type
@@ -838,8 +849,9 @@ extension TypeQualifierFailure {
       // Continue like above
       case .failure(.noTypeMember):
         continue
+      // Note: `resolveMember` wraps the underlying error in ``Failure.invalidMembers``
       case .failure(let failure):
-        return Result.failure(Failure.invalidMembers([(typeComponent.introducingSyntax, failure)]))
+        return Result.failure(failure)
       }
 
       return Result.success(memberType)
@@ -915,8 +927,12 @@ extension TypeQualifierFailure {
     }
 
     // Get the type chain
-    let typeChain: ChainResult
-    switch nominalDecl.findTypeChain(module: nil) {
+    let typeChainResult: Result<ChainResolution, NominalTypeDeclSyntax.ChainResolutionFailure> =
+      nominalDecl.findTypeChain(
+        module: nil
+      )
+    let typeChain: ChainResolution
+    switch typeChainResult {
     case .success(let result):
       typeChain = result
     case .failure(.noSourceFileRoot(let nonFileRoot)):
