@@ -354,7 +354,11 @@ final class TestQualifiedTypeName: XCTestCase {
         let declsToNames: [NominalTypeDeclSyntax: String]
         var typeResolutionDependencies = [ExtensionBindingResult.Dependency]()
         let lookupResultOrFailure: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeQualifier.Failure> =
-          typeQualifier.resolveSyntax(typeSyntax: targetTypeSyntax, memberDependencies: &typeResolutionDependencies)
+          typeQualifier.resolveSyntax(
+            typeSyntax: targetTypeSyntax,
+            memberDependencies: &typeResolutionDependencies,
+            visitedTypeSyntax: []
+          )
         // _ = consume typeResolutionDependencies
 
         // Report result
@@ -546,6 +550,17 @@ final class TestQualifiedTypeName: XCTestCase {
       }
       func f(_: \(reference: "🟩")Outer.A)
       func g(_: \(reference: "🟩")Outer.B)
+      """ as QualifiedTypeNameSource
+    ])
+  }
+
+  func testSimpleCycle() {
+    // FIXME: Fix error or investigate why we get `.invalidBaseType`
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      typealias A = \(failure: .cyclicalTypeReference(cycle: ["B", "A"]))B
+      typealias B = A
+      func f(_: \(failure: .cyclicalTypeReference(cycle: ["A", "B", "A"]))A)
       """ as QualifiedTypeNameSource
     ])
   }

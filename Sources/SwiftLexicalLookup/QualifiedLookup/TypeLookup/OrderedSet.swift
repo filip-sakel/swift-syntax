@@ -14,7 +14,7 @@
 // TODO: Could we just assert uniqueness in debug?
 //
 /// No-dependency version of Swift Collections' `OrderedSet`.
-internal struct OrderedSet<Element: Hashable> {
+@_spi(_QualifiedLookup) public struct OrderedSet<Element: Hashable> {
   private var _elements: [Element]
   private var _members: Set<Element>
 

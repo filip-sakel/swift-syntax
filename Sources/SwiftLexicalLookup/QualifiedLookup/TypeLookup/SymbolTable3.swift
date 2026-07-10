@@ -340,7 +340,12 @@ extension SymbolTable3 {
     case cannotFixNonInvalidated
     /// Either root isn't a source file, or said source file isn't registered
     case nonRegisteredSyntaxRoot
-    case boundToUnresolvedName
+
+    // case boundToUnresolvedName
+
+    /// Same as NominalRegistrationFailure.invalidReregistration
+    case invalidReregistration(existingMainDecl: NominalTypeDeclSyntax)
+
     // See todo comment below
     case bindingBeforeFixingInvalidatedExtensions(invalidatedExtension: ExtensionDeclSyntax)
   }
@@ -361,7 +366,10 @@ extension SymbolTable3 {
   /// Returns: Broken extensions or binding failure.
   func bindExtension(
     _ extensionDecl: ExtensionDeclSyntax,
-    to result: Result<QualifiedTypeName, TypeQualifier.Failure>,
+    to result: Result<
+      (qualifiedName: QualifiedTypeName, mainDecl: NominalTypeDeclSyntax),
+      TypeQualifier.Failure
+    >,
     dependencies: [ExtensionBindingResult.Dependency]
   ) -> Result<InvalidatedExtensions, ExtensionBindingFailure> {
     _admitExtension(
@@ -377,7 +385,10 @@ extension SymbolTable3 {
   /// again.
   func fixInvalidatedExtension(
     _ extensionDecl: ExtensionDeclSyntax,
-    to result: Result<QualifiedTypeName, TypeQualifier.Failure>,
+    to result: Result<
+      (qualifiedName: QualifiedTypeName, mainDecl: NominalTypeDeclSyntax),
+      TypeQualifier.Failure
+    >,
     dependencies: [ExtensionBindingResult.Dependency]
   ) -> Result<InvalidatedExtensions, ExtensionBindingFailure> {
     _admitExtension(
@@ -392,7 +403,10 @@ extension SymbolTable3 {
   fileprivate func _admitExtension(
     _ extensionDecl: ExtensionDeclSyntax,
     isUpdatingInvalidating isFixingInvalidating: Bool,
-    to result: Result<QualifiedTypeName, TypeQualifier.Failure>,
+    to result: Result<
+      (qualifiedName: QualifiedTypeName, mainDecl: NominalTypeDeclSyntax),
+      TypeQualifier.Failure
+    >,
     dependencies: [ExtensionBindingResult.Dependency]
   ) -> Result<InvalidatedExtensions, ExtensionBindingFailure> {
     // Get file and module
@@ -424,17 +438,21 @@ extension SymbolTable3 {
     }
 
     // TODO: This might not be necessary if we change the model,
-    // but we should check that all invalidated extehsions
+    // but we should check that all invalidated extensions
     // have been handled.
 
     // Compute the new extension state and what old extensions we've broken
     let newExtensionState: ExtensionBindingState
     let invalidatedExtensions: OrderedSet<ExtensionDeclSyntax>
     switch result {
-    case .success(let resolvedName):
+    case .success(let (qualifiedName, mainDecl)):
       // Get nominal type
-      guard let currentNominal = typeState[resolvedName] else {
-        return .failure(ExtensionBindingFailure.boundToUnresolvedName)
+      let currentNominal: NominalType
+      switch registerNominalTypeReference(qualifiedName: qualifiedName, mainDecl: mainDecl) {
+      case .success(let success):
+        currentNominal = success
+      case .failure(.invalidReregistration(let existingMainDecl)):
+        return .failure(ExtensionBindingFailure.invalidReregistration(existingMainDecl: existingMainDecl))
       }
       // Find introduced type members
       // TODO: configuredRegions
@@ -443,7 +461,7 @@ extension SymbolTable3 {
       // TODO: Factor these checks out
       // 1. Can't introduce members we depend on (without a cycle)
       if let (_, recursiveTypeMembers) = dependencies._firstMatchingTypeMembers(
-        resolvedTypeName: resolvedName,
+        resolvedTypeName: qualifiedName,
         typeMembers: typeMembers
       ) {
         newExtensionState = ExtensionBindingState.cannotDependOnIntroducedMembers(
@@ -472,14 +490,14 @@ extension SymbolTable3 {
           guard case .resolved(let introducingExtensionResult) = extensionState[introducingExtension] else {
             // TODO: Make the required checks to justify this being a fatalError
             fatalError(
-              "[SwiftLexicalLookup] Internal error: While trying to bind extension to '\(resolvedName)', found dependency to type member `\(dependency.typeMember.name)` originating from a non-resolved/invalidated extension: \(String(reflecting: extensionState[introducingExtension]))."
+              "[SwiftLexicalLookup] Internal error: While trying to bind extension to '\(qualifiedName)', found dependency to type member `\(dependency.typeMember.name)` originating from a non-resolved/invalidated extension: \(String(reflecting: extensionState[introducingExtension]))."
             )
           }
 
           // Continue if there are no conflicts
           guard
             let (_, recursiveTypeMembers) = introducingExtensionResult.dependencies._firstMatchingTypeMembers(
-              resolvedTypeName: resolvedName,
+              resolvedTypeName: qualifiedName,
               typeMembers: typeMembers
             )
           else {
@@ -528,7 +546,7 @@ extension SymbolTable3 {
         guard
           let (firstConflictingDependency, firstConflictingTypeDecls) = extensionBindingResult.dependencies
             ._firstMatchingTypeMembers(
-              resolvedTypeName: resolvedName,
+              resolvedTypeName: qualifiedName,
               typeMembers: typeMembers
             )
         else { continue }
@@ -538,7 +556,7 @@ extension SymbolTable3 {
           invalidatedResult: extensionBindingResult,
           // We're the ones doing the invalidating
           invalidatingExtension: extensionDecl,
-          invalidatingType: resolvedName,
+          invalidatingType: qualifiedName,
           // Record conflict
           firstConflictingDependency: firstConflictingDependency,
           firstConflictingTypeDecls: firstConflictingTypeDecls
@@ -546,7 +564,7 @@ extension SymbolTable3 {
         invalidatedExtensionDecls.append(extensionDecl)
       }
       newExtensionState = ExtensionBindingState.resolved(
-        ExtensionBindingResult(dependencies: [], resolution: .success(resolvedName))
+        ExtensionBindingResult(dependencies: [], resolution: .success(qualifiedName))
       )
       invalidatedExtensions = invalidatedExtensionDecls
 
@@ -559,7 +577,7 @@ extension SymbolTable3 {
         "[SwiftLexicalLookup] Internal error: Extension was already in `extensions` despite appearing in `unresolvedExtensions"
       )
       // Update lookup table
-      typeState[resolvedName] = newNominal
+      typeState[qualifiedName] = newNominal
     case .failure(let failure):
       // Otherwise just save the failure
       newExtensionState = ExtensionBindingState.resolved(
