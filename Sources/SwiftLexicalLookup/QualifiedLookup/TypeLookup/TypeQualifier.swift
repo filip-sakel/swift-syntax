@@ -289,32 +289,39 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
 }
 
 extension TypeQualifierFailure {
-  /// Looks recursively into this failure to pull out and
-  /// ``.cyclicalTypeReference`` diagnostic.
-  fileprivate var _recursivelyNestedCycle: [TypeSyntax]? {
+  /// Tries to pull out a ``.cyclicalTypeReference`` from this failure at depth
+  /// zero or one (non-recursive).
+  fileprivate var _nestedCycle: [TypeSyntax]? {
     switch self {
-    // Base case
     case .cyclicalTypeReference(let cycle):
       return cycle
+
+    // Simple nesting
+    case .invalidAliasedType(.cyclicalTypeReference(let nestedCycle)),
+      .invalidBaseType(.cyclicalTypeReference(let nestedCycle)):
+      return nestedCycle
 
     // No nested ``TypeQualifierFailure`` => nil
     case .noTypeInScope, .cannotComposeNonClassOrProtocol(_), .noTypeMember(member: _, in: _),
       .cannotExtendNonNominal(nonnominal: _), .other(_), .genericParameterOrAssociatedType,
-      .ambiguousTypeDecl(_), .syntaxNotInSymbolTable(rootKind: _), .syntaxInDisabledRegion:
+      .ambiguousTypeDecl(_), .syntaxNotInSymbolTable(rootKind: _), .syntaxInDisabledRegion,
+      // If the above case don't directly contain a cycle
+      .invalidAliasedType(_), .invalidBaseType(_):
       return nil
 
-    // Simple recursion
-    case .invalidAliasedType(let nestedFailure),
-      .invalidBaseType(let nestedFailure):
-      return nestedFailure._recursivelyNestedCycle
-
-    // Only return a `_nestedCycle` if we have exactly one result.
+    // Only return a nested cycle if we have exactly one result.
     case .invalidMembers(let nestedFailures):
-      guard let (_, nestedFailure) = nestedFailures.first, nestedFailures.count == 1 else { return nil }
-      return nestedFailure._recursivelyNestedCycle
+      guard
+        case (_, TypeQualifierFailure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
+        nestedFailures.count == 1
+      else { return nil }
+      return nestedCycle
     case .invalidComposition(let nestedFailures):
-      guard let (_, nestedFailure) = nestedFailures.first, nestedFailures.count == 1 else { return nil }
-      return nestedFailure._recursivelyNestedCycle
+      guard
+        case (_, TypeQualifierFailure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
+        nestedFailures.count == 1
+      else { return nil }
+      return nestedCycle
     }
   }
 }
@@ -892,11 +899,7 @@ extension TypeQualifierFailure {
         return Result.success(success)
       case .failure(let failure):
         // If we're part of the cycle, return the cycle
-        //
-        // Note: Although `_recursivelyNestedCycle` is recursive, each type
-        // alias should unwrap the cyclicalTypeReference, basically resulting
-        // in a constant-time operation.
-        if let nestedCycle = failure._recursivelyNestedCycle, nestedCycle.contains(aliasedTypeSyntax) {
+        if let nestedCycle = failure._nestedCycle, nestedCycle.contains(aliasedTypeSyntax) {
           return Result.failure(Failure.cyclicalTypeReference(cycle: nestedCycle))
         }
         // Wrapping the failure indicates the type alias itself isn't the

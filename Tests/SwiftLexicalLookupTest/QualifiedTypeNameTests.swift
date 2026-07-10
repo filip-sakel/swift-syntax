@@ -912,8 +912,7 @@ final class TestQualifiedTypeName: XCTestCase {
 
   // TODO: Test property wrapper lookup? (idk if it's in scope)
 
-  // TODO: Test cycles, e.g. struct A { typealias Element = B.Element }; struct B { typealias Element = A }
-  // typealias A = B; typealias B = A. Or protocol A: B {}; protocol B: A {}
+  // TODO: Test supertype cycles protocol A: B {}; protocol B: A {}
 
   // TODO: Handle lookup in struct nested inside function, e.g. func hi() { struct Hello { var a }; Hello().a }
 
