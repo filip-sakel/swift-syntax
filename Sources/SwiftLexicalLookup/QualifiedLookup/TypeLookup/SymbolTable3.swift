@@ -248,17 +248,19 @@ extension Collection where Element == ExtensionBindingResult.Dependency {
   // internal var typeSyntaxState: [TypeSyntax: TypeSyntaxResolutionState] = [:]
   // internal var typeState: [QualifiedTypeName: TypeResolutionState] = [:]
   internal private(set) var typeState: [QualifiedTypeName: NominalType] = [:]
-  internal private(set) var extensionState: [ExtensionDeclSyntax: ExtensionBindingState] = [:]
-  internal private(set) lazy var unresolvedExtensions: [SourceFileSyntax: OrderedSet<ExtensionDeclSyntax>] = {
-    var result = [SourceFileSyntax: OrderedSet<ExtensionDeclSyntax>]()
-    for (module, files) in moduleToSources {
-      for (_, file) in files {
-        // TODO: Implement configuredRegions
-        result[file] = file.findExtensions(configuredRegions: nil)
+  @_spi(_QualifiedLookupTests) public private(set) var extensionState: [ExtensionDeclSyntax: ExtensionBindingState] =
+    [:]
+  @_spi(_QualifiedLookupTests) public private(set) lazy var unresolvedExtensions:
+    [SourceFileSyntax: OrderedSet<ExtensionDeclSyntax>] = {
+      var result = [SourceFileSyntax: OrderedSet<ExtensionDeclSyntax>]()
+      for (module, files) in moduleToSources {
+        for (_, file) in files {
+          // TODO: Implement configuredRegions
+          result[file] = file.findExtensions(configuredRegions: nil)
+        }
       }
-    }
-    return result
-  }()
+      return result
+    }()
 
   public init(
     moduleToSources: [Module: [String: SourceFileSyntax]],
@@ -687,5 +689,12 @@ extension SymbolTable3: CustomDebugStringConvertible {
       "\(extensionDecl._memberlessDescription): \(extensionState)"
     })
     return "SymbolTable3(types: \(typesDescription), extensionState: \(extensionsDescription)"
+  }
+}
+
+extension ExtensionBindingResult.Dependency: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    let foundDeclsDescription = resolvedDecls.mapValues({ typeDecls in typeDecls.map(\.trimmedDescription) })
+    return "\(baseTypeName.debugDescription)>\(typeMember.name) == \(foundDeclsDescription)"
   }
 }

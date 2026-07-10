@@ -14,7 +14,7 @@ import SwiftSyntax
 
 extension ExtensionDeclSyntax {
   /// Trimmed description of extension after removing member block
-  var _memberlessDescription: String {
+  @_spi(_QualifiedLookupTests) public var _memberlessDescription: String {
     self.with(\.memberBlock, MemberBlockSyntax(members: [])).trimmedDescription
   }
 }

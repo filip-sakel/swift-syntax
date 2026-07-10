@@ -1226,12 +1226,13 @@ extension TypeQualifierFailure {
 
   /// Implements `resolveNominalType`
   fileprivate mutating func _resolveNominalType(
-    // TODO: What if we just take a `ResolvedNominalTypeReference` instead
-    // and register types like that?
-    // name: QualifiedTypeName,
-    // originatingSyntax: TypeLikeSyntax
     typeReference: ResolvedNominalTypeReference
   ) -> NominalType {
+    // TODO: See if we actually need to check for accessible extensions even if
+    // there's an ongoing request.
+    // TODO: At least find a way to cache available extensions. (E.g. don't
+    // recalculate accessible extensions if ongoing request targetted the same file)
+
     // There are three paths:
     // 1. The symbol table hasn't resolved the extensions accessibles from this source file
     //    We need to bind all said extensions
@@ -1311,10 +1312,15 @@ extension TypeQualifierFailure {
       // requests to see that we're actively trying to bind this extension.
       defer { self.requestedExtensions.remove(extensionDecl) }
 
-      var invalidatedExtensions: OrderedSet<ExtensionDeclSyntax> = withLogging(
+      var (_, _, invalidatedExtensions) = withLogging(
         request: "Binding `\(extensionDecl._memberlessDescription)`",
-        describe: { (invalidatedExtensions: SymbolTable3.InvalidatedExtensions) in
-          "Invalidated: \(invalidatedExtensions.map(\._memberlessDescription))"
+        describe: {
+          (
+            extendedTypeResult: Result<ResolvedNominalTypeReference, Failure>,
+            extensionDependencies: [ExtensionBindingResult.Dependency],
+            invalidatedExtensions: SymbolTable3.InvalidatedExtensions
+          ) in
+          "\(extendedTypeResult._debugDescription); Dependencies: \(extensionDependencies.map(\.debugDescription))"
         },
         perform: {
           // Resolve, tracking dependencies
@@ -1343,8 +1349,8 @@ extension TypeQualifierFailure {
           // Handle failures
 
           switch bindingResult {
-          case .success(let success):
-            return success
+          case .success(let invalidatedExtensions):
+            return (extendedTypeResult, extensionDependencies, invalidatedExtensions)
           case .failure(let failure):
             // Ensure we handle future failure types
             switch failure {
@@ -1371,6 +1377,8 @@ extension TypeQualifierFailure {
           }
         }
       )
+      // Log invalidated
+      log("Extension `\(extensionDecl._memberlessDescription)` invalidated: \(invalidatedExtensions)")
 
       // Fix invalidated extensions
       while let invalidatedExtensionDecl = invalidatedExtensions.first {

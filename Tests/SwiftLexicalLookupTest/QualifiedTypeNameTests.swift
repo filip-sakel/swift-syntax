@@ -217,8 +217,8 @@ final class TestQualifiedTypeName: XCTestCase {
     configuredRegions: ConfiguredRegions? = nil,
     file: StaticString = #file,
     line: UInt = #line,
+    assertSymbolTableState: (borrowing SymbolTable3) -> Void = { _ in },
     verbose: Bool = false,
-    assertSymbolTableState: (borrowing SymbolTable3) -> Void = { _ in }
   ) {
     // Parse each source file
     let lookupFiles: [String: SourceFileSyntax] = lookupSources.mapValues({ lookupSource in
@@ -354,7 +354,7 @@ final class TestQualifiedTypeName: XCTestCase {
 
         // Print target syntax (to show the syntax kinds)
         if verbose {
-          print("Target syntax parsed as: \(targetTypeSyntax.debugDescription)")
+          print("Target syntax parsed as:\n\(targetTypeSyntax.debugDescription)\n")
         }
 
         // Find the minimal-nominal type
@@ -571,7 +571,7 @@ final class TestQualifiedTypeName: XCTestCase {
   /// Types that forward resolution to the underlying syntax, including
   /// some/any types, attributed types (e.g. `inout Int`), and pack
   /// element/expansion syntax.
-  func testSimpleRecursiveTypes() {
+  func testSimpleForwardingTypes() {
     assertQualifiedTypeName([
       "MyFile.swift": """
       // Any/some types forward to the underlying protocol (but we
@@ -831,16 +831,52 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testSimpleRecursiveExtension() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::A")
-      struct A {}
-      extension A.B { struct A {} }
-      extension A { typealias B = A }
+    let typeMemberA = ImplicitTypeReferenceComponent(
+      from: PartiallyResolvedTypeIdentifier.Component(
+        module: nil,
+        name: Identifier(canonicalName: "A"),
+        introducingSyntax: "A"
+      )
+    )
 
-      func f(_: \(failure: .noTypeMember(member: ImplicitTypeReferenceComponent(from: PartiallyResolvedTypeIdentifier.Component(module: nil, name: Identifier(canonicalName: "A"), introducingSyntax: "A")), in: MemberLookupResult.memberResults(["🟥"])))A.A)
-      """ as QualifiedTypeNameSource
-    ])
+    assertQualifiedTypeName(
+      [
+        "MyFile.swift": """
+        \("🟥", name: "_(MyFile.swift)::A")
+        struct A {}
+        extension A.B { struct A {} }
+        extension A { typealias B = A }
+
+        func f(_: \(failure: .noTypeMember(member: typeMemberA, in: .memberResults(["🟥"])))A.A)
+        """ as QualifiedTypeNameSource
+      ],
+      assertSymbolTableState: { symbolTable in
+        guard
+          let (extensionDecl, extensionState) = symbolTable.extensionState.first(where: {
+            (extensionDecl, _) in extensionDecl._memberlessDescription == "extension A.B {}"
+          })
+        else {
+          XCTFail("Expected `extension A.B {}` to have been resolved.", file: #file, line: #line)
+          return
+        }
+
+        guard case ExtensionBindingState.cannotDependOnIntroducedMembers(let typeMembers) = extensionState else {
+          XCTFail(
+            "Expected `extension A.B {}` to be unbound because of a cycle; instead, got state: \(extensionState)",
+            file: #file,
+            line: #line
+          )
+          return
+        }
+
+        XCTAssertEqual(
+          typeMembers.map(\.trimmedDescription),
+          ["A"],
+          "Invalid cycle detected: `extension A.B {}` depends on the wrong type members."
+        )
+      },
+      verbose: true
+    )
   }
   // func testCrossFileExtension() {
   //   assertQualifiedTypeName([
