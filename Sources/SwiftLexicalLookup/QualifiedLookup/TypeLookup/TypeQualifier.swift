@@ -458,7 +458,6 @@ extension TypeQualifierFailure {
     let partialType: Result<PartiallyResolvedType, TypeResolutionFailure> = typeSyntax.partiallyResolve()
     switch partialType {
     case .success(.anyType):
-      // TODO: Handle so we don't fail `Encodable & Any` like we do `Encodable & Int.Type`
       return Result.success(MemberLookupResult.anyType)
     case .success(.function(let argumentCount)):
       return Result.success(.function(argumentCount: argumentCount))
@@ -490,7 +489,7 @@ extension TypeQualifierFailure {
         visitedTypeSyntax: visitedTypeSyntax
       )
     case .success(.composition(let childTypes)):
-      // TODO: Record assumption that `consituentTypes` is unique.
+      // TODO: Record assumption that `childTypes` is unique.
       var syntaxToTypes = [
         (childSyntax: TypeSyntax, childResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>)
       ]()
@@ -589,12 +588,16 @@ extension TypeQualifierFailure {
 
     // Stop even if we only have one failure
     guard failures.isEmpty else {
-      // log("Resolved \(typeSyntax.trimmedDescription) to failures \(failures)")
       return Result.failure(Failure.invalidComposition(failures))
     }
 
-    // We get `anyType` only when all the constituent types are `any`.
-    guard anyTypeCounter != syntaxToTypes.count else {
+    // We get `anyType` only when all the child types are `any`,
+    // and have at least one children.
+    //
+    // We need to check we have more than one children because,
+    // for instance, `Int.Type` returns an empty array which
+    // doesn't equal the `Any` type.
+    if anyTypeCounter > 0, anyTypeCounter == syntaxToTypes.count {
       return Result.success(MemberLookupResult.anyType)
     }
 

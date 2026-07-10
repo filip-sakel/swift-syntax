@@ -352,6 +352,11 @@ final class TestQualifiedTypeName: XCTestCase {
         }
         let targetTypeSyntax = findHeadTypeSyntax(of: typeSyntax)
 
+        // Print target syntax (to show the syntax kinds)
+        if verbose {
+          print("Target syntax parsed as: \(targetTypeSyntax.debugDescription)")
+        }
+
         // Find the minimal-nominal type
         let expectedMarkers: [Character]
         let declsToNames: [NominalTypeDeclSyntax: String]
@@ -521,6 +526,89 @@ final class TestQualifiedTypeName: XCTestCase {
       """ as QualifiedTypeNameSource
     ])
   }
+
+  // MARK: Simple Non Nominal
+  func testSimpleFunction() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      typealias A = \(result: .function(argumentCount: 2))(_ a: Int, _ b: Int) -> Int
+      """ as QualifiedTypeNameSource
+    ])
+  }
+  func testSimpleTuple() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      func f(_: \(result: .tuple(labels: [Identifier(canonicalName: "a"), nil]))(a: Int, Bool))
+      """ as QualifiedTypeNameSource
+    ])
+  }
+  func testSimpleAnyType() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      func f(_: \(result: .anyType)Any)
+      func g(_: \(result: .anyType)(Any & Any) & Any)
+      """ as QualifiedTypeNameSource
+    ])
+  }
+  /// "Empty types" are metatypes, named opaque types, and class restrictions
+  /// that produce no types for lookup (and have no members).
+  func testSimpleEmptyTypes() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      // Meta types
+      struct A {}
+      func f(_: \(references: [])A.Type)
+
+      // Named opaque return types
+      func g() -> <T> \(references: [])T { 1 }
+
+      // Class restrictions
+      protocol A: \(references: [])class {}
+      """ as QualifiedTypeNameSource
+    ])
+  }
+
+  /// Types that forward resolution to the underlying syntax, including
+  /// some/any types, attributed types (e.g. `inout Int`), and pack
+  /// element/expansion syntax.
+  func testSimpleRecursiveTypes() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      // Any/some types forward to the underlying protocol (but we
+      // don't actually check that the base type is a protocol)
+      \("🟥", name: "_(MyFile.swift)::A")
+      protocol A {}
+
+      func f(_: \(references: ["🟥"])some A)
+      func g(_: \(references: ["🟥"])any A)
+
+      // Attributed types (and modifiers)
+      func h(_: @escaping \(result: MemberLookupResult.function(argumentCount: 0))() -> Void)
+      func i(_: sending \(references: ["🟥"])A)
+
+      // Pack elements & expansions
+      func f<each T>(_: \(failure: .genericParameterOrAssociatedType)(repeat each T)) {}
+      """ as QualifiedTypeNameSource
+    ])
+  }
+
+  // MARK: Generic Parameters & Associated Types
+  func testSimpleGenericParameters() {
+    assertQualifiedTypeName([
+      "MyFile.swift": """
+      struct A<T> {
+        func f(_: \(failure: .genericParameterOrAssociatedType)T)
+      }
+      protocol B {
+        associatedtype U
+        func g(_: \(failure: .invalidMembers([("U", .genericParameterOrAssociatedType)]))U)
+      }
+      """ as QualifiedTypeNameSource
+    ])
+  }
+
+  // MARK: Aliases
+
   func testSimpleAlias() {
     assertQualifiedTypeName([
       "MyFile.swift": """
@@ -555,6 +643,8 @@ final class TestQualifiedTypeName: XCTestCase {
       """ as QualifiedTypeNameSource
     ])
   }
+
+  // MARK: Alias Cycles
 
   func testSimpleCycle() {
     assertQualifiedTypeName([
@@ -611,6 +701,8 @@ final class TestQualifiedTypeName: XCTestCase {
     ])
   }
 
+  // MARK: Compositions
+
   func testSimpleComposition() {
     assertQualifiedTypeName([
       "MyFile.swift": """
@@ -625,47 +717,6 @@ final class TestQualifiedTypeName: XCTestCase {
     ])
   }
 
-  func testSimpleFunction() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      typealias A = \(result: .function(argumentCount: 2))(_ a: Int, _ b: Int) -> Int
-      """ as QualifiedTypeNameSource
-    ])
-  }
-  func testSimpleTuple() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      func f(_: \(result: .tuple(labels: [Identifier(canonicalName: "a"), nil]))(a: Int, Bool))
-      """ as QualifiedTypeNameSource
-    ])
-  }
-  func testSimpleAnyType() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      func f(_: \(result: .anyType)Any)
-      func g(_: \(result: .anyType)(Any & Any) & Any)
-      """ as QualifiedTypeNameSource
-    ])
-  }
-  func testSimpleMetatype() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      struct A {}
-      func f(_: \(result: .memberResults([]))A.Type)
-      """ as QualifiedTypeNameSource
-    ])
-  }
-  func testSimpleProtocolTypes() {
-    assertQualifiedTypeName([
-      "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::A")
-      protocol A {}
-
-      func f(_: \(references: ["🟥"])some A)
-      func g(_: \(references: ["🟥"])any A)
-      """ as QualifiedTypeNameSource
-    ])
-  }
   func testAnyTypeComposition() {
     assertQualifiedTypeName([
       "MyFile.swift": """
@@ -726,6 +777,8 @@ final class TestQualifiedTypeName: XCTestCase {
   //     """ as QualifiedTypeNameSource
   //   ])
   // }
+
+  // MARK: Extensions
 
   func testSimpleExtension() {
     assertQualifiedTypeName([
@@ -924,13 +977,9 @@ final class TestQualifiedTypeName: XCTestCase {
   // TODO: Test nested and non-nested (invalid) macro lookup
   // TODO: Test macro and non-`macro` attributes, e.g., actors, result builders, property wrappers
 
-  // TODO: Test property wrapper lookup? (idk if it's in scope)
-
   // TODO: Test supertype cycles protocol A: B {}; protocol B: A {}
 
   // TODO: Handle lookup in struct nested inside function, e.g. func hi() { struct Hello { var a }; Hello().a }
-
-  // TODO: Think about isolation use cases? (That seems more like type checking)
 
   // TODO: Macro test, e.g. @freestanding macro noargsButCallable() = ...; #closure(args)
 

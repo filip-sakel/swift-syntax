@@ -342,7 +342,7 @@ extension TypeSyntaxProtocol {
     // Base cases that don't produce types
     case .metatypeType, .namedOpaqueReturnType, .classRestrictionType:
       return Result.success(PartiallyResolvedType.composition([]))
-    case .suppressedType(let suppressedType):
+    case .suppressedType:
       // Don't diagnose here since suprressed types can be aliased, e.g.:
       //   typealias A = Escapable
       //   struct B: ~A {}
