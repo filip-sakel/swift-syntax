@@ -12,7 +12,7 @@
 
 import SwiftSyntax
 
-extension ExtensionDeclSyntax {
+extension DeclGroupSyntax {
   /// Trimmed description of extension after removing member block
   @_spi(_QualifiedLookupTests) public var _memberlessDescription: String {
     self.with(\.memberBlock, MemberBlockSyntax(members: [])).trimmedDescription

@@ -92,7 +92,7 @@ import SwiftSyntax
 ///       Or rather, is it possible that we add a dependent extension, that adds
 ///       members that require updating other dependent extensions, which in turn
 ///       updates the dependent extension we added? (without causing a cycle)
-@_spi(_QualifiedLookup) public struct ExtensionBindingResult {
+@_spi(_QualifiedLookup) public struct ExtensionBindingResult: Sendable {
   // public enum ResolutionState {
   //   /// We're in the process of resolving this extension. Helps catch cycles.
   //   case resolving
@@ -111,7 +111,7 @@ import SwiftSyntax
   /// at the time the declaration was made. A single type declaration,
   /// means the type member can resolve properly. More than one types,
   /// on the other hand, give us ambiguities.
-  @_spi(_QualifiedLookup) public struct Dependency {
+  @_spi(_QualifiedLookup) public struct Dependency: Sendable {
     let baseTypeName: QualifiedTypeName
     let typeMember: Identifier
     /// The resolved type declarations and the extensions in which they
@@ -337,7 +337,7 @@ extension SymbolTable3 {
 // MARK: Nominal + Extension Binding
 extension SymbolTable3 {
   enum ExtensionBindingFailure: Error {
-    case alreadyResolved
+    case alreadyResolved(ExtensionBindingResult)
     case cannotBindInvalidated
     case cannotFixNonInvalidated
     /// Either root isn't a source file, or said source file isn't registered
@@ -420,11 +420,8 @@ extension SymbolTable3 {
     }
 
     // Ensure we haven't already bound
-    guard
-      var unresolvedFileExtensions = unresolvedExtensions[sourceFile],
-      unresolvedFileExtensions.contains(extensionDecl)
-    else {
-      return .failure(ExtensionBindingFailure.alreadyResolved)
+    if case ExtensionBindingState.resolved(let bindingResult)? = extensionState[extensionDecl] {
+      return .failure(ExtensionBindingFailure.alreadyResolved(bindingResult))
     }
     switch (isFixingInvalidating, extensionState[extensionDecl]) {
     case (false, nil), (true, .invalidated):
@@ -523,10 +520,10 @@ extension SymbolTable3 {
       //    we're adding
       // TODO: Find more efficient way to do this
       var invalidatedExtensionDecls = OrderedSet<ExtensionDeclSyntax>()
-      for (extensionDecl, extensionState) in extensionState {
+      for (invalidatedExtensionDecl, invalidatedExtensionState) in extensionState {
         // We can only break resolved extensions
         let extensionBindingResult: ExtensionBindingResult
-        switch extensionState {
+        switch invalidatedExtensionState {
         case ExtensionBindingState.resolved(let result):
           extensionBindingResult = result
         case ExtensionBindingState.invalidated(_, let invalidatedExtension, _, _, _):
@@ -554,19 +551,21 @@ extension SymbolTable3 {
         else { continue }
 
         // Invalidate extension and add to results
-        self.extensionState[extensionDecl] = ExtensionBindingState.invalidated(
+        self.extensionState[invalidatedExtensionDecl] = ExtensionBindingState.invalidated(
           invalidatedResult: extensionBindingResult,
           // We're the ones doing the invalidating
-          invalidatingExtension: extensionDecl,
+          invalidatingExtension: invalidatedExtensionDecl,
           invalidatingType: qualifiedName,
           // Record conflict
           firstConflictingDependency: firstConflictingDependency,
           firstConflictingTypeDecls: firstConflictingTypeDecls
         )
-        invalidatedExtensionDecls.append(extensionDecl)
+        invalidatedExtensionDecls.append(invalidatedExtensionDecl)
       }
+
+      // Save extension-binding results.
       newExtensionState = ExtensionBindingState.resolved(
-        ExtensionBindingResult(dependencies: [], resolution: .success(qualifiedName))
+        ExtensionBindingResult(dependencies: dependencies, resolution: .success(qualifiedName))
       )
       invalidatedExtensions = invalidatedExtensionDecls
 
@@ -583,7 +582,7 @@ extension SymbolTable3 {
     case .failure(let failure):
       // Otherwise just save the failure
       newExtensionState = ExtensionBindingState.resolved(
-        ExtensionBindingResult(dependencies: [], resolution: .failure(failure))
+        ExtensionBindingResult(dependencies: dependencies, resolution: .failure(failure))
       )
       // Can't break a type's extensions since we didn't bind to one
       invalidatedExtensions = []
@@ -668,8 +667,7 @@ extension SymbolTable3 {
     // Save extension
     extensionState[extensionDecl] = newExtensionState
     // Remove from unresovled
-    unresolvedFileExtensions.remove(extensionDecl)
-    unresolvedExtensions[sourceFile] = unresolvedFileExtensions
+    unresolvedExtensions[sourceFile, default: []].remove(extensionDecl)
 
     // Return which extensions broke
     return .success(invalidatedExtensions)
@@ -694,7 +692,18 @@ extension SymbolTable3: CustomDebugStringConvertible {
 
 extension ExtensionBindingResult.Dependency: CustomDebugStringConvertible {
   public var debugDescription: String {
-    let foundDeclsDescription = resolvedDecls.mapValues({ typeDecls in typeDecls.map(\.trimmedDescription) })
-    return "\(baseTypeName.debugDescription)>\(typeMember.name) == \(foundDeclsDescription)"
+    let flattenedDeclDescriptions = resolvedDecls.flatMap({ (declGroup, typeDecls) in
+      typeDecls.map({ typeDecl in
+        let declGroupDescription = declGroup?._memberlessDescription ?? "main decl"
+        return "`\(typeDecl)` [from `\(declGroupDescription)`]"
+      })
+    })
+    let declsDescription: String
+    if flattenedDeclDescriptions.isEmpty {
+      declsDescription = "[]"
+    } else {
+      declsDescription = flattenedDeclDescriptions.joined(separator: ", ")
+    }
+    return "\(baseTypeName.debugDescription)/\(typeMember.name) == \(declsDescription)"
   }
 }
