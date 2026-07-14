@@ -76,6 +76,7 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
       file: StaticString,
       line: UInt
     )
+    case extensionState(extensionState: ExtensionBindingState, file: StaticString, line: UInt)
   }
 
   // Syntactic sugar for listing expectations alongside source code.
@@ -95,6 +96,14 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
       line: UInt = #line
     ) {
       components.append(.definition(marker: marker, name: name, file: file, line: line))
+    }
+    mutating func appendInterpolation(
+      extensionState: ExtensionBindingState,
+      name: String,
+      file: StaticString = #file,
+      line: UInt = #line
+    ) {
+      components.append(.extensionState(extensionState: extensionState, file: file, line: line))
     }
     mutating func appendInterpolation(
       resultOrFailure: Result<MemberLookupResult<Character>, QualifierFailure>,
@@ -142,6 +151,12 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
     [String.Index: (
       markers: Result<MemberLookupResult<Character>, QualifierFailure>, file: StaticString, line: UInt
     )]
+  // A map from positions in the string to the expected binding-resolution state
+  // for the annotated extension.
+  let positionsToExtensionExpectations:
+    [String.Index: (
+      markers: Result<MemberLookupResult<Character>, QualifierFailure>, file: StaticString, line: UInt
+    )]
 
   init(stringInterpolation: Interpolation) {
     var source = ""
@@ -171,6 +186,8 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
         }
         // Save expectation
         positionsToExpectations[source.endIndex] = (result, file: file, line: line)
+      case .extensionState(let extensionState, let file, let line):
+
       }
     }
 
@@ -211,7 +228,7 @@ extension ResolvedNominalTypeReference {
 }
 
 final class TestQualifiedTypeName: XCTestCase {
-  func assertQualifiedTypeName(
+  func assertTypeResolution(
     _ lookupSources: [String: QualifiedTypeNameSource],
     moduleName: StaticString = "MyModule",
     configuredRegions: ConfiguredRegions? = nil,
@@ -477,7 +494,7 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testSimpleCase() {
-    assertQualifiedTypeName(
+    assertTypeResolution(
       [
         "MyFile.swift": """
         \("🟥", name: "_(MyFile.swift)::A")
@@ -510,7 +527,7 @@ final class TestQualifiedTypeName: XCTestCase {
   //   )
   // }
   func testSimpleNestedCase() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       \("🟥", name: "_(MyFile.swift)::Hi")
       struct Hi {
@@ -529,21 +546,21 @@ final class TestQualifiedTypeName: XCTestCase {
 
   // MARK: Simple Non Nominal
   func testSimpleFunction() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       typealias A = \(result: .function(argumentCount: 2))(_ a: Int, _ b: Int) -> Int
       """ as QualifiedTypeNameSource
     ])
   }
   func testSimpleTuple() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       func f(_: \(result: .tuple(labels: [Identifier(canonicalName: "a"), nil]))(a: Int, Bool))
       """ as QualifiedTypeNameSource
     ])
   }
   func testSimpleAnyType() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       func f(_: \(result: .anyType)Any)
       func g(_: \(result: .anyType)(Any & Any) & Any)
@@ -553,7 +570,7 @@ final class TestQualifiedTypeName: XCTestCase {
   /// "Empty types" are metatypes, named opaque types, and class restrictions
   /// that produce no types for lookup (and have no members).
   func testSimpleEmptyTypes() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       // Meta types
       struct A {}
@@ -572,7 +589,7 @@ final class TestQualifiedTypeName: XCTestCase {
   /// some/any types, attributed types (e.g. `inout Int`), and pack
   /// element/expansion syntax.
   func testSimpleForwardingTypes() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       // Any/some types forward to the underlying protocol (but we
       // don't actually check that the base type is a protocol)
@@ -594,7 +611,7 @@ final class TestQualifiedTypeName: XCTestCase {
 
   // MARK: Generic Parameters & Associated Types
   func testSimpleGenericParameters() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       struct A<T> {
         func f(_: \(failure: .genericParameterOrAssociatedType)T)
@@ -611,7 +628,7 @@ final class TestQualifiedTypeName: XCTestCase {
   // MARK: Aliases
 
   func testSimpleAlias() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       typealias A = \(reference: "🟥")B
 
@@ -627,7 +644,7 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testNestedAlias() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       \("🟥", name: "_(MyFile.swift)::Outer")
       struct Outer {
@@ -648,7 +665,7 @@ final class TestQualifiedTypeName: XCTestCase {
   // MARK: Alias Cycles
 
   func testSimpleCycle() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       typealias A = \(failure: .cyclicalTypeReference(cycle: ["B", "A"]))B
       typealias B = A
@@ -658,7 +675,7 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testAliasesToCycle() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       // Cycle
       typealias A = \(failure: .cyclicalTypeReference(cycle: ["B", "A"]))B
@@ -672,7 +689,7 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testExtensionOfCycle() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       // Cycle
       typealias A = \(failure: .cyclicalTypeReference(cycle: ["B", "A"]))B
@@ -690,7 +707,7 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testNestedCycle() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       \("🟥", name: "_(MyFile.swift)::A")
       struct A { typealias Element = B.Element }
@@ -705,7 +722,7 @@ final class TestQualifiedTypeName: XCTestCase {
   // MARK: Compositions
 
   func testSimpleComposition() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       typealias C = \(references: ["🟥", "🟩"])A & B
 
@@ -719,7 +736,7 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testAnyTypeComposition() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       \("🟥", name: "_(MyFile.swift)::ProtoA")
       protocol ProtoA {}
@@ -732,7 +749,7 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testNonnominalComposition() {
-    assertQualifiedTypeName(
+    assertTypeResolution(
       [
         "MyFile.swift": """
         // Cannot compose non nominal types
@@ -752,7 +769,7 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testDuplicateComposition() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       \("🟥", name: "_(MyFile.swift)::ProtoA")
       protocol ProtoA {}
@@ -781,7 +798,7 @@ final class TestQualifiedTypeName: XCTestCase {
         introducingSyntax: "MyType"
       )
     )
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       struct A {}
       struct B {}
@@ -797,7 +814,7 @@ final class TestQualifiedTypeName: XCTestCase {
   // MARK: Extensions
 
   func testSimpleExtension() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       \("🟥", name: "_(MyFile.swift)::A")
       struct A {}
@@ -813,7 +830,7 @@ final class TestQualifiedTypeName: XCTestCase {
     ])
   }
   func testTypeInExtension() {
-    assertQualifiedTypeName([
+    assertTypeResolution([
       "MyFile.swift": """
       \("🟥", name: "_(MyFile.swift)::A")
       struct A {}
@@ -831,6 +848,7 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testSimpleRecursiveExtension() {
+    // A type member `A`
     let typeMemberA = ImplicitTypeReferenceComponent(
       from: PartiallyResolvedTypeIdentifier.Component(
         module: nil,
@@ -839,7 +857,7 @@ final class TestQualifiedTypeName: XCTestCase {
       )
     )
 
-    assertQualifiedTypeName(
+    assertTypeResolution(
       [
         "MyFile.swift": """
         \("🟥", name: "_(MyFile.swift)::A")
@@ -860,7 +878,8 @@ final class TestQualifiedTypeName: XCTestCase {
           return
         }
 
-        guard case ExtensionBindingState.cannotDependOnIntroducedMembers(let typeMembers) = extensionState else {
+        guard case ExtensionBindingState.cannotDependOnIntroducedMembers(let introducedTypeMembers) = extensionState
+        else {
           XCTFail(
             "Expected `extension A.B {}` to be unbound because of a cycle; instead, got state: \(extensionState)",
             file: #file,
@@ -870,13 +889,24 @@ final class TestQualifiedTypeName: XCTestCase {
         }
 
         XCTAssertEqual(
-          typeMembers.map(\.trimmedDescription),
-          ["A"],
+          introducedTypeMembers.map(\.trimmedDescription),
+          ["struct A {}"],
           "Invalid cycle detected: `extension A.B {}` depends on the wrong type members."
         )
       },
       verbose: true
     )
+  }
+  func testRedeclarationWithRecursiveExtension() {
+    assertTypeResolution([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::A")
+      struct A {}
+      extension A.B {}
+      extension A { typealias B = A }
+      extension A.B { typealias B = OtherType }
+      """ as QualifiedTypeNameSource
+    ])
   }
   // func testCrossFileExtension() {
   //   assertQualifiedTypeName([
@@ -1095,13 +1125,6 @@ final class TestQualifiedTypeName: XCTestCase {
   // ```
   // Example B
   //  <bug report>
-  //
-  // Example C (from docstrings)
-  // ```
-  // struct A {}
-  // extension A.Inner {}
-  // extension A { typealias A = Inner }
-  // ```
   //
   // Example C (corrected?)
   // ```swiftc

@@ -129,7 +129,7 @@ public struct QualifiedTableLookupConfig {
 //   case idMap(IdentifierTypeSyntax, canonicalType: ResolvedType, using: TypeAliasDeclSyntax)
 //   case memberMap(MemberTypeSyntax, canonicalType: ResolvedType, using: TypeAliasDeclSyntax)
 //
-//   static func from(type: TypeSyntax, nestedAliases: borrowing [ResolvedType?: [Identifier: [TypeAliasDeclSyntax]]) -> [ResolvedType] {
+//   static func from(type: TypeSyntax, nestedAliases: __shared [ResolvedType?: [Identifier: [TypeAliasDeclSyntax]]) -> [ResolvedType] {
 //     // TODO: Other types
 //     if let idType = type.as(IdentifierTypeSyntax.self) {
 //       // Can't do anything with non-identifier name

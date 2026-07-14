@@ -373,26 +373,103 @@ import SwiftSyntax
   }
 }
 
-@_spi(Experimental) extension ActorDeclSyntax: NonProtocolNominalTypeDeclSyntax {
-  @_spi(Experimental) public var scopeDebugName: String {
-    "ActorDeclScope"
+/// The only nominal types that introduce implicit `Self` are protocols.
+/// See: https://github.com/swiftlang/swift-syntax/pull/2852#discussion_r1775049671
+@_spi(Experimental) extension StructDeclSyntax: NominalTypeDeclScopeSyntax, WithGenericParametersScopeSyntax {
+  @_spi(Experimental) public var defaultIntroducedNames: [LookupName] {
+    []
   }
-}
-@_spi(Experimental) extension ClassDeclSyntax: NonProtocolNominalTypeDeclSyntax {
-  @_spi(Experimental) public var scopeDebugName: String {
-    "ClassDeclScope"
-  }
-}
-@_spi(Experimental) extension StructDeclSyntax: NonProtocolNominalTypeDeclSyntax {
   @_spi(Experimental) public var scopeDebugName: String {
     "StructDeclScope"
   }
 }
-@_spi(Experimental) extension EnumDeclSyntax: NonProtocolNominalTypeDeclSyntax {
+@_spi(Experimental) extension EnumDeclSyntax: NominalTypeDeclScopeSyntax, WithGenericParametersScopeSyntax {
+  @_spi(Experimental) public var defaultIntroducedNames: [LookupName] {
+    []
+  }
   @_spi(Experimental) public var scopeDebugName: String {
     "EnumDeclScope"
   }
 }
+@_spi(Experimental) extension ClassDeclSyntax: NominalTypeDeclScopeSyntax, WithGenericParametersScopeSyntax {
+  @_spi(Experimental) public var defaultIntroducedNames: [LookupName] {
+    []
+  }
+  @_spi(Experimental) public var scopeDebugName: String {
+    "ClassDeclScope"
+  }
+}
+@_spi(Experimental) extension ActorDeclSyntax: NominalTypeDeclScopeSyntax, WithGenericParametersScopeSyntax {
+  @_spi(Experimental) public var defaultIntroducedNames: [LookupName] {
+    []
+  }
+  @_spi(Experimental) public var scopeDebugName: String {
+    "ActorDeclScope"
+  }
+}
+@_spi(Experimental) extension ProtocolDeclSyntax: NominalTypeDeclScopeSyntax {
+  // Like extensions, protocols introduce implicit `Self`; see comment above.
+  @_spi(Experimental) public var defaultIntroducedNames: [LookupName] {
+    [.implicit(.Self(DeclSyntax(self)))]
+  }
+
+  @_spi(Experimental) public var scopeDebugName: String {
+    "ProtocolDeclScope"
+  }
+
+  /// For the lookup initiated from inside primary
+  /// associated type clause, this function also finds
+  /// all associated type declarations made inside the
+  /// protocol member block.
+  ///
+  /// ### Example
+  /// ```swift
+  /// class A {}
+  ///
+  /// protocol Foo<A/*<-- lookup here>*/> {
+  ///  associatedtype A
+  ///  class A {}
+  /// }
+  /// ```
+  /// For the lookup started at the primary associated type `A`,
+  /// the function returns exactly two results. First associated with the member
+  /// block that consists of the `associatedtype A` declaration and
+  /// the latter one from the file scope and `class A` exactly in this order.
+  public func lookup(
+    _ identifier: Identifier?,
+    at lookUpPosition: AbsolutePosition,
+    with config: LookupConfig
+  ) -> [LookupResult] {
+    var results: [LookupResult] = []
+
+    if let primaryAssociatedTypeClause,
+      primaryAssociatedTypeClause.range.contains(lookUpPosition)
+    {
+      results = memberBlock.lookupAssociatedTypeDeclarations(
+        identifier,
+        at: lookUpPosition,
+        with: config
+      )
+    }
+
+    let lookInMembers: [LookupResult]
+
+    if inheritanceClause?.range.contains(lookUpPosition) != false {
+      lookInMembers = [.lookForMembers(in: Syntax(self))]
+    } else {
+      lookInMembers = []
+    }
+
+    return results
+      + defaultLookupImplementation(
+        identifier,
+        at: lookUpPosition,
+        with: config,
+        propagateToParent: false
+      ) + lookInMembers + lookupInParent(identifier, at: lookUpPosition, with: config)
+  }
+}
+
 @_spi(Experimental) extension ExtensionDeclSyntax: ScopeSyntax, LookInMembersScopeSyntax {
   @_spi(Experimental) public var lookupMembersPosition: AbsolutePosition {
     if let memberType = extendedType.as(MemberTypeSyntax.self) {
@@ -707,73 +784,6 @@ import SwiftSyntax
     }
 
     return false
-  }
-}
-
-@_spi(Experimental) extension ProtocolDeclSyntax: ScopeSyntax, LookInMembersScopeSyntax {
-  /// Protocol declarations don't introduce names by themselves.
-  @_spi(Experimental) public var defaultIntroducedNames: [LookupName] {
-    [.implicit(.Self(DeclSyntax(self)))]
-  }
-
-  @_spi(Experimental) public var lookupMembersPosition: AbsolutePosition {
-    name.positionAfterSkippingLeadingTrivia
-  }
-
-  @_spi(Experimental) public var scopeDebugName: String {
-    "ProtocolDeclScope"
-  }
-
-  /// For the lookup initiated from inside primary
-  /// associated type clause, this function also finds
-  /// all associated type declarations made inside the
-  /// protocol member block.
-  ///
-  /// ### Example
-  /// ```swift
-  /// class A {}
-  ///
-  /// protocol Foo<A/*<-- lookup here>*/> {
-  ///  associatedtype A
-  ///  class A {}
-  /// }
-  /// ```
-  /// For the lookup started at the primary associated type `A`,
-  /// the function returns exactly two results. First associated with the member
-  /// block that consists of the `associatedtype A` declaration and
-  /// the latter one from the file scope and `class A` exactly in this order.
-  public func lookup(
-    _ identifier: Identifier?,
-    at lookUpPosition: AbsolutePosition,
-    with config: LookupConfig
-  ) -> [LookupResult] {
-    var results: [LookupResult] = []
-
-    if let primaryAssociatedTypeClause,
-      primaryAssociatedTypeClause.range.contains(lookUpPosition)
-    {
-      results = memberBlock.lookupAssociatedTypeDeclarations(
-        identifier,
-        at: lookUpPosition,
-        with: config
-      )
-    }
-
-    let lookInMembers: [LookupResult]
-
-    if !(inheritanceClause?.range.contains(lookUpPosition) ?? false) {
-      lookInMembers = [.lookForMembers(in: Syntax(self))]
-    } else {
-      lookInMembers = []
-    }
-
-    return results
-      + defaultLookupImplementation(
-        identifier,
-        at: lookUpPosition,
-        with: config,
-        propagateToParent: false
-      ) + lookInMembers + lookupInParent(identifier, at: lookUpPosition, with: config)
   }
 }
 

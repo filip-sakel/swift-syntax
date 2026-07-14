@@ -217,10 +217,6 @@ extension ValueDeclSyntax {
 
 // MARK: Basic Queries
 
-extension Int {
-  private struct A {}
-}
-
 extension ValueDeclSyntax {
   /// Get the variable declaration parent of this identifier pattern
   /// value-declaration. Returns `nil` if the scope is invalid.
@@ -503,19 +499,7 @@ extension ValueDeclSyntax {
 // Conrete types
 extension ValueDeclSyntax {
   // Types
-  public init(_ syntax: StructDeclSyntax) {
-    self.init(syntax)!
-  }
-  public init(_ syntax: EnumDeclSyntax) {
-    self.init(syntax)!
-  }
-  public init(_ syntax: ClassDeclSyntax) {
-    self.init(syntax)!
-  }
-  public init(_ syntax: ActorDeclSyntax) {
-    self.init(syntax)!
-  }
-  public init(_ syntax: ProtocolDeclSyntax) {
+  public init(_ syntax: __shared some NominalTypeDeclSyntaxProtocol) {
     self.init(syntax)!
   }
   public init(_ syntax: TypeAliasDeclSyntax) {
@@ -555,127 +539,14 @@ extension ValueDeclSyntax {
   }
 }
 
-// Protocols
-extension ValueDeclSyntax {
-  init(fromProtocol syntax: borrowing some NonProtocolNominalTypeDeclSyntax) {
-    // We know this cast is going to succeed. Go through `init(_: SyntaxData)` just to double-check and
-    // verify the kind matches in debug builds and get maximum performance in release builds.
-    self = Syntax(syntax).cast(ValueDeclSyntax.self)
-  }
-}
-
-// MARK: `as` Casts
-
-// extension ValueDeclSyntax {
-//   public func `as`(_ syntaxType: StructDeclSyntax.Type) -> StructDeclSyntax? {
-//     return StructDeclSyntax(_syntaxNode)
-//   }
-//   public func `as`(_ syntaxType: EnumDeclSyntax.Type) -> EnumDeclSyntax? {
-//     return EnumDeclSyntax(_syntaxNode)
-//   }
-//   public func `as`(_ syntaxType: ClassDeclSyntax.Type) -> ClassDeclSyntax? {
-//     return ClassDeclSyntax(_syntaxNode)
-//   }
-//   public func `as`(_ syntaxType: ActorDeclSyntax.Type) -> ActorDeclSyntax? {
-//     return ActorDeclSyntax(_syntaxNode)
-//   }
-//   public func `as`(_ syntaxType: ProtocolDeclSyntax.Type) -> ProtocolDeclSyntax? {
-//     return ProtocolDeclSyntax(_syntaxNode)
-//   }
-//   public func `as`(_ syntaxType: TypeAliasDeclSyntax.Type) -> TypeAliasDeclSyntax? {
-//     return TypeAliasDeclSyntax(_syntaxNode)
-//   }
-//   public func `as`(_ syntaxType: AssociatedTypeDeclSyntax.Type) -> AssociatedTypeDeclSyntax? {
-//     return AssociatedTypeDeclSyntax(_syntaxNode)
-//   }
-//   public func `as`(_ syntaxType: FunctionDeclSyntax.Type) -> FunctionDeclSyntax? {
-//     return FunctionDeclSyntax(_syntaxNode)
-//   }
-//   public func `as`(_ syntaxType: InitializerDeclSyntax.Type) -> InitializerDeclSyntax? {
-//     return InitializerDeclSyntax(_syntaxNode)
-//   }
-//   public func `as`(_ syntaxType: DeinitializerDeclSyntax.Type) -> DeinitializerDeclSyntax? {
-//     return DeinitializerDeclSyntax(_syntaxNode)
-//   }
-//   public func `as`(_ syntaxType: IdentifierPatternSyntax.Type) -> IdentifierPatternSyntax? {
-//     return IdentifierPatternSyntax(_syntaxNode)
-//   }
-//   public func `as`(_ syntaxType: SubscriptDeclSyntax.Type) -> SubscriptDeclSyntax? {
-//     return SubscriptDeclSyntax(_syntaxNode)
-//   }
-//   public func `as`(_ syntaxType: MacroDeclSyntax.Type) -> MacroDeclSyntax? {
-//     return MacroDeclSyntax(_syntaxNode)
-//   }
-//   public func `as`(_ syntaxType: EnumCaseElementSyntax.Type) -> EnumCaseElementSyntax? {
-//     return EnumCaseElementSyntax(_syntaxNode)
-//   }
-//
-//   @available(*, deprecated, message: "This cast will always fail")
-//   public func `as`<S: SyntaxProtocol>(_ syntaxType: S.Type) -> S? {
-//     return nil
-//   }
-// }
-
 // MARK: DeclSyntaxProtocol Conversions
 
-extension DeclSyntaxProtocol {
-  @_spi(_QualifiedLookup) public func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax? {
-    Syntax(self).as(ValueDeclSyntax.self)
-  }
-
-  @_spi(_QualifiedLookup) public func `is`(_ syntaxType: ValueDeclSyntax.Type) -> Bool {
-    self.as(syntaxType) != nil
-  }
-}
-
-// MARK: `is` Checks
-
-extension ValueDeclSyntax {
-  public func `is`(_ syntaxType: StructDeclSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-  public func `is`(_ syntaxType: EnumDeclSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-  public func `is`(_ syntaxType: ClassDeclSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-  public func `is`(_ syntaxType: ActorDeclSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-  public func `is`(_ syntaxType: ProtocolDeclSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-  public func `is`(_ syntaxType: TypeAliasDeclSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-  public func `is`(_ syntaxType: AssociatedTypeDeclSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-  public func `is`(_ syntaxType: FunctionDeclSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-  public func `is`(_ syntaxType: InitializerDeclSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-  public func `is`(_ syntaxType: DeinitializerDeclSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-  public func `is`(_ syntaxType: IdentifierPatternSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-  public func `is`(_ syntaxType: SubscriptDeclSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-  public func `is`(_ syntaxType: MacroDeclSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-  public func `is`(_ syntaxType: EnumCaseElementSyntax.Type) -> Bool {
-    return self.as(syntaxType) != nil
-  }
-
-  @available(*, deprecated, message: "This check will always fail")
-  public func `is`<S: SyntaxProtocol>(_ syntaxType: S.Type) -> Bool {
-    return false
-  }
-}
+// extension DeclSyntaxProtocol {
+//   @_spi(_QualifiedLookup) public func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax? {
+//     Syntax(self).as(ValueDeclSyntax.self)
+//   }
+//
+//   @_spi(_QualifiedLookup) public func `is`(_ syntaxType: ValueDeclSyntax.Type) -> Bool {
+//     self.as(syntaxType) != nil
+//   }
+// }

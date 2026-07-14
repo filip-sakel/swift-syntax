@@ -71,7 +71,7 @@ extension TypeDeclSyntax {
 // MARK: Upcasts
 
 extension TypeDeclSyntax {
-  public init(_ nominalType: NominalTypeDeclSyntax) {
+  public init(_ nominalType: some NominalTypeDeclSyntaxProtocol) {
     self = Syntax(nominalType).cast(TypeDeclSyntax.self)
   }
 

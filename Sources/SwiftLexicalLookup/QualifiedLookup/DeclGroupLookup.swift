@@ -26,8 +26,7 @@ import SwiftSyntax
   }
 
   public static let structure: SwiftSyntax.SyntaxNodeStructure = .choices([
-    .node(StructDeclSyntax.self), .node(EnumDeclSyntax.self), .node(ClassDeclSyntax.self),
-    .node(ActorDeclSyntax.self), .node(ProtocolDeclSyntax.self), .node(ExtensionDeclSyntax.self),
+    .node(NominalTypeDeclSyntax.self), .node(ExtensionDeclSyntax.self),
   ])
 }
 
@@ -84,8 +83,8 @@ import SwiftSyntax
     }
   }
 
-  public init(exactly node: some DeclGroupSyntax) {
-    self.init(node)!
+  public init(_ syntax: __shared some DeclGroupSyntax) {
+    self = Syntax(syntax).cast(Self.self)
   }
 
   public var attributes: AttributeListSyntax {
