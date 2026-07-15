@@ -39,16 +39,26 @@ protocol LexicalMatcher {
   associatedtype Expectation: LexicalAnnotation
   typealias ExpectationFailure = LexicalMatcherExpectationFailure<Reference>
 
-  /// Asserts the given expectation; returns matched references.
+  /// Asserts the given expectation by returning failures.
+  ///
+  /// ### Implementation Note
+  ///
+  /// We're given two maps for references:
+  /// 1. the markers->references map helps us convert markers from expectations
+  ///    to actual references
+  /// 2. the syntax->references map helps us convert the lookup output's syntax
+  ///    to actual references
+  /// Then, you can use methods like ``LexicalAssertions/diffLexicalResults``
+  /// to diff the expected vs lookup-produced references.
   func assertExpectation(
     expectation: ContextualizedAnnotation<Expectation>,
     markersToReferences: [Reference.ID: ContextualizedAnnotation<Reference>],
     syntaxToReferences: [Reference.SyntaxReference: ContextualizedAnnotation<Reference>],
     verbose: Bool
-  ) -> [ExpectationFailure]  //-> Set<Reference.ID>
+  ) -> [ExpectationFailure]
 
+  /// Describes the expectation's syntax to provide more useful `XCTFail` messages.
   func describeExpectationSyntax(_ syntax: Expectation.SyntaxReference) -> String
-  // func describeReference(_ reference: ContextualizedAnnotation<Reference>) -> String
 }
 
 /// A source file annotated with references and expectations on those references.
@@ -64,8 +74,6 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
   enum Component {
     case stringFragment(String)
     case annotation(annotation: Annotation, file: StaticString, line: UInt)
-    // case reference(reference: Matcher.Reference, file: StaticString, line: UInt)
-    // case expectations(expectations: [Matcher.Expectation], file: StaticString, line: UInt)
   }
 
   struct Interpolation: StringInterpolationProtocol {
@@ -97,13 +105,7 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
   let fileSource: String
   /// Parsed `source`
   let fileSyntax: SourceFileSyntax
-  // /// A list of references and their source index / source location.
-  // let references: [(reference: Matcher.Reference, index: String.Index, file: StaticString, line: UInt)]
-  // /// A map from positions in the string to the expected result at that location.
-  // let positionsToExpectations:
-  //   [String.Index: (
-  //     expectations: [Matcher.Expectation], file: StaticString, line: UInt
-  //   )]
+  /// A list of annotations, their source index and source location.
   let annotations: [(index: String.Index, annotation: Annotation, file: StaticString, line: UInt)]
 
   /// Gets the token from the source at the given index of `fileSource`.
@@ -121,11 +123,6 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
 
   init(stringInterpolation: Interpolation) {
     var source = ""
-    // var references: [(reference: Matcher.Reference, index: String.Index, file: StaticString, line: UInt)] = []
-    // var positionsToExpectations:
-    //   [String.Index: (
-    //     expectations: [Matcher.Expectation], file: StaticString, line: UInt
-    //   )] = [:]
     var annotations = [(index: String.Index, annotation: Annotation, file: StaticString, line: UInt)]()
 
     for component in stringInterpolation.components {
@@ -149,24 +146,6 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
         }
         // Save expectation
         annotations.append((index, annotation, file: file, line: line))
-
-      // Get the endIndex so we refer to the token after the expectation
-      // case .reference(let reference, let file, let line):
-      //   // We don't diagnose duplicates yet, since markers should be unique
-      //   // across source files and we only have access to one
-      //   references.append((reference, source.endIndex, file, line))
-      // case .expectations(let expectations, let file, let line):
-      //   // Diagnose existing expectation (we allow only one per source index)
-      //   if let existingExpectation = positionsToExpectations[source.endIndex] {
-      //     XCTFail(
-      //       "[Lookup Failure] Second expectation for same source index is prohibited (original expectation at \(existingExpectation.file):\(existingExpectation.line))",
-      //       file: file,
-      //       line: line
-      //     )
-      //     continue
-      //   }
-      //   // Save expectation
-      //   positionsToExpectations[source.endIndex] = (expectations, file: file, line: line)
       }
     }
 
@@ -176,8 +155,6 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
     self.fileSource = source
     self.fileSyntax = SourceFileSyntax.parse(from: &parser)
     self.annotations = annotations
-    // self.references = references
-    // self.positionsToExpectations = positionsToExpectations
   }
 
   init(stringLiteral value: String) {
@@ -188,6 +165,8 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
   }
 }
 
+/// Used by ``LexicalMatcher/assertExpectation`` to report errors back
+/// to `_assertLexicalLookup`.
 enum LexicalMatcherExpectationFailure<Reference: LexicalAnnotation & Identifiable> {
   /// This expectation references a marker that wasn't declared in source
   case referencesUndefinedMarker(Reference.ID)
@@ -206,6 +185,7 @@ enum LexicalMatcherExpectationFailure<Reference: LexicalAnnotation & Identifiabl
   /// Wrong result type. E.g., expected failure, but succeeded
   case other(failure: String)
 
+  /// Converts this failure to a string for `XCTFail`.
   func describe(describeReference: (ContextualizedAnnotation<Reference>) -> String) -> String {
     switch self {
     case .referencesUndefinedMarker(let marker):
@@ -224,6 +204,15 @@ enum LexicalMatcherExpectationFailure<Reference: LexicalAnnotation & Identifiabl
   }
 }
 
+// MARK: _assertLexicalLookup
+
+/// Verifies the provided annotated sources and drives `Matcher`
+/// to verify lookup results.
+///
+/// You should wrap this method using a custom `Matcher`
+/// for each use-case. See `assertTypeResolution` as an example.
+///
+/// Note: We don't diagnose unused reference annotations.
 func _assertLexicalLookup<Matcher: LexicalMatcher>(
   _ lookupSources: KeyValuePairs<String, LexicalLookupSource<Matcher>>,
   matcher: Matcher,
@@ -231,36 +220,14 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
   line: UInt,
   verbose: Bool = false
 ) {
-  // Parse each source file
-  // let lookupFiles: [(name: String, text: String, syntax: SourceFileSyntax)] = lookupSources.map({
-  //   fileName,
-  //   lookupSource in
-  //   var parser = Parser(lookupSource.source)
-  //   return (fileName, lookupSource.source, SourceFileSyntax.parse(from: &parser))
-  // })
-  //
-  // /// IMPORTANT: Only use for the given files with matching source/parsedSource.
-  // func sourceToken(at index: String.Index, fileSource: String, fileSyntax: SourceFileSyntax) -> TokenSyntax? {
-  //   let sourcePosition = AbsolutePosition(
-  //     utf8Offset: fileSource.distance(
-  //       from: fileSource.startIndex,
-  //       to: index
-  //     )
-  //   )
-  //   return fileSyntax.token(at: sourcePosition)
-  // }
-
   // Find the expected syntax for each reference and expectation.
-  var markersToReferences = [
-    Matcher.Reference.ID: ContextualizedAnnotation<Matcher.Reference>
-  ]()
+  //
+  // See why we create two maps to references: markers->references, and
+  // syntax->references in `LexicalMatcher/assertExpectation`
+  var markersToReferences = [Matcher.Reference.ID: ContextualizedAnnotation<Matcher.Reference>]()
   var syntaxToReferences = [Matcher.Reference.SyntaxReference: ContextualizedAnnotation<Matcher.Reference>]()
   var contextualizedExpectations = [ContextualizedAnnotation<Matcher.Expectation>]()
   for (_, lookupSource) in lookupSources {
-    // // Parse file
-    // var parser = Parser(lookupSource.fileSource)
-    // let fileSyntax = SourceFileSyntax.parse(from: &parser)
-
     for (annotationSourceIndex, annotation, file, line) in lookupSource.annotations {
       // Get the token at this index (e.g. 'struct')
       let token = lookupSource.getSourceToken(at: annotationSourceIndex)
@@ -315,7 +282,8 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
       case .expectations(let expectations):
         for expectation in expectations {
           // Find annotated syntax (like above)
-          guard let expectationSyntax = expectation.findSyntaxFromToken(token, verbose: verbose, file: file, line: line)
+          guard
+            let expectationSyntax = expectation.findSyntaxFromToken(token, verbose: verbose, file: file, line: line)
           else {
             // We leave diagnostics to `findSyntaxFromToken` since they'll be more precise
             continue
@@ -326,13 +294,10 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
             ContextualizedAnnotation(annotation: expectation, syntax: expectationSyntax, file: file, line: line)
           )
         }
-
       }
     }
 
     // Try to match each expectation with at least one reference
-
-    // var unmatchedReferenceIDs: Set<Matcher.Reference.ID> = Set(markersToReferences.keys)
     for contextualizedExpectation in contextualizedExpectations {
       // Assert the expectations
       let failures = matcher.assertExpectation(
@@ -350,18 +315,11 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
           line: contextualizedExpectation.line
         )
       }
-      // // Updates matched ids
-      // unmatchedReferenceIDs.subtract(newlyMatchedIDs)
     }
-
-    // // Diagnose unmatched references
-    // for id in unmatchedReferenceIDs {
-    //   XCTFail("Unmatched marker: No expectation matched reference '\(id)'", file: file, line: line)
-    // }
   }
 }
 
-enum LexicalAssertions {
+enum LexicalAssertionUtilities {
   /// Find the direct parent of the given token and cast it to the desired
   /// `Parent` syntax type.
   ///

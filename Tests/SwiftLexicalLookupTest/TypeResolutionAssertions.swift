@@ -16,6 +16,48 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
+/// Asserts the given annotated `TypeSyntax` resolves to the right `NominalTypeDeclSyntax`
+/// and qualified name. Also asserts `ExtensionDeclSyntax`-binding produces the expected
+/// `ExtensionBindingState`.
+/// and `ExtensionDeclSyntax`
+struct TypeResolutionMatcher {
+  /// A marker and the resolved qualified name of the annotated `NominalTypeDeclSyntax`.
+  struct Reference {
+    let marker: Character
+    let name: String
+  }
+  /// Annotates `TypeSyntax` with a type-resolution result using markers;
+  /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
+  enum Expectation {
+    case syntaxResolution(Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>)
+    case extensionBinding(ExtensionBindingState)
+  }
+
+  let symbolTable: SymbolTable3
+  let moduleName: Identifier
+  let lookupFiles: [(String, SourceFileSyntax)]
+}
+
+// MARK: `Reference` Conformances
+
+extension TypeResolutionMatcher.Reference: LexicalAnnotation, Identifiable, CustomStringConvertible {
+  typealias SyntaxReference = NominalTypeDeclSyntax
+  func findSyntaxFromToken(
+    _ token: SwiftSyntax.TokenSyntax,
+    verbose: Bool,
+    file: StaticString,
+    line: UInt
+  ) -> NominalTypeDeclSyntax? {
+    LexicalAssertionUtilities.findDirectParent(from: token, ofType: NominalTypeDeclSyntax.self, file: file, line: line)
+  }
+
+  var id: Character { marker }
+
+  var description: String { name }
+}
+
+// MARK: `Expectation` Conformances
+
 /// Either `TypeSyntax` or `ExtensionDeclSyntax`. Helper
 /// for `TypeResolutionMatcher`
 struct TypeSyntaxOrExtension: SyntaxProtocol, SyntaxHashable {
@@ -40,88 +82,64 @@ struct TypeSyntaxOrExtension: SyntaxProtocol, SyntaxHashable {
   }
 }
 
-struct TypeResolutionMatcher: LexicalMatcher {
-  /// A type-lookup reference has a marker and the resolved qualified name.
-  /// A reference is tied to a `NominalTypeDeclSyntax`
-  struct Reference: LexicalAnnotation, Identifiable, CustomStringConvertible {
-    let marker: Character
-    let name: String
+extension TypeResolutionMatcher.Expectation: LexicalAnnotation {
+  typealias SyntaxReference = TypeSyntaxOrExtension
 
-    typealias SyntaxReference = NominalTypeDeclSyntax
-    func findSyntaxFromToken(
-      _ token: SwiftSyntax.TokenSyntax,
-      verbose: Bool,
-      file: StaticString,
-      line: UInt
-    ) -> NominalTypeDeclSyntax? {
-      LexicalAssertions.findDirectParent(from: token, ofType: NominalTypeDeclSyntax.self, file: file, line: line)
+  /// Find the head type-syntax (because for instance `any Encodable & Decodable`
+  /// contains the `Encodable & Decodable` nested type syntax)
+  private func _findHeadTypeSyntax(of typeSyntax: TypeSyntax) -> TypeSyntax {
+    // Cast the parent to type syntax, or return current type syntax
+    //
+    // Check for special-cases first (e.g., compositions)
+    if typeSyntax.parent?.is(CompositionTypeElementSyntax.self) == true,
+      let compositionSyntax = typeSyntax.parent?.parent?.parent?.as(CompositionTypeSyntax.self)
+    {
+      return _findHeadTypeSyntax(of: TypeSyntax(compositionSyntax))
     }
-
-    var id: Character { marker }
-
-    var description: String { name }
+    // General case
+    guard let parentTypeSyntax = typeSyntax.parent?.as(TypeSyntax.self) else { return typeSyntax }
+    // Find parent's head type syntax
+    return _findHeadTypeSyntax(of: parentTypeSyntax)
   }
-  enum Expectation: LexicalAnnotation {
-    case syntaxResolution(Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>)
-    case extensionBinding(ExtensionBindingState)
 
-    typealias SyntaxReference = TypeSyntaxOrExtension
-
-    func findSyntaxFromToken(
-      _ token: TokenSyntax,
-      verbose: Bool,
-      file: StaticString,
-      line: UInt
-    ) -> TypeSyntaxOrExtension? {
-      switch self {
-      case .extensionBinding:
-        // Extensions should be annotated before 'extension' and the direct token
-        // parent should be ExtensionDeclSyntax
-        return LexicalAssertions.findDirectParent(
-          from: token,
-          ofType: ExtensionDeclSyntax.self,
+  func findSyntaxFromToken(
+    _ token: TokenSyntax,
+    verbose: Bool,
+    file: StaticString,
+    line: UInt
+  ) -> TypeSyntaxOrExtension? {
+    switch self {
+    case .extensionBinding:
+      // Extensions should be annotated before 'extension' and the direct token
+      // parent should be ExtensionDeclSyntax
+      return LexicalAssertionUtilities.findDirectParent(
+        from: token,
+        ofType: ExtensionDeclSyntax.self,
+        file: file,
+        line: line,
+        annotationKindDescription: "extension-binding"
+      ).map(TypeSyntaxOrExtension.init(_:))
+    case .syntaxResolution:
+      // Ensure the token's parent is a type syntax
+      guard let baseTypeSyntax = token.parent?.as(TypeSyntax.self) else {
+        XCTFail(
+          "Invalid type-syntax expectation placement: A qualified-name expectation should be placed right before the target type syntax (parent is '\(String(reflecting: token.parent?.kind))').",
           file: file,
-          line: line,
-          annotationKindDescription: "extension-binding"
-        ).map(TypeSyntaxOrExtension.init(_:))
-      case .syntaxResolution:
-        // Ensure the token's parent is a type syntax
-        guard let baseTypeSyntax = token.parent?.as(TypeSyntax.self) else {
-          XCTFail(
-            "Invalid type-syntax expectation placement: A qualified-name expectation should be placed right before the target type syntax (parent is '\(String(reflecting: token.parent?.kind))').",
-            file: file,
-            line: line
-          )
-          return nil
-        }
-
-        /// Find the head type-syntax (because for instance `any Encodable & Decodable`
-        /// contains the `Encodable & Decodable` nested type syntax)
-        func findHeadTypeSyntax(of typeSyntax: TypeSyntax) -> TypeSyntax {
-          // Cast the parent to type syntax, or return current type syntax
-          //
-          // Check for special-cases first (e.g., compositions)
-          if typeSyntax.parent?.is(CompositionTypeElementSyntax.self) == true,
-            let compositionSyntax = typeSyntax.parent?.parent?.parent?.as(CompositionTypeSyntax.self)
-          {
-            return findHeadTypeSyntax(of: TypeSyntax(compositionSyntax))
-          }
-          // General case
-          guard let parentTypeSyntax = typeSyntax.parent?.as(TypeSyntax.self) else { return typeSyntax }
-          // Find parent's head type syntax
-          return findHeadTypeSyntax(of: parentTypeSyntax)
-        }
-        let typeSyntax = findHeadTypeSyntax(of: baseTypeSyntax)
-
-        return TypeSyntaxOrExtension(typeSyntax)
+          line: line
+        )
+        return nil
       }
+
+      let typeSyntax = _findHeadTypeSyntax(of: baseTypeSyntax)
+
+      return TypeSyntaxOrExtension(typeSyntax)
     }
   }
+}
 
-  let symbolTable: SymbolTable3
-  let moduleName: Identifier
-  let lookupFiles: [(String, SourceFileSyntax)]
+// MARK: `LexicalMatcher` Conformance
 
+extension TypeResolutionMatcher: LexicalMatcher {
   func describeExpectationSyntax(_ syntax: TypeSyntaxOrExtension) -> String {
     if let extensionDecl = syntax.as(ExtensionDeclSyntax.self) {
       return extensionDecl._memberlessDescription
@@ -139,110 +157,39 @@ struct TypeResolutionMatcher: LexicalMatcher {
     markersToReferences: [Character: ContextualizedAnnotation<Reference>],
     syntaxToReferences: [NominalTypeDeclSyntax: ContextualizedAnnotation<Reference>],
     verbose: Bool
-  ) -> [ExpectationFailure] {  //-> Set<Character> {
-    var typeQualifier = TypeQualifier(symbolTable: symbolTable, _verbose: verbose)
-
+  ) -> [ExpectationFailure] {
     switch expectation.annotation {
-    case Expectation.syntaxResolution(let expectedResult):
+    case .syntaxResolution(let expectedResult):
       guard let typeSyntax = expectation.syntax.as(TypeSyntax.self) else {
         fatalError(
           "[SwiftLexicalLookup] Internal test error: Expected syntax-resolution queries to find 'TypeSyntax' nodes, but got '\(expectation.syntax.kind)'."
         )
       }
 
-      // Print target syntax (to show the syntax kinds)
-      if verbose {
-        print("Target syntax parsed as:\n\(typeSyntax.debugDescription)\n")
-      }
-
-      // Perform the lookup
-      let lookupResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeQualifier.Failure>
-      do {
-        var memberDependencies = [ExtensionBindingResult.Dependency]()
-        lookupResult = typeQualifier.resolveSyntax(
-          typeSyntax: typeSyntax,
-          memberDependencies: &memberDependencies,
-          visitedTypeSyntax: []
-        )
-      }
-      return assertTypeSyntax(
+      return _assertTypeSyntax(
+        typeSyntax: typeSyntax,
         expectedResult: expectedResult,
-        actualResult: lookupResult,
         markersToReferences: markersToReferences,
         syntaxToReferences: syntaxToReferences,
         verbose: verbose
       )
-    case Expectation.extensionBinding(let expectedState):
+    case .extensionBinding(let expectedState):
       guard let extensionDecl = expectation.syntax.as(ExtensionDeclSyntax.self) else {
         fatalError(
           "[SwiftLexicalLookup] Internal test error: Expected syntax-resolution queries to find 'ExtensionDeclSyntax' nodes, but got '\(expectation.syntax.kind)'."
         )
       }
 
-      // Look up extended type if not already resolved
-      let actualState: ExtensionBindingState
-      // Try to get already-resolved state
-      if let existingState = symbolTable.extensionState[extensionDecl] {
-        actualState = existingState
-      } else {
-        if verbose {
-          print("Extension `\(extensionDecl._memberlessDescription)` not already bound; initating binding.")
-        }
-
-        // Evaluate the extended type
-        var memberDependencies = [ExtensionBindingResult.Dependency]()
-        let lookupResult: Result<ResolvedNominalTypeReference, TypeQualifier.Failure> =
-          typeQualifier.resolveExtendedTypeSyntax(
-            extensionDecl: extensionDecl,
-            memberDependencies: &memberDependencies
-          )
-
-        // Diagnose type-resolution failures
-        let nominalReference: ResolvedNominalTypeReference
-        switch lookupResult {
-        case .success(let success):
-          nominalReference = success
-        case .failure(let failure):
-          XCTFail(
-            "Invalid extended type: Couldn't resolve extended type for given extension: \(failure.debugDescription)",
-            file: expectation.file,
-            line: expectation.line
-          )
-          return []
-        }
-
-        // Trigger binding and ensure we have a state
-        _ = typeQualifier.resolveNominalType(typeReference: nominalReference)
-        guard let producedState = symbolTable.extensionState[extensionDecl] else {
-          let availableExtensions = symbolTable.extensionState.keys.map(\._memberlessDescription)
-          XCTFail(
-            "No extension state: Couldn't find extension state even after nominal-type resolution; available extensions are: \(availableExtensions)",
-            file: expectation.file,
-            line: expectation.line
-          )
-          return []
-        }
-
-        actualState = producedState
-      }
-
-      // FIXME: Do proper printing
-      let expectedStateDescription = String(reflecting: expectedState)
-      let actualStateDescription = String(reflecting: actualState)
-      guard expectedStateDescription == actualStateDescription else {
-        return [
-          ExpectationFailure.other(
-            failure: "Extension-state mismatch. Expected: \(expectedStateDescription)\nGot: \(actualStateDescription)"
-          )
-        ]
-      }
-      return []
+      return _assertExtensionBinding(
+        extensionDecl: extensionDecl,
+        expectedState: expectedState,
+        verbose: verbose
+      )
     }
-
   }
 
   /// Helper for converting a qualified type name to a string description
-  func describeQualifiedName(_ name: QualifiedTypeName) -> String {
+  private func _describeQualifiedName(_ name: QualifiedTypeName) -> String {
     name._describe(describeFileID: { fileID in
       // Get name of first matching id
       for (fileName, file) in lookupFiles {
@@ -253,13 +200,99 @@ struct TypeResolutionMatcher: LexicalMatcher {
     })
   }
 
-  func assertTypeSyntax(
+  /// `assertExpectation` forwards extensions here.
+  private func _assertExtensionBinding(
+    extensionDecl: ExtensionDeclSyntax,
+    expectedState: ExtensionBindingState,
+    verbose: Bool
+  ) -> [ExpectationFailure] {
+    // Look up extended type if not already resolved
+    let actualState: ExtensionBindingState
+    // Try to get already-resolved state
+    if let existingState = symbolTable.extensionState[extensionDecl] {
+      actualState = existingState
+    } else {
+      if verbose {
+        print("Extension `\(extensionDecl._memberlessDescription)` not already bound; initating binding.")
+      }
+
+      // Evaluate the extended type
+      var typeQualifier = TypeQualifier(symbolTable: symbolTable, _verbose: verbose)
+      var memberDependencies = [ExtensionBindingResult.Dependency]()
+      let lookupResult: Result<ResolvedNominalTypeReference, TypeQualifier.Failure> =
+        typeQualifier.resolveExtendedTypeSyntax(
+          extensionDecl: extensionDecl,
+          memberDependencies: &memberDependencies
+        )
+
+      // Diagnose type-resolution failures
+      let nominalReference: ResolvedNominalTypeReference
+      switch lookupResult {
+      case .success(let success):
+        nominalReference = success
+      case .failure(let failure):
+        return [
+          ExpectationFailure.other(
+            failure:
+              "Invalid extended type: Couldn't resolve extended type for given extension: \(failure.debugDescription)"
+          )
+        ]
+      }
+
+      // Trigger binding and ensure we have a state
+      _ = typeQualifier.resolveNominalType(typeReference: nominalReference)
+      guard let producedState = symbolTable.extensionState[extensionDecl] else {
+        let availableExtensions = symbolTable.extensionState.keys.map(\._memberlessDescription)
+        return [
+          ExpectationFailure.other(
+            failure:
+              "No extension state: Couldn't find extension state even after nominal-type resolution; available extensions are: \(availableExtensions)",
+          )
+        ]
+      }
+
+      actualState = producedState
+    }
+
+    // FIXME: Do proper printing
+    let expectedStateDescription = String(reflecting: expectedState)
+    let actualStateDescription = String(reflecting: actualState)
+    guard expectedStateDescription == actualStateDescription else {
+      return [
+        ExpectationFailure.other(
+          failure: "Extension-state mismatch. Expected: \(expectedStateDescription)\nGot: \(actualStateDescription)"
+        )
+      ]
+    }
+    return []
+  }
+
+  /// `assertExpectation` forwards type syntax here.
+  private func _assertTypeSyntax(
+    typeSyntax: TypeSyntax,
     expectedResult: Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>,
-    actualResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeQualifier.Failure>,
     markersToReferences: [Character: ContextualizedAnnotation<Reference>],
     syntaxToReferences: [NominalTypeDeclSyntax: ContextualizedAnnotation<Reference>],
     verbose: Bool,
-  ) -> [ExpectationFailure] {  // -> Set<Character> {
+  ) -> [ExpectationFailure] {
+    // Print target syntax (to show the syntax kinds)
+    if verbose {
+      print("Target syntax parsed as:\n\(typeSyntax.debugDescription)\n")
+    }
+
+    // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
+    var typeQualifier = TypeQualifier(symbolTable: symbolTable, _verbose: verbose)
+    let actualResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeQualifier.Failure>
+    do {
+      var memberDependencies = [ExtensionBindingResult.Dependency]()
+      actualResult = typeQualifier.resolveSyntax(
+        typeSyntax: typeSyntax,
+        memberDependencies: &memberDependencies,
+        visitedTypeSyntax: []
+      )
+    }
+
+    // Assert output
     var failures = [ExpectationFailure]()
     switch (expectedResult, actualResult) {
     case (.success(.memberResults(let markers)), .success(.memberResults(let nominalTypes))):
@@ -288,7 +321,7 @@ struct TypeResolutionMatcher: LexicalMatcher {
       guard !failures.isEmpty else { break }
 
       // Diff if markers check out
-      LexicalAssertions.diffLexicalResults(expected: expectations, actual: results, failures: &failures)
+      LexicalAssertionUtilities.diffLexicalResults(expected: expectations, actual: results, failures: &failures)
     case (.success(let expectedLookupResult), .success(let actualLookupResult)):
       // We handled members above, so map to `Bool` to facilitate the comparison.
       if expectedLookupResult.mapMembers({ _ in false }) != actualLookupResult.mapMembers({ _ in false }) {
@@ -315,8 +348,8 @@ struct TypeResolutionMatcher: LexicalMatcher {
 
       // Describe the lookup failure
       let actualFailureDescription = actualFailure._describeDebug(
-        resolveMininalNominal: { describeQualifiedName($0.qualifiedName) },
-        resolveExtendedNominal: { describeQualifiedName($0.qualifiedName) }
+        resolveMininalNominal: { _describeQualifiedName($0.qualifiedName) },
+        resolveExtendedNominal: { _describeQualifiedName($0.qualifiedName) }
       )
 
       // Check equality
@@ -338,6 +371,8 @@ struct TypeResolutionMatcher: LexicalMatcher {
     return failures
   }
 }
+
+// MARK: Assert Function
 
 func assertTypeResolution(
   _ lookupSources: KeyValuePairs<String, LexicalLookupSource<TypeResolutionMatcher>>,
@@ -371,6 +406,8 @@ func assertTypeResolution(
     line: line
   )
 }
+
+// MARK: String-Interpolation Helpers
 
 extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatcher {
   mutating func appendInterpolation(
