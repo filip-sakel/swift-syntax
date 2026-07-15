@@ -193,7 +193,8 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
     self.source = source
     self.markersAndNames = markersAndNames
     self.positionsToExpectations = positionsToExpectations
-    fatalError("Fix")
+    self.positionsToExtensionExpectations = [:]
+    // fatalError("Fix")
   }
 
   init(stringLiteral value: String) {

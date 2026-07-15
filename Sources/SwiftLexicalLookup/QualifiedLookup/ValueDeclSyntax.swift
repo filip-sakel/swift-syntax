@@ -541,12 +541,12 @@ extension ValueDeclSyntax {
 
 // MARK: DeclSyntaxProtocol Conversions
 
-// extension DeclSyntaxProtocol {
-//   @_spi(_QualifiedLookup) public func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax? {
-//     Syntax(self).as(ValueDeclSyntax.self)
-//   }
-//
-//   @_spi(_QualifiedLookup) public func `is`(_ syntaxType: ValueDeclSyntax.Type) -> Bool {
-//     self.as(syntaxType) != nil
-//   }
-// }
+extension DeclSyntaxProtocol {
+  @_spi(_QualifiedLookup) public func `as`(_ syntaxType: ValueDeclSyntax.Type) -> ValueDeclSyntax? {
+    Syntax(self).as(ValueDeclSyntax.self)
+  }
+
+  @_spi(_QualifiedLookup) public func `is`(_ syntaxType: ValueDeclSyntax.Type) -> Bool {
+    self.as(syntaxType) != nil
+  }
+}

@@ -158,7 +158,7 @@ extension NominalType {
     guard let mainDeclFile = mainDecl.root.as(SourceFileSyntax.self) else {
       fatalError("[SwiftLexicalLookup] Internal error: mainDecl is not attached to a SourceFileSyntax")
     }
-    var results = [mainDeclFile: [DeclGroupSyntaxType(exactly: mainDecl)]]
+    var results = [mainDeclFile: [DeclGroupSyntaxType(mainDecl)]]
     for (_, extensionDecls) in extensions {
       for extensionDecl in extensionDecls {
         guard let file = extensionDecl.root.as(SourceFileSyntax.self) else {
@@ -166,7 +166,7 @@ extension NominalType {
             "[SwiftLexicalLookup] Internal error: Should have checked extension declaration has source-file root before being bound to a nominal type."
           )
         }
-        results[file, default: []].append(DeclGroupSyntaxType(exactly: extensionDecl))
+        results[file, default: []].append(DeclGroupSyntaxType(extensionDecl))
       }
     }
     return results

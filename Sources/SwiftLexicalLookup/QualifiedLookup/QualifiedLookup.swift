@@ -246,19 +246,13 @@ public class SymbolTable {
     aliases: inout [Identifier: [TypeAliasDeclSyntax]]
   ) {
     // Look for declaration groups:
-    //   1. nominal types (structs, enums, classes, actors)
-    if let nominalType = decl.asProtocol((any NonProtocolNominalTypeDeclSyntax).self),
+    //   1. nominal types (structs, enums, classes, actors, protocols)
+    if let nominalType = decl.as(NominalTypeDeclSyntax.self),
       let typeName = nominalType.name.identifier
     {
-      types[typeName, default: []].append(DeclGroupSyntaxType(exactly: nominalType))
+      types[typeName, default: []].append(DeclGroupSyntaxType(nominalType))
     }
-    //   2. protocols (same as nominal types)
-    else if let protocolDecl = decl.as(ProtocolDeclSyntax.self),
-      let typeName = protocolDecl.name.identifier
-    {
-      types[typeName, default: []].append(DeclGroupSyntaxType(exactly: protocolDecl))
-    }
-    //   3. extensions (different because extensions can have a member type, e.g. `extension A.B {}`)
+    //   2. extensions (different because extensions can have a member type, e.g. `extension A.B {}`)
     //    TODO: Only do at file scope
     else if let extensionDecl = decl.as(ExtensionDeclSyntax.self) {
       // Check the extended type isn't `Any` or `Self`; these are caught in Semantic Analysis
@@ -517,7 +511,7 @@ extension SymbolTable {
     // Check extensions using this canonical type
     for extensionDecl in globalGroups.extensions[canonicalType, default: []] {
       _lookUpGroupMembers(
-        group: DeclGroupSyntaxType(exactly: extensionDecl),
+        group: DeclGroupSyntaxType(extensionDecl),
         type: canonicalType,
         name: name,
         kind: memberKind,
@@ -620,7 +614,7 @@ extension SymbolTable {
     // TODO: Look at how potential access control influences lookup
     // TODO: Look at how to handle `lookFor[..]` queries
     var extendedLookup = [CanonicalType: [QualifiedLookupResult]]()
-    var mainDecls = [CanonicalType: [any NonProtocolNominalTypeDeclSyntax]]()
+    var mainDecls = [CanonicalType: [NominalTypeDeclSyntax]]()
     for (canonicalType, results) in nestedTypeMainDecls {
       for result in results {
         switch result {
@@ -630,7 +624,7 @@ extension SymbolTable {
           mainDecls[canonicalType, default: []].append(
             contentsOf: decls.lazy.map({
               // Ensure look up gave us nominal declarations
-              guard let nominalType = $0.asProtocol((any NonProtocolNominalTypeDeclSyntax).self) else {
+              guard let nominalType = $0.as(NominalTypeDeclSyntax.self) else {
                 fatalError(
                   "[SwiftLexicalLookup] Internal assertion failure: Expected only nominal types after performing type-only lookup."
                 )
@@ -670,7 +664,7 @@ extension SymbolTable {
         results[canonicalType, default: []].append(
           QualifiedLookupResult.members(
             directMembers,
-            introducedIn: DeclGroupSyntaxType(exactly: mainDecl)
+            introducedIn: DeclGroupSyntaxType(mainDecl)
           )
         )
       }
@@ -678,7 +672,7 @@ extension SymbolTable {
       // Add extension declaration matching this canonical type
       for extensionDecl in globalGroups.extensions[canonicalType, default: []] {
         _lookUpGroupMembers(
-          group: DeclGroupSyntaxType(exactly: extensionDecl),
+          group: DeclGroupSyntaxType(extensionDecl),
           type: nestedCanonicalType,
           name: name,
           kind: memberKind,
