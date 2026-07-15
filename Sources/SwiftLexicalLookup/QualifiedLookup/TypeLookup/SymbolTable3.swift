@@ -242,7 +242,7 @@ extension Collection where Element == ExtensionBindingResult.Dependency {
 // }
 @_spi(_QualifiedLookup) public final class SymbolTable3 {
   public typealias Module = Identifier
-  let moduleToSources: [Module: [String: SourceFileSyntax]]
+  @_spi(_QualifiedLookupTests) public let moduleToSources: [Module: [String: SourceFileSyntax]]
   let configuredRegions: ConfiguredRegions?
 
   // internal var typeSyntaxState: [TypeSyntax: TypeSyntaxResolutionState] = [:]
@@ -676,10 +676,6 @@ extension SymbolTable3 {
 
 // MARK: Debug Print
 
-// extension ExtensionBindingState: CustomDebugStringConvertible {
-//
-// }
-
 extension SymbolTable3: CustomDebugStringConvertible {
   public var debugDescription: String {
     let typesDescription = typeState.values.map(\.debugDescription)
@@ -707,3 +703,9 @@ extension ExtensionBindingResult.Dependency: CustomDebugStringConvertible {
     return "\(baseTypeName.debugDescription)/\(typeMember.name) == \(declsDescription)"
   }
 }
+
+// extension ExtensionBindingState: CustomDebugStringConvertible {
+//   public var debugDescription: String {
+//     "ExtensionBindingState()"
+//   }
+// }

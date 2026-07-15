@@ -622,7 +622,7 @@ extension TypeQualifierFailure {
   /// Note that we only diagnose extending tuples/functions and compositions
   /// (e.g. `Codable = Encodable & Decodable`). However, we don't diagnose
   /// things like extending an existential (e.g. `extension any Collection`).
-  fileprivate mutating func resolveExtendedTypeSyntax(
+  @_spi(_QualifiedLookupTests) public mutating func resolveExtendedTypeSyntax(
     extensionDecl: ExtensionDeclSyntax,
     memberDependencies: inout [ExtensionBindingResult.Dependency]
   ) -> Result<ResolvedNominalTypeReference, Failure> {
@@ -1233,7 +1233,7 @@ extension TypeQualifierFailure {
 
   /// Resolve a qualified-type name to a nominal type with all accessible
   /// extensions bound.
-  fileprivate mutating func resolveNominalType(
+  @_spi(_QualifiedLookupTests) public mutating func resolveNominalType(
     typeReference: ResolvedNominalTypeReference
   ) -> NominalType {
     withLogging(

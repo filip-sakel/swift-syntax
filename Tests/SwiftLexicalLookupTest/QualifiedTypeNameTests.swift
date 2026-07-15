@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-import Foundation
 import SwiftIfConfig
 @_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) @_spi(Experimental) import SwiftLexicalLookup
 import SwiftParser
@@ -187,13 +186,14 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
         // Save expectation
         positionsToExpectations[source.endIndex] = (result, file: file, line: line)
       case .extensionState(let extensionState, let file, let line):
-
+        fatalError("Not implemented")
       }
     }
 
     self.source = source
     self.markersAndNames = markersAndNames
     self.positionsToExpectations = positionsToExpectations
+    fatalError("Fix")
   }
 
   init(stringLiteral value: String) {
