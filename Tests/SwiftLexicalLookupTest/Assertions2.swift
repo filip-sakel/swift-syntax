@@ -48,7 +48,7 @@ protocol LexicalMatcher {
   ///    to actual references
   /// 2. the syntax->references map helps us convert the lookup output's syntax
   ///    to actual references
-  /// Then, you can use methods like ``LexicalAssertions/diffLexicalResults``
+  /// Then, you can use methods like ``LexicalAssertionUtilities/diffLexicalResults``
   /// to diff the expected vs lookup-produced references.
   func assertExpectation(
     expectation: ContextualizedAnnotation<Expectation>,
