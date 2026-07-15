@@ -380,8 +380,7 @@ func assertTypeResolution(
   configuredRegions: ConfiguredRegions? = nil,
   file: StaticString = #file,
   line: UInt = #line,
-  assertSymbolTableState: (borrowing SymbolTable3) -> Void = { _ in },
-  verbose: Bool = false,
+  verbose: Bool = false
 ) {
   // Convert data formats
   let moduleIdentifier = Identifier(canonicalName: moduleName)
@@ -420,7 +419,6 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
   }
   mutating func appendInterpolation(
     extensionState: ExtensionBindingState,
-    name: String,
     file: StaticString = #file,
     line: UInt = #line
   ) {

@@ -22,6 +22,13 @@ extension TypeLikeSyntax: ExpressibleByStringLiteral {
     self.init(TypeSyntax(stringLiteral: value))
   }
 }
+// Convenience `String` initializer for `TypeDeclSyntax`; will
+// crash at runtime if given a non `TypeDeclSyntax`.
+extension TypeDeclSyntax: ExpressibleByStringLiteral {
+  public init(stringLiteral value: StringLiteralType) {
+    self = Syntax(DeclSyntax(stringLiteral: value)).cast(TypeDeclSyntax.self)
+  }
+}
 
 extension ResolvedNominalTypeReference {
   fileprivate static func _mockMarkerType(_ kind: SyntaxKind, marker: Character) -> ResolvedNominalTypeReference? {
@@ -358,9 +365,12 @@ final class TestQualifiedTypeName: XCTestCase {
       struct B {}
 
       // Tuples, functions, and metatypes don't have type members
-      var x: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.tuple(labels: [nil, nil])))(A, B).MyType
-      var y: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.function(argumentCount: 1)))((A) -> B).MyType
-      var z: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.memberResults([])))A.Type.MyType
+      var x: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.tuple(labels: [nil, nil])))
+             (A, B).MyType
+      var y: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.function(argumentCount: 1)))
+             ((A) -> B).MyType
+      var z: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.memberResults([])))
+             A.Type.MyType
       """ as LexicalLookupSource
     ])
   }
@@ -402,54 +412,15 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testSimpleRecursiveExtension() {
-    // A type member `A`
-    let typeMemberA = ImplicitTypeReferenceComponent(
-      from: PartiallyResolvedTypeIdentifier.Component(
-        module: nil,
-        name: Identifier(canonicalName: "A"),
-        introducingSyntax: "A"
-      )
-    )
-
-    assertTypeResolution(
-      [
-        "MyFile.swift": """
-        \("🟥", name: "_(MyFile.swift)::A")
-        struct A {}
-        extension A.B { struct A {} }
-        extension A { typealias B = A }
-
-        func f(_: \(failure: .noTypeMember(member: typeMemberA, in: .memberResults(["🟥"])))A.A)
-        """ as LexicalLookupSource
-      ],
-      assertSymbolTableState: { symbolTable in
-        guard
-          let (_, extensionState) = symbolTable.extensionState.first(where: {
-            (extensionDecl, _) in extensionDecl._memberlessDescription == "extension A.B {}"
-          })
-        else {
-          XCTFail("Expected `extension A.B {}` to have been resolved.", file: #file, line: #line)
-          return
-        }
-
-        guard case ExtensionBindingState.cannotDependOnIntroducedMembers(let introducedTypeMembers) = extensionState
-        else {
-          XCTFail(
-            "Expected `extension A.B {}` to be unbound because of a cycle; instead, got state: \(extensionState)",
-            file: #file,
-            line: #line
-          )
-          return
-        }
-
-        XCTAssertEqual(
-          introducedTypeMembers.map(\.trimmedDescription),
-          ["struct A {}"],
-          "Invalid cycle detected: `extension A.B {}` depends on the wrong type members."
-        )
-      },
-      verbose: true
-    )
+    assertTypeResolution([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::A")
+      struct A {}
+      \(extensionState: .cannotDependOnIntroducedMembers(typeMembers: ["struct A {}"]))
+      extension A.B { struct A {} }
+      extension A { typealias B = A }
+      """ as LexicalLookupSource
+    ])
   }
   func testRedeclarationWithRecursiveExtension() {
     assertTypeResolution([
