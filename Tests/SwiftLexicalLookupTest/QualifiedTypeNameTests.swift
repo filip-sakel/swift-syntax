@@ -185,7 +185,7 @@ struct QualifiedTypeNameSource: ExpressibleByStringLiteral, ExpressibleByStringI
         }
         // Save expectation
         positionsToExpectations[source.endIndex] = (result, file: file, line: line)
-      case .extensionState(let extensionState, let file, let line):
+      case .extensionState(_, _, _):
         fatalError("Not implemented")
       }
     }
@@ -229,270 +229,270 @@ extension ResolvedNominalTypeReference {
 }
 
 final class TestQualifiedTypeName: XCTestCase {
-  func assertTypeResolution(
-    _ lookupSources: [String: QualifiedTypeNameSource],
-    moduleName: StaticString = "MyModule",
-    configuredRegions: ConfiguredRegions? = nil,
-    file: StaticString = #file,
-    line: UInt = #line,
-    assertSymbolTableState: (borrowing SymbolTable3) -> Void = { _ in },
-    verbose: Bool = false,
-  ) {
-    // Parse each source file
-    let lookupFiles: [String: SourceFileSyntax] = lookupSources.mapValues({ lookupSource in
-      var parser = Parser(lookupSource.source)
-      return SourceFileSyntax.parse(from: &parser)
-    })
-    // // Merger markers
-    // let markersToNames = [Character: (source: String, index: String.Index, name: String, file: StaticString, line: UInt)]()
-    // for (fileName, lookupSource) in lookupSources {
-    //   for marker in lookupSource.markersToNames {
-    //     guard markersToNames[]
-    //   }
-    // }
-
-    /// A map from positions in the string to a list of references for the declaration at that location.
-
-    /// IMPORTANT: Only use for `lookupSource.source` and `sourceFile`.
-    func sourcePosition(of index: String.Index, in source: String) -> AbsolutePosition {
-      AbsolutePosition(
-        utf8Offset: source.distance(
-          from: source.startIndex,
-          to: index
-        )
-      )
-    }
-
-    // Find the expected nominal-type declaration and qualified-name string for each marker.
-    var markerToType = [
-      Character: (nominalDecl: NominalTypeDeclSyntax, name: String, file: StaticString, line: UInt)
-    ]()
-    for (fileName, lookupSource) in lookupSources {
-      let sourceString = lookupSource.source
-      // Force-unwrapped because we just created `lookupFile` with the same `fileName`s
-      let sourceFile = lookupFiles[fileName]!
-      for (marker, sourceIndex, name, file, line) in lookupSource.markersAndNames {
-        // The assertion expects this to be an introducer token (e.g, 'struct')
-        guard let introducerToken = sourceFile.token(at: sourcePosition(of: sourceIndex, in: sourceString)) else {
-          XCTFail(
-            "[Internal Error] Unexpectedly couldn't find token for marker.",
-            file: file,
-            line: line
-          )
-          continue
-        }
-
-        // We expect the parent to be a nominal-type declaration
-        guard let nominalDecl = introducerToken.parent?.as(NominalTypeDeclSyntax.self) else {
-          XCTFail(
-            "Invalid marker placement: The parent of the token after the expectation isn't a nominal-type declaration; instead got parent kind '\(String(reflecting: introducerToken.parent?.kind))'.",
-            file: file,
-            line: line
-          )
-          continue
-        }
-
-        // Ensure we're not overwriting a previous marker
-        guard markerToType[marker] == nil else {
-          XCTFail(
-            "Duplicate marker '\(marker)': Unexpectedly found the same marker for another nominal-type declaration.",
-            file: file,
-            line: line
-          )
-          continue
-        }
-        markerToType[marker] = (nominalDecl, name, file, line)
-      }
-    }
-
-    /// Helper for converting a qualified type name to a string description
-    func describeQualifiedName(_ name: QualifiedTypeName) -> String {
-      name._describe(describeFileID: { fileID in
-        // Get name of first matching id
-        for (fileName, file) in lookupFiles {
-          guard file.id == fileID else { continue }
-          return fileName
-        }
-        return fileID.hashValue.description
-      })
-    }
-
-    // Perform lookup
-    let symbolTable = SymbolTable3(
-      moduleToSources: [Identifier(canonicalName: moduleName): lookupFiles],
-      configuredRegions: configuredRegions,
-    )
-    var typeQualifier = TypeQualifier(
-      symbolTable: symbolTable,
-      _verbose: verbose
-    )
-    for (fileName, lookupSource) in lookupSources {
-      let sourceString = lookupSource.source
-      // Force-unwrapped because we just created `lookupFile` with the same `fileName`s
-      let sourceFile = lookupFiles[fileName]!
-
-      assertionLoop: for (sourceIndex, (expectedResult, file, line)) in lookupSource.positionsToExpectations {
-        // We're looking for a token that's part of some type syntax
-        guard let typeToken = sourceFile.token(at: sourcePosition(of: sourceIndex, in: sourceString)) else {
-          XCTFail(
-            "[Internal Error] Unexpectedly couldn't find token for marker.",
-            file: file,
-            line: line
-          )
-          continue
-        }
-
-        // Ensure the token's parent is a type syntax
-        guard let typeSyntax = typeToken.parent?.as(TypeSyntax.self) else {
-          XCTFail(
-            "Invalid type-syntax expectation placement: A qualified-name expectation should be placed right before the target type syntax (parent is '\(String(reflecting: typeToken.parent?.kind))').",
-            file: file,
-            line: line
-          )
-          continue
-        }
-
-        /// Find the head type-syntax (because for instance `any Encodable & Decodable`
-        /// contains the `Encodable & Decodable` nested type syntax)
-        func findHeadTypeSyntax(of typeSyntax: TypeSyntax) -> TypeSyntax {
-          // Cast the parent to type syntax, or return current type syntax
-          //
-          // Check for special-cases first (e.g., compositions)
-          if typeSyntax.parent?.is(CompositionTypeElementSyntax.self) == true,
-            let compositionSyntax = typeSyntax.parent?.parent?.parent?.as(CompositionTypeSyntax.self)
-          {
-            return findHeadTypeSyntax(of: TypeSyntax(compositionSyntax))
-          }
-          // General case
-          guard let parentTypeSyntax = typeSyntax.parent?.as(TypeSyntax.self) else { return typeSyntax }
-          // Find parent's head type syntax
-          return findHeadTypeSyntax(of: parentTypeSyntax)
-        }
-        let targetTypeSyntax = findHeadTypeSyntax(of: typeSyntax)
-
-        // Print target syntax (to show the syntax kinds)
-        if verbose {
-          print("Target syntax parsed as:\n\(targetTypeSyntax.debugDescription)\n")
-        }
-
-        // Find the minimal-nominal type
-        let expectedMarkers: [Character]
-        let declsToNames: [NominalTypeDeclSyntax: String]
-        var typeResolutionDependencies = [ExtensionBindingResult.Dependency]()
-        let lookupResultOrFailure: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeQualifier.Failure> =
-          typeQualifier.resolveSyntax(
-            typeSyntax: targetTypeSyntax,
-            memberDependencies: &typeResolutionDependencies,
-            visitedTypeSyntax: []
-          )
-        // _ = consume typeResolutionDependencies
-
-        // Report result
-        if verbose {
-          print(">>> Result of `\(targetTypeSyntax.trimmedDescription)` lookup: \(lookupResultOrFailure)")
-          print("Symbol table: \(symbolTable.debugDescription)\n")
-        }
-
-        // Match success with success and failure with failure
-        switch (expectedResult, lookupResultOrFailure) {
-        case (.success(.memberResults(let markers)), .success(.memberResults(let nominalTypes))):
-          expectedMarkers = markers
-          // Map tuple to results
-          var namesToDeclsTemporary = [NominalTypeDeclSyntax: String]()
-          for nominalType in nominalTypes {
-            let nameDescription = describeQualifiedName(nominalType.qualifiedName)
-            guard namesToDeclsTemporary[nominalType.mainDecl] == nil else { continue assertionLoop }
-            namesToDeclsTemporary[nominalType.mainDecl] = nameDescription
-          }
-          declsToNames = namesToDeclsTemporary
-        case (.success(let expectedLookupResult), .success(let lookupResult)):
-          XCTAssertEqual(
-            // We handled members above, so map to `Bool` to facilitate comparison.
-            expectedLookupResult.mapMembers({ _ in false }),
-            lookupResult.mapMembers({ _ in false }),
-            "Mismatch in expetced type-qualifier lookup result of `\(targetTypeSyntax.trimmedDescription)` and actual result.",
-            file: file,
-            line: line
-          )
-          continue
-        case (.failure(let expectedFailure), .failure(let failure)):
-          // TODO: Implement proper comparisons
-          let markerToQualifiedName = { (nominalMarker: Character) -> String in
-            guard let nominalDecl = markerToType[nominalMarker] else { return "_" }
-            return nominalDecl.name
-          }
-          let expectedFailureDescription = expectedFailure._describeDebug(
-            resolveMininalNominal: markerToQualifiedName,
-            resolveExtendedNominal: markerToQualifiedName
-          )
-          let failureDescription = failure._describeDebug(
-            resolveMininalNominal: { describeQualifiedName($0.qualifiedName) },
-            resolveExtendedNominal: { describeQualifiedName($0.qualifiedName) }
-          )
-          XCTAssertEqual(
-            expectedFailureDescription,
-            failureDescription,
-            "Mismatch in expected type-qualifier failure and actual failure.",
-            file: file,
-            line: line
-          )
-          continue
-        default:
-          XCTFail(
-            "Lookup of `\(targetTypeSyntax.trimmedDescription)` didn't succeed/fail as expected. Expected '\(expectedResult)'; got: '\(lookupResultOrFailure)'",
-            file: file,
-            line: line
-          )
-          continue
-        }
-
-        // Cross off matched markers
-        var unmatchedResults = declsToNames
-        for marker in expectedMarkers {
-          // Get the expected nominal type and name
-          guard let expected = markerToType[marker] else {
-            XCTFail(
-              "Undefined marker '\(marker)': The given marker isn't attached to any nominal-type declaration.",
-              file: file,
-              line: line
-            )
-            continue
-          }
-
-          // Cross off matched result
-          guard let resultDeclName = unmatchedResults[expected.nominalDecl] else {
-            XCTFail(
-              "Lookup of `\(targetTypeSyntax.trimmedDescription)` didn't return expected nominal type at marker '\(marker)'.",
-              file: file,
-              line: line
-            )
-            continue
-          }
-          unmatchedResults[expected.nominalDecl] = nil
-
-          // Check decl names match
-          XCTAssertEqual(
-            expected.name,
-            resultDeclName,
-            "Lookup of `\(targetTypeSyntax.trimmedDescription)` matched main declaration but gave invalid name '\(resultDeclName)'.",
-            file: file,
-            line: line
-          )
-        }
-
-        // Diagnose unmatched
-        for (name, nominalDecl) in unmatchedResults {
-          XCTFail(
-            "[Lookup Failure] Lookup of `\(targetTypeSyntax.trimmedDescription)` found unexpected declaration named '\(name)' (main decl: ```\(nominalDecl)```)",
-            file: file,
-            line: line
-          )
-        }
-      }
-    }
-    // Assert symbolTable state after lookup
-    assertSymbolTableState(symbolTable)
-  }
+  // func assertTypeResolution(
+  //   _ lookupSources: [String: QualifiedTypeNameSource],
+  //   moduleName: StaticString = "MyModule",
+  //   configuredRegions: ConfiguredRegions? = nil,
+  //   file: StaticString = #file,
+  //   line: UInt = #line,
+  //   assertSymbolTableState: (borrowing SymbolTable3) -> Void = { _ in },
+  //   verbose: Bool = false,
+  // ) {
+  //   // Parse each source file
+  //   let lookupFiles: [String: SourceFileSyntax] = lookupSources.mapValues({ lookupSource in
+  //     var parser = Parser(lookupSource.source)
+  //     return SourceFileSyntax.parse(from: &parser)
+  //   })
+  //   // // Merger markers
+  //   // let markersToNames = [Character: (source: String, index: String.Index, name: String, file: StaticString, line: UInt)]()
+  //   // for (fileName, lookupSource) in lookupSources {
+  //   //   for marker in lookupSource.markersToNames {
+  //   //     guard markersToNames[]
+  //   //   }
+  //   // }
+  //
+  //   /// A map from positions in the string to a list of references for the declaration at that location.
+  //
+  //   /// IMPORTANT: Only use for `lookupSource.source` and `sourceFile`.
+  //   func sourcePosition(of index: String.Index, in source: String) -> AbsolutePosition {
+  //     AbsolutePosition(
+  //       utf8Offset: source.distance(
+  //         from: source.startIndex,
+  //         to: index
+  //       )
+  //     )
+  //   }
+  //
+  //   // Find the expected nominal-type declaration and qualified-name string for each marker.
+  //   var markerToType = [
+  //     Character: (nominalDecl: NominalTypeDeclSyntax, name: String, file: StaticString, line: UInt)
+  //   ]()
+  //   for (fileName, lookupSource) in lookupSources {
+  //     let sourceString = lookupSource.source
+  //     // Force-unwrapped because we just created `lookupFile` with the same `fileName`s
+  //     let sourceFile = lookupFiles[fileName]!
+  //     for (marker, sourceIndex, name, file, line) in lookupSource.markersAndNames {
+  //       // The assertion expects this to be an introducer token (e.g, 'struct')
+  //       guard let introducerToken = sourceFile.token(at: sourcePosition(of: sourceIndex, in: sourceString)) else {
+  //         XCTFail(
+  //           "[Internal Error] Unexpectedly couldn't find token for marker.",
+  //           file: file,
+  //           line: line
+  //         )
+  //         continue
+  //       }
+  //
+  //       // We expect the parent to be a nominal-type declaration
+  //       guard let nominalDecl = introducerToken.parent?.as(NominalTypeDeclSyntax.self) else {
+  //         XCTFail(
+  //           "Invalid marker placement: The parent of the token after the expectation isn't a nominal-type declaration; instead got parent kind '\(String(reflecting: introducerToken.parent?.kind))'.",
+  //           file: file,
+  //           line: line
+  //         )
+  //         continue
+  //       }
+  //
+  //       // Ensure we're not overwriting a previous marker
+  //       guard markerToType[marker] == nil else {
+  //         XCTFail(
+  //           "Duplicate marker '\(marker)': Unexpectedly found the same marker for another nominal-type declaration.",
+  //           file: file,
+  //           line: line
+  //         )
+  //         continue
+  //       }
+  //       markerToType[marker] = (nominalDecl, name, file, line)
+  //     }
+  //   }
+  //
+  //   /// Helper for converting a qualified type name to a string description
+  //   func describeQualifiedName(_ name: QualifiedTypeName) -> String {
+  //     name._describe(describeFileID: { fileID in
+  //       // Get name of first matching id
+  //       for (fileName, file) in lookupFiles {
+  //         guard file.id == fileID else { continue }
+  //         return fileName
+  //       }
+  //       return fileID.hashValue.description
+  //     })
+  //   }
+  //
+  //   // Perform lookup
+  //   let symbolTable = SymbolTable3(
+  //     moduleToSources: [Identifier(canonicalName: moduleName): lookupFiles],
+  //     configuredRegions: configuredRegions,
+  //   )
+  //   var typeQualifier = TypeQualifier(
+  //     symbolTable: symbolTable,
+  //     _verbose: verbose
+  //   )
+  //   for (fileName, lookupSource) in lookupSources {
+  //     let sourceString = lookupSource.source
+  //     // Force-unwrapped because we just created `lookupFile` with the same `fileName`s
+  //     let sourceFile = lookupFiles[fileName]!
+  //
+  //     assertionLoop: for (sourceIndex, (expectedResult, file, line)) in lookupSource.positionsToExpectations {
+  //       // We're looking for a token that's part of some type syntax
+  //       guard let typeToken = sourceFile.token(at: sourcePosition(of: sourceIndex, in: sourceString)) else {
+  //         XCTFail(
+  //           "[Internal Error] Unexpectedly couldn't find token for marker.",
+  //           file: file,
+  //           line: line
+  //         )
+  //         continue
+  //       }
+  //
+  //       // Ensure the token's parent is a type syntax
+  //       guard let typeSyntax = typeToken.parent?.as(TypeSyntax.self) else {
+  //         XCTFail(
+  //           "Invalid type-syntax expectation placement: A qualified-name expectation should be placed right before the target type syntax (parent is '\(String(reflecting: typeToken.parent?.kind))').",
+  //           file: file,
+  //           line: line
+  //         )
+  //         continue
+  //       }
+  //
+  //       /// Find the head type-syntax (because for instance `any Encodable & Decodable`
+  //       /// contains the `Encodable & Decodable` nested type syntax)
+  //       func findHeadTypeSyntax(of typeSyntax: TypeSyntax) -> TypeSyntax {
+  //         // Cast the parent to type syntax, or return current type syntax
+  //         //
+  //         // Check for special-cases first (e.g., compositions)
+  //         if typeSyntax.parent?.is(CompositionTypeElementSyntax.self) == true,
+  //           let compositionSyntax = typeSyntax.parent?.parent?.parent?.as(CompositionTypeSyntax.self)
+  //         {
+  //           return findHeadTypeSyntax(of: TypeSyntax(compositionSyntax))
+  //         }
+  //         // General case
+  //         guard let parentTypeSyntax = typeSyntax.parent?.as(TypeSyntax.self) else { return typeSyntax }
+  //         // Find parent's head type syntax
+  //         return findHeadTypeSyntax(of: parentTypeSyntax)
+  //       }
+  //       let targetTypeSyntax = findHeadTypeSyntax(of: typeSyntax)
+  //
+  //       // Print target syntax (to show the syntax kinds)
+  //       if verbose {
+  //         print("Target syntax parsed as:\n\(targetTypeSyntax.debugDescription)\n")
+  //       }
+  //
+  //       // Find the minimal-nominal type
+  //       let expectedMarkers: [Character]
+  //       let declsToNames: [NominalTypeDeclSyntax: String]
+  //       var typeResolutionDependencies = [ExtensionBindingResult.Dependency]()
+  //       let lookupResultOrFailure: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeQualifier.Failure> =
+  //         typeQualifier.resolveSyntax(
+  //           typeSyntax: targetTypeSyntax,
+  //           memberDependencies: &typeResolutionDependencies,
+  //           visitedTypeSyntax: []
+  //         )
+  //       // _ = consume typeResolutionDependencies
+  //
+  //       // Report result
+  //       if verbose {
+  //         print(">>> Result of `\(targetTypeSyntax.trimmedDescription)` lookup: \(lookupResultOrFailure)")
+  //         print("Symbol table: \(symbolTable.debugDescription)\n")
+  //       }
+  //
+  //       // Match success with success and failure with failure
+  //       switch (expectedResult, lookupResultOrFailure) {
+  //       case (.success(.memberResults(let markers)), .success(.memberResults(let nominalTypes))):
+  //         expectedMarkers = markers
+  //         // Map tuple to results
+  //         var namesToDeclsTemporary = [NominalTypeDeclSyntax: String]()
+  //         for nominalType in nominalTypes {
+  //           let nameDescription = describeQualifiedName(nominalType.qualifiedName)
+  //           guard namesToDeclsTemporary[nominalType.mainDecl] == nil else { continue assertionLoop }
+  //           namesToDeclsTemporary[nominalType.mainDecl] = nameDescription
+  //         }
+  //         declsToNames = namesToDeclsTemporary
+  //       case (.success(let expectedLookupResult), .success(let lookupResult)):
+  //         XCTAssertEqual(
+  //           // We handled members above, so map to `Bool` to facilitate comparison.
+  //           expectedLookupResult.mapMembers({ _ in false }),
+  //           lookupResult.mapMembers({ _ in false }),
+  //           "Mismatch in expetced type-qualifier lookup result of `\(targetTypeSyntax.trimmedDescription)` and actual result.",
+  //           file: file,
+  //           line: line
+  //         )
+  //         continue
+  //       case (.failure(let expectedFailure), .failure(let failure)):
+  //         // TODO: Implement proper comparisons
+  //         let markerToQualifiedName = { (nominalMarker: Character) -> String in
+  //           guard let nominalDecl = markerToType[nominalMarker] else { return "_" }
+  //           return nominalDecl.name
+  //         }
+  //         let expectedFailureDescription = expectedFailure._describeDebug(
+  //           resolveMininalNominal: markerToQualifiedName,
+  //           resolveExtendedNominal: markerToQualifiedName
+  //         )
+  //         let failureDescription = failure._describeDebug(
+  //           resolveMininalNominal: { describeQualifiedName($0.qualifiedName) },
+  //           resolveExtendedNominal: { describeQualifiedName($0.qualifiedName) }
+  //         )
+  //         XCTAssertEqual(
+  //           expectedFailureDescription,
+  //           failureDescription,
+  //           "Mismatch in expected type-qualifier failure and actual failure.",
+  //           file: file,
+  //           line: line
+  //         )
+  //         continue
+  //       default:
+  //         XCTFail(
+  //           "Lookup of `\(targetTypeSyntax.trimmedDescription)` didn't succeed/fail as expected. Expected '\(expectedResult)'; got: '\(lookupResultOrFailure)'",
+  //           file: file,
+  //           line: line
+  //         )
+  //         continue
+  //       }
+  //
+  //       // Cross off matched markers
+  //       var unmatchedResults = declsToNames
+  //       for marker in expectedMarkers {
+  //         // Get the expected nominal type and name
+  //         guard let expected = markerToType[marker] else {
+  //           XCTFail(
+  //             "Undefined marker '\(marker)': The given marker isn't attached to any nominal-type declaration.",
+  //             file: file,
+  //             line: line
+  //           )
+  //           continue
+  //         }
+  //
+  //         // Cross off matched result
+  //         guard let resultDeclName = unmatchedResults[expected.nominalDecl] else {
+  //           XCTFail(
+  //             "Lookup of `\(targetTypeSyntax.trimmedDescription)` didn't return expected nominal type at marker '\(marker)'.",
+  //             file: file,
+  //             line: line
+  //           )
+  //           continue
+  //         }
+  //         unmatchedResults[expected.nominalDecl] = nil
+  //
+  //         // Check decl names match
+  //         XCTAssertEqual(
+  //           expected.name,
+  //           resultDeclName,
+  //           "Lookup of `\(targetTypeSyntax.trimmedDescription)` matched main declaration but gave invalid name '\(resultDeclName)'.",
+  //           file: file,
+  //           line: line
+  //         )
+  //       }
+  //
+  //       // Diagnose unmatched
+  //       for (name, nominalDecl) in unmatchedResults {
+  //         XCTFail(
+  //           "[Lookup Failure] Lookup of `\(targetTypeSyntax.trimmedDescription)` found unexpected declaration named '\(name)' (main decl: ```\(nominalDecl)```)",
+  //           file: file,
+  //           line: line
+  //         )
+  //       }
+  //     }
+  //   }
+  //   // Assert symbolTable state after lookup
+  //   assertSymbolTableState(symbolTable)
+  // }
 
   func testSimpleCase() {
     assertTypeResolution(
@@ -500,10 +500,10 @@ final class TestQualifiedTypeName: XCTestCase {
         "MyFile.swift": """
         \("🟥", name: "_(MyFile.swift)::A")
         struct A {
-          static func f() -> \(reference: "🟥")A {}
+          static func f() -> \(nominal: "🟥")A {}
           static func g() -> \(failure: .noTypeInScope)B {}
         }
-        """ as QualifiedTypeNameSource
+        """ as LexicalLookupSource
       ]
     )
   }
@@ -522,7 +522,7 @@ final class TestQualifiedTypeName: XCTestCase {
   //         func f(_: \(reference: "🟩")`0`)
   //         func g(_: \(reference: "🟥")B)
   //       }
-  //       """ as QualifiedTypeNameSource
+  //       """ as LexicalLookupSource
   //     ],
   //     verbose: true
   //   )
@@ -535,13 +535,13 @@ final class TestQualifiedTypeName: XCTestCase {
 
         \("🟩", name: "_(MyFile.swift)::Hi._(MyFile.swift)::A")
         struct A {
-          static func f() -> \(reference: "🟩")A {}
+          static func f() -> \(nominal: "🟩")A {}
         }
 
       }
-      func g(_: \(reference: "🟩")Hi.A)
-      func h(_: \(reference: "🟥")Hi)
-      """ as QualifiedTypeNameSource
+      func g(_: \(nominal: "🟩")Hi.A)
+      func h(_: \(nominal: "🟥")Hi)
+      """ as LexicalLookupSource
     ])
   }
 
@@ -549,23 +549,23 @@ final class TestQualifiedTypeName: XCTestCase {
   func testSimpleFunction() {
     assertTypeResolution([
       "MyFile.swift": """
-      typealias A = \(result: .function(argumentCount: 2))(_ a: Int, _ b: Int) -> Int
-      """ as QualifiedTypeNameSource
+      typealias A = \(type: .function(argumentCount: 2))(_ a: Int, _ b: Int) -> Int
+      """ as LexicalLookupSource
     ])
   }
   func testSimpleTuple() {
     assertTypeResolution([
       "MyFile.swift": """
-      func f(_: \(result: .tuple(labels: [Identifier(canonicalName: "a"), nil]))(a: Int, Bool))
-      """ as QualifiedTypeNameSource
+      func f(_: \(type: .tuple(labels: [Identifier(canonicalName: "a"), nil]))(a: Int, Bool))
+      """ as LexicalLookupSource
     ])
   }
   func testSimpleAnyType() {
     assertTypeResolution([
       "MyFile.swift": """
-      func f(_: \(result: .anyType)Any)
-      func g(_: \(result: .anyType)(Any & Any) & Any)
-      """ as QualifiedTypeNameSource
+      func f(_: \(type: .anyType)Any)
+      func g(_: \(type: .anyType)(Any & Any) & Any)
+      """ as LexicalLookupSource
     ])
   }
   /// "Empty types" are metatypes, named opaque types, and class restrictions
@@ -575,14 +575,14 @@ final class TestQualifiedTypeName: XCTestCase {
       "MyFile.swift": """
       // Meta types
       struct A {}
-      func f(_: \(references: [])A.Type)
+      func f(_: \(nominals: [])A.Type)
 
       // Named opaque return types
-      func g() -> <T> \(references: [])T { 1 }
+      func g() -> <T> \(nominals: [])T { 1 }
 
       // Class restrictions
-      protocol A: \(references: [])class {}
-      """ as QualifiedTypeNameSource
+      protocol A: \(nominals: [])class {}
+      """ as LexicalLookupSource
     ])
   }
 
@@ -597,16 +597,16 @@ final class TestQualifiedTypeName: XCTestCase {
       \("🟥", name: "_(MyFile.swift)::A")
       protocol A {}
 
-      func f(_: \(references: ["🟥"])some A)
-      func g(_: \(references: ["🟥"])any A)
+      func f(_: \(nominal: "🟥")some A)
+      func g(_: \(nominal: "🟥")any A)
 
       // Attributed types (and modifiers)
-      func h(_: @escaping \(result: MemberLookupResult.function(argumentCount: 0))() -> Void)
-      func i(_: sending \(references: ["🟥"])A)
+      func h(_: @escaping \(type: .function(argumentCount: 0))() -> Void)
+      func i(_: sending \(nominal: "🟥")A)
 
       // Pack elements & expansions
       func f<each T>(_: \(failure: .genericParameterOrAssociatedType)(repeat each T)) {}
-      """ as QualifiedTypeNameSource
+      """ as LexicalLookupSource
     ])
   }
 
@@ -621,7 +621,7 @@ final class TestQualifiedTypeName: XCTestCase {
         associatedtype U
         func g(_: \(failure: .invalidMembers([("U", .genericParameterOrAssociatedType)]))U)
       }
-      """ as QualifiedTypeNameSource
+      """ as LexicalLookupSource
     ])
 
   }
@@ -631,16 +631,16 @@ final class TestQualifiedTypeName: XCTestCase {
   func testSimpleAlias() {
     assertTypeResolution([
       "MyFile.swift": """
-      typealias A = \(reference: "🟥")B
+      typealias A = \(nominal: "🟥")B
 
       \("🟥", name: "_(MyFile.swift)::B")
       struct B {
-        static func f() -> \(reference: "🟥")A {}
-        static func g() -> \(reference: "🟥")B {}
+        static func f() -> \(nominal: "🟥")A {}
+        static func g() -> \(nominal: "🟥")B {}
       }
-      func f() -> \(reference: "🟥")A {}
-      func g() -> \(reference: "🟥")B {}
-      """ as QualifiedTypeNameSource
+      func f() -> \(nominal: "🟥")A {}
+      func g() -> \(nominal: "🟥")B {}
+      """ as LexicalLookupSource
     ])
   }
 
@@ -649,17 +649,17 @@ final class TestQualifiedTypeName: XCTestCase {
       "MyFile.swift": """
       \("🟥", name: "_(MyFile.swift)::Outer")
       struct Outer {
-        typealias B = \(reference: "🟩")A
+        typealias B = \(nominal: "🟩")A
 
         \("🟩", name: "_(MyFile.swift)::Outer._(MyFile.swift)::A")
         struct A {
-          static func f() -> \(reference: "🟩")B {}
-          static func g() -> \(reference: "🟩")B {}
+          static func f() -> \(nominal: "🟩")B {}
+          static func g() -> \(nominal: "🟩")B {}
         }
       }
-      func f(_: \(reference: "🟩")Outer.A)
-      func g(_: \(reference: "🟩")Outer.B)
-      """ as QualifiedTypeNameSource
+      func f(_: \(nominal: "🟩")Outer.A)
+      func g(_: \(nominal: "🟩")Outer.B)
+      """ as LexicalLookupSource
     ])
   }
 
@@ -671,7 +671,7 @@ final class TestQualifiedTypeName: XCTestCase {
       typealias A = \(failure: .cyclicalTypeReference(cycle: ["B", "A"]))B
       typealias B = A
       func f(_: \(failure: .cyclicalTypeReference(cycle: ["B", "A"]))A)
-      """ as QualifiedTypeNameSource
+      """ as LexicalLookupSource
     ])
   }
 
@@ -685,7 +685,7 @@ final class TestQualifiedTypeName: XCTestCase {
       typealias C = B
       typealias D = C
       func f(_: \(failure: .invalidAliasedType(.invalidAliasedType(.cyclicalTypeReference(cycle: ["A", "B"]))))D)
-      """ as QualifiedTypeNameSource
+      """ as LexicalLookupSource
     ])
   }
 
@@ -703,7 +703,7 @@ final class TestQualifiedTypeName: XCTestCase {
         }
         func h(_: \(failure: .invalidBaseType(.cyclicalTypeReference(cycle: ["B", "A"])))C)
       }
-      """ as QualifiedTypeNameSource
+      """ as LexicalLookupSource
     ])
   }
 
@@ -714,9 +714,9 @@ final class TestQualifiedTypeName: XCTestCase {
       struct A { typealias Element = B.Element }
       struct B { typealias Element = A.Element }
 
-      func f(_: \(references: ["🟥"])A)
+      func f(_: \(nominal: "🟥")A)
       func g(_: \(failure: .invalidMembers([("A.Element", .cyclicalTypeReference(cycle: ["B.Element", "A.Element"]))]))A.Element)
-      """ as QualifiedTypeNameSource
+      """ as LexicalLookupSource
     ])
   }
 
@@ -725,14 +725,14 @@ final class TestQualifiedTypeName: XCTestCase {
   func testSimpleComposition() {
     assertTypeResolution([
       "MyFile.swift": """
-      typealias C = \(references: ["🟥", "🟩"])A & B
+      typealias C = \(nominals: ["🟥", "🟩"])A & B
 
       \("🟥", name: "_(MyFile.swift)::A")
       protocol A {}
 
       \("🟩", name: "_(MyFile.swift)::B")
       protocol B {}
-      """ as QualifiedTypeNameSource
+      """ as LexicalLookupSource
     ])
   }
 
@@ -743,9 +743,9 @@ final class TestQualifiedTypeName: XCTestCase {
       protocol ProtoA {}
       \("🟩", name: "_(MyFile.swift)::ProtoB")
       protocol ProtoB {}
-      func f(_: \(references: ["🟥"])(Any & ProtoA) & Any)
-      func g(_: \(references: ["🟥", "🟩"])((ProtoB & Any) & Any) & ProtoB)
-      """ as QualifiedTypeNameSource
+      func f(_: \(nominal: "🟥")(Any & ProtoA) & Any)
+      func g(_: \(nominals: ["🟥", "🟩"])((ProtoB & Any) & Any) & ProtoB)
+      """ as LexicalLookupSource
     ])
   }
 
@@ -764,7 +764,7 @@ final class TestQualifiedTypeName: XCTestCase {
           ("A", .cannotComposeNonClassOrProtocol(resolved: .memberResults(["🟥"]))),
         ]))
         ((A, B) -> Int) & A
-        """ as QualifiedTypeNameSource
+        """ as LexicalLookupSource
       ]
     )
   }
@@ -776,16 +776,16 @@ final class TestQualifiedTypeName: XCTestCase {
       protocol ProtoA {}
       \("🟩", name: "_(MyFile.swift)::ProtoB")
       protocol ProtoB {}
-      func f(_: \(references: ["🟥"])ProtoA & Any & ProtoA)
-      func g(_: \(references: ["🟥", "🟩"])(ProtoA & ProtoB) & ProtoA)
-      """ as QualifiedTypeNameSource
+      func f(_: \(nominal: "🟥")ProtoA & Any & ProtoA)
+      func g(_: \(nominals: ["🟥", "🟩"])(ProtoA & ProtoB) & ProtoA)
+      """ as LexicalLookupSource
     ])
   }
   // func testTupleComposition() {
   //   assertQualifiedTypeName([
   //     "MyFile.swift": """
   //     func f(_: \(result: .tuple(labels: [Identifier(canonicalName: "a"), nil]))(a: Int, Bool))
-  //     """ as QualifiedTypeNameSource
+  //     """ as LexicalLookupSource
   //   ])
   // }
 
@@ -808,7 +808,7 @@ final class TestQualifiedTypeName: XCTestCase {
       var x: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.tuple(labels: [nil, nil])))(A, B).MyType
       var y: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.function(argumentCount: 1)))((A) -> B).MyType
       var z: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.memberResults([])))A.Type.MyType
-      """ as QualifiedTypeNameSource
+      """ as LexicalLookupSource
     ])
   }
 
@@ -824,10 +824,10 @@ final class TestQualifiedTypeName: XCTestCase {
         \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
         struct B {}
       }
-      func f(_: \(references: ["🟩"])A.B)
+      func f(_: \(nominal: "🟩")A.B)
       // Test that incremental binding still works with a second request
-      func g(_: \(references: ["🟩"])A.B)
-      """ as QualifiedTypeNameSource
+      func g(_: \(nominal: "🟩")A.B)
+      """ as LexicalLookupSource
     ])
   }
   func testTypeInExtension() {
@@ -839,12 +839,12 @@ final class TestQualifiedTypeName: XCTestCase {
       extension A {
         \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
         struct B {
-          func f(_: \(references: ["🟩"])B)
+          func f(_: \(nominal: "🟩")B)
         }
-        func g(_: \(references: ["🟩"])B)
+        func g(_: \(nominal: "🟩")B)
       }
-      func h(_: \(references: ["🟩"])A.B)
-      """ as QualifiedTypeNameSource
+      func h(_: \(nominal: "🟩")A.B)
+      """ as LexicalLookupSource
     ])
   }
 
@@ -867,11 +867,11 @@ final class TestQualifiedTypeName: XCTestCase {
         extension A { typealias B = A }
 
         func f(_: \(failure: .noTypeMember(member: typeMemberA, in: .memberResults(["🟥"])))A.A)
-        """ as QualifiedTypeNameSource
+        """ as LexicalLookupSource
       ],
       assertSymbolTableState: { symbolTable in
         guard
-          let (extensionDecl, extensionState) = symbolTable.extensionState.first(where: {
+          let (_, extensionState) = symbolTable.extensionState.first(where: {
             (extensionDecl, _) in extensionDecl._memberlessDescription == "extension A.B {}"
           })
         else {
@@ -906,7 +906,7 @@ final class TestQualifiedTypeName: XCTestCase {
       extension A.B {}
       extension A { typealias B = A }
       extension A.B { typealias B = OtherType }
-      """ as QualifiedTypeNameSource
+      """ as LexicalLookupSource
     ])
   }
   // func testCrossFileExtension() {
@@ -915,7 +915,7 @@ final class TestQualifiedTypeName: XCTestCase {
   //     \("🟥", name: "_(FileA.swift)::A")
   //     struct A {}
   //     func f(_: \(references: ["🟩"])A.B)
-  //     """ as QualifiedTypeNameSource,
+  //     """ as LexicalLookupSource,
   //
   //     "FileB.swift": """
   //     extension A {
@@ -923,7 +923,7 @@ final class TestQualifiedTypeName: XCTestCase {
   //       struct B {}
   //     }
   //     func g(_: \(references: ["🟩"])A.B)
-  //     """ as QualifiedTypeNameSource,
+  //     """ as LexicalLookupSource,
   //   ])
   // }
 
@@ -938,7 +938,7 @@ final class TestQualifiedTypeName: XCTestCase {
   //         static func makeSelf() -> \(references: "🟩")Self
   //       }
   //     }
-  //     """ as QualifiedTypeNameSource
+  //     """ as LexicalLookupSource
   //
   //       // """
   //       //   func anonymousScope() {
@@ -975,7 +975,7 @@ final class TestQualifiedTypeName: XCTestCase {
   //       // \(references: "🟥")A
   //       // \(result: .memberResults([]))B
   //       // \(result: .memberResults([]))D
-  //       // """ as QualifiedTypeNameSource
+  //       // """ as LexicalLookupSource
   //   ])
   // }
 

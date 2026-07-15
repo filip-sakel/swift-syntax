@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+import SwiftIfConfig
 @_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) @_spi(Experimental) import SwiftLexicalLookup
 import SwiftParser
 import SwiftSyntax
@@ -68,8 +69,8 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
     mutating func appendLiteral(_ literal: String) {
       components.append(.stringFragment(literal))
     }
-    mutating func appendInterpolation(
-      _ reference: Matcher.Reference,
+    mutating func append(
+      reference: Matcher.Reference,
       file: StaticString = #file,
       line: UInt = #line
     ) {
@@ -85,7 +86,9 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
   }
 
   /// The source with all references/expectations removed
-  let source: String
+  let fileSource: String
+  /// Parsed `source`
+  let fileSyntax: SourceFileSyntax
   // /// A list of references and their source index / source location.
   // let references: [(reference: Matcher.Reference, index: String.Index, file: StaticString, line: UInt)]
   // /// A map from positions in the string to the expected result at that location.
@@ -94,6 +97,19 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
   //     expectations: [Matcher.Expectation], file: StaticString, line: UInt
   //   )]
   let annotations: [(index: String.Index, annotation: Annotation, file: StaticString, line: UInt)]
+
+  /// Gets the token from the source at the given index of `fileSource`.
+  ///
+  /// IMPORTANT: Only use for indices acquired from `annotations`.
+  func getSourceToken(at index: String.Index) -> TokenSyntax? {
+    let sourcePosition = AbsolutePosition(
+      utf8Offset: fileSource.distance(
+        from: fileSource.startIndex,
+        to: index
+      )
+    )
+    return fileSyntax.token(at: sourcePosition)
+  }
 
   init(stringInterpolation: Interpolation) {
     var source = ""
@@ -146,7 +162,11 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
       }
     }
 
-    self.source = source
+    // Parse file
+    var parser = Parser(source)
+
+    self.fileSource = source
+    self.fileSyntax = SourceFileSyntax.parse(from: &parser)
     self.annotations = annotations
     // self.references = references
     // self.positionsToExpectations = positionsToExpectations
@@ -176,7 +196,7 @@ enum LexicalMatcherExpectationFailure<Reference: LexicalAnnotation & Identifiabl
     actual: [ContextualizedAnnotation<Reference>]
   )
   /// Wrong result type. E.g., expected failure, but succeeded
-  case invalidResultType(failure: String)
+  case other(failure: String)
 
   func describe(describeReference: (ContextualizedAnnotation<Reference>) -> String) -> String {
     switch self {
@@ -190,7 +210,7 @@ enum LexicalMatcherExpectationFailure<Reference: LexicalAnnotation & Identifiabl
       "Lookup introduced unexpected result '\(references.map(describeReference))'"
     case .invalidResultOrder(let expected, let actual):
       "Lookup returned results in wrong order. Expected: \(expected.map(describeReference)). Got: \(actual.map(describeReference))"
-    case .invalidResultType(let failure):
+    case .other(let failure):
       failure
     }
   }
@@ -198,7 +218,6 @@ enum LexicalMatcherExpectationFailure<Reference: LexicalAnnotation & Identifiabl
 
 func _assertLexicalLookup<Matcher: LexicalMatcher>(
   _ lookupSources: KeyValuePairs<String, LexicalLookupSource<Matcher>>,
-  moduleName: StaticString,
   matcher: Matcher,
   file: StaticString,
   line: UInt,
@@ -211,17 +230,17 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
   //   var parser = Parser(lookupSource.source)
   //   return (fileName, lookupSource.source, SourceFileSyntax.parse(from: &parser))
   // })
-
-  /// IMPORTANT: Only use for the given files with matching source/parsedSource.
-  func sourceToken(at index: String.Index, fileSource: String, fileSyntax: SourceFileSyntax) -> TokenSyntax? {
-    let sourcePosition = AbsolutePosition(
-      utf8Offset: fileSource.distance(
-        from: fileSource.startIndex,
-        to: index
-      )
-    )
-    return fileSyntax.token(at: sourcePosition)
-  }
+  //
+  // /// IMPORTANT: Only use for the given files with matching source/parsedSource.
+  // func sourceToken(at index: String.Index, fileSource: String, fileSyntax: SourceFileSyntax) -> TokenSyntax? {
+  //   let sourcePosition = AbsolutePosition(
+  //     utf8Offset: fileSource.distance(
+  //       from: fileSource.startIndex,
+  //       to: index
+  //     )
+  //   )
+  //   return fileSyntax.token(at: sourcePosition)
+  // }
 
   // Find the expected syntax for each reference and expectation.
   var markersToReferences = [
@@ -230,17 +249,13 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
   var syntaxToReferences = [Matcher.Reference.SyntaxReference: ContextualizedAnnotation<Matcher.Reference>]()
   var contextualizedExpectations = [ContextualizedAnnotation<Matcher.Expectation>]()
   for (_, lookupSource) in lookupSources {
-    // Parse file
-    var parser = Parser(lookupSource.source)
-    let fileSyntax = SourceFileSyntax.parse(from: &parser)
+    // // Parse file
+    // var parser = Parser(lookupSource.fileSource)
+    // let fileSyntax = SourceFileSyntax.parse(from: &parser)
 
     for (annotationSourceIndex, annotation, file, line) in lookupSource.annotations {
       // Get the token at this index (e.g. 'struct')
-      let token = sourceToken(
-        at: annotationSourceIndex,
-        fileSource: lookupSource.source,
-        fileSyntax: fileSyntax
-      )
+      let token = lookupSource.getSourceToken(at: annotationSourceIndex)
       guard let token else {
         XCTFail(
           "[Internal Error] Unexpectedly couldn't find token for annotation.",
@@ -318,9 +333,11 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
         syntaxToReferences: syntaxToReferences,
         verbose: verbose
       )
+      let syntaxDescription = matcher.describeExpectationSyntax(contextualizedExpectation.syntax)
       for failure in failures {
+        let failureDescription = failure.describe(describeReference: \.annotation.description)
         XCTFail(
-          failure.describe(describeReference: \.annotation.description),
+          "[Lookup of `\(syntaxDescription)`] \(failureDescription)",
           file: contextualizedExpectation.file,
           line: contextualizedExpectation.line
         )
@@ -410,7 +427,7 @@ struct TypeLookupMatcher: LexicalMatcher {
   /// A reference is tied to a `NominalTypeDeclSyntax`
   struct Reference: LexicalAnnotation, Identifiable, CustomStringConvertible {
     let marker: Character
-    let name: QualifiedTypeName
+    let name: String
 
     typealias SyntaxReference = NominalTypeDeclSyntax
     func findSyntaxFromToken(
@@ -424,7 +441,7 @@ struct TypeLookupMatcher: LexicalMatcher {
 
     var id: Character { marker }
 
-    var description: String { name.debugDescription }
+    var description: String { name }
   }
   struct TypeSyntaxOrExtension: SyntaxProtocol, SyntaxHashable {
     private(set) var _syntaxNode: Syntax
@@ -617,7 +634,7 @@ struct TypeLookupMatcher: LexicalMatcher {
       let actualStateDescription = String(reflecting: actualState)
       guard expectedStateDescription == actualStateDescription else {
         return [
-          ExpectationFailure.invalidResultType(
+          ExpectationFailure.other(
             failure: "Extension-state mismatch. Expected: \(expectedStateDescription)\nGot: \(actualStateDescription)"
           )
         ]
@@ -679,7 +696,7 @@ struct TypeLookupMatcher: LexicalMatcher {
       // We handled members above, so map to `Bool` to facilitate the comparison.
       if expectedLookupResult.mapMembers({ _ in false }) != actualLookupResult.mapMembers({ _ in false }) {
         failures.append(
-          ExpectationFailure.invalidResultType(
+          ExpectationFailure.other(
             failure:
               "Resolved-type mismatch. Expected: \(expectedLookupResult)\nGot: \(actualLookupResult)"
           )
@@ -692,7 +709,7 @@ struct TypeLookupMatcher: LexicalMatcher {
           failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
           return "_"
         }
-        return nominalDecl.annotation.name.debugDescription
+        return nominalDecl.annotation.name
       }
       let expectedFailureDescription = expectedFailure._describeDebug(
         resolveMininalNominal: markerToQualifiedName,
@@ -708,19 +725,106 @@ struct TypeLookupMatcher: LexicalMatcher {
       // Check equality
       if expectedFailureDescription != actualFailureDescription {
         failures.append(
-          ExpectationFailure.invalidResultType(
-            failure: "Failure mismatch. Expected:\(expectedFailureDescription)\nGot:\(actualFailureDescription)"
+          ExpectationFailure.other(
+            failure: "Failure mismatch. Expected: '\(expectedFailureDescription)'. Got: '\(actualFailureDescription)'"
           )
         )
       }
     default:
       failures.append(
-        ExpectationFailure.invalidResultType(
+        ExpectationFailure.other(
           failure:
-            "Lookup didn't succeed/fail as expected. Expected '\(expectedResult)'; got: '\(actualResult)'"
+            "Lookup didn't succeed/fail as expected. Expected '\(expectedResult)'. Got: '\(actualResult)'"
         )
       )
     }
     return failures
+  }
+}
+
+func assertTypeResolution(
+  _ lookupSources: KeyValuePairs<String, LexicalLookupSource<TypeLookupMatcher>>,
+  moduleName: StaticString = "MyModule",
+  configuredRegions: ConfiguredRegions? = nil,
+  file: StaticString = #file,
+  line: UInt = #line,
+  assertSymbolTableState: (borrowing SymbolTable3) -> Void = { _ in },
+  verbose: Bool = false,
+) {
+  // Convert data formats
+  let moduleIdentifier = Identifier(canonicalName: moduleName)
+  // Map files to name & file syntax
+  let lookupFiles: [(String, SourceFileSyntax)] = lookupSources.map({ fileName, lookupSource in
+    (fileName, lookupSource.fileSyntax)
+  })
+  // Test cases should give us unique file names
+  let uniquedLookupFiles = Dictionary(uniqueKeysWithValues: lookupFiles)
+
+  _assertLexicalLookup(
+    lookupSources,
+    matcher: TypeLookupMatcher(
+      symbolTable: SymbolTable3(
+        moduleToSources: [moduleIdentifier: uniquedLookupFiles],
+        configuredRegions: configuredRegions
+      ),
+      moduleName: moduleIdentifier,
+      lookupFiles: lookupFiles
+    ),
+    file: file,
+    line: line
+  )
+}
+
+extension LexicalLookupSource.Interpolation where Matcher == TypeLookupMatcher {
+  mutating func appendInterpolation(
+    _ marker: Character,
+    name: String,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) {
+    append(reference: TypeLookupMatcher.Reference(marker: marker, name: name), file: file, line: line)
+  }
+  mutating func appendInterpolation(
+    extensionState: ExtensionBindingState,
+    name: String,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) {
+    appendInterpolation(expects: [TypeLookupMatcher.Expectation.extensionBinding(extensionState)])
+  }
+  mutating func appendInterpolation(
+    result: Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) {
+    appendInterpolation(expects: [TypeLookupMatcher.Expectation.syntaxResolution(result)])
+  }
+  mutating func appendInterpolation(
+    failure: TypeQualifierFailure<Character, Character>,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) {
+    appendInterpolation(result: Result.failure(failure), file: file, line: line)
+  }
+  mutating func appendInterpolation(
+    type: MemberLookupResult<Character>,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) {
+    appendInterpolation(result: Result.success(type), file: file, line: line)
+  }
+  mutating func appendInterpolation(
+    nominals markers: [Character],
+    file: StaticString = #file,
+    line: UInt = #line
+  ) {
+    appendInterpolation(type: MemberLookupResult.memberResults(markers), file: file, line: line)
+  }
+  mutating func appendInterpolation(
+    nominal marker: Character,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) {
+    appendInterpolation(nominals: [marker], file: file, line: line)
   }
 }
