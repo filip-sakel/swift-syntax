@@ -10,17 +10,21 @@
 //
 //===----------------------------------------------------------------------===//
 
-import SwiftIfConfig
-@_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) @_spi(Experimental) import SwiftLexicalLookup
 import SwiftParser
 import SwiftSyntax
 import XCTest
 
+/// An annotation (used for ``LexicalMatcher`` references and expectations)
+/// associates testing data with a syntax node in the given ``LexicalLookupSource``.
+///
+/// Used by ``_assertLexicalLookup``.
 protocol LexicalAnnotation {
   associatedtype SyntaxReference: SyntaxProtocol, SyntaxHashable
   func findSyntaxFromToken(_ token: TokenSyntax, verbose: Bool, file: StaticString, line: UInt) -> SyntaxReference?
 }
 
+/// A ``LexicalAnnotation`` resolved by ``_assertLexicalLookup`` to include
+/// the target syntax and source-location information.
 struct ContextualizedAnnotation<Annotation: LexicalAnnotation> {
   let annotation: Annotation
   let syntax: Annotation.SyntaxReference
@@ -28,6 +32,8 @@ struct ContextualizedAnnotation<Annotation: LexicalAnnotation> {
   let line: UInt
 }
 
+/// A matcher asserts a particular expectation with access to the
+/// lexical information and references collected by `_assertLexicalLookup`.
 protocol LexicalMatcher {
   associatedtype Reference: LexicalAnnotation, Identifiable, CustomStringConvertible
   associatedtype Expectation: LexicalAnnotation
@@ -48,6 +54,8 @@ protocol LexicalMatcher {
 /// A source file annotated with references and expectations on those references.
 ///
 /// All annotations should be placed before the target token.
+///
+/// Look for examples in `assertTypeResolution` and related assertion methods.
 struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral, ExpressibleByStringInterpolation {
   enum Annotation {
     case reference(reference: Matcher.Reference)
@@ -353,478 +361,73 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
   }
 }
 
-/// Find the direct parent of the given token and cast it to the desired
-/// `Parent` syntax type.
-///
-/// Parameters:
-/// - annotationKindDescription: Helps make the casting-failure message more
-///   specific.
-func findDirectParent<Parent: SyntaxProtocol>(
-  from introducerToken: TokenSyntax,
-  ofType _: Parent.Type,
-  file: StaticString,
-  line: UInt,
-  annotationKindDescription: String? = nil
-) -> Parent? {
-  // Get parent
-  guard let rawParent = introducerToken.parent else {
-    XCTFail(
-      "Annotation lacks parent: Token '\(introducerToken.trimmedDescription)' has no parent node.",
-      file: file,
-      line: line
-    )
-    return nil
-  }
-
-  // Cast to right type
-  guard let parent = rawParent.as(Parent.self) else {
-    // Explains why the casting is necessary
-    let messageQualifier: String
-    if let annotationKindDescription {
-      messageQualifier = " for \(annotationKindDescription) annotations."
-    } else {
-      messageQualifier = ""
-    }
-
-    XCTFail(
-      "Invalid annotation placement: Token '\(introducerToken.trimmedDescription)' should have a \(Parent.self) parent\(messageQualifier).",
-      file: file,
-      line: line
-    )
-    return nil
-  }
-
-  return parent
-}
-
-func diffLexicalResults<Reference: LexicalAnnotation & Identifiable>(
-  expected: [ContextualizedAnnotation<Reference>],
-  actual: [ContextualizedAnnotation<Reference>],
-  failures: inout [LexicalMatcherExpectationFailure<Reference>]
-) {
-  // Convert to sets
-  let expectedMarkers = Set(expected.map(\.annotation.id))
-  let actualMarkers = Set(expected.map(\.annotation.id))
-
-  // Calculate differences
-  let missingReferences = expected.filter({ !actualMarkers.contains($0.annotation.id) })
-  if !missingReferences.isEmpty {
-    failures.append(.resultMissesReferences(missingReferences))
-  }
-  let addedReferences = actual.filter({ !expectedMarkers.contains($0.annotation.id) })
-  if !addedReferences.isEmpty {
-    failures.append(.resultMissesReferences(addedReferences))
-  }
-
-  // Check order (through markers)
-  if expected.map(\.annotation.id) != actual.map(\.annotation.id) {
-    failures.append(.invalidResultOrder(expected: expected, actual: actual))
-  }
-}
-
-struct TypeLookupMatcher: LexicalMatcher {
-  /// A type-lookup reference has a marker and the resolved qualified name.
-  /// A reference is tied to a `NominalTypeDeclSyntax`
-  struct Reference: LexicalAnnotation, Identifiable, CustomStringConvertible {
-    let marker: Character
-    let name: String
-
-    typealias SyntaxReference = NominalTypeDeclSyntax
-    func findSyntaxFromToken(
-      _ token: SwiftSyntax.TokenSyntax,
-      verbose: Bool,
-      file: StaticString,
-      line: UInt
-    ) -> NominalTypeDeclSyntax? {
-      findDirectParent(from: token, ofType: NominalTypeDeclSyntax.self, file: file, line: line)
-    }
-
-    var id: Character { marker }
-
-    var description: String { name }
-  }
-  struct TypeSyntaxOrExtension: SyntaxProtocol, SyntaxHashable {
-    private(set) var _syntaxNode: Syntax
-    init?(_ node: __shared some SyntaxProtocol) {
-      guard node.is(TypeSyntax.self) || node.is(ExtensionDeclSyntax.self) else { return nil }
-      _syntaxNode = Syntax(node)
-    }
-    static var structure: SyntaxNodeStructure {
-      SyntaxNodeStructure.choices([
-        .node(TypeSyntax.self),
-        .node(ExtensionDeclSyntax.self),
-      ])
-    }
-
-    // Always succeeding inits
-    init(_ node: __shared some TypeSyntaxProtocol) {
-      self = Syntax(node).cast(TypeSyntaxOrExtension.self)
-    }
-    init(_ node: __shared ExtensionDeclSyntax) {
-      self = Syntax(node).cast(TypeSyntaxOrExtension.self)
-    }
-  }
-  enum Expectation: LexicalAnnotation {
-    case syntaxResolution(Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>)
-    case extensionBinding(ExtensionBindingState)
-
-    typealias SyntaxReference = TypeSyntaxOrExtension
-
-    func findSyntaxFromToken(
-      _ token: TokenSyntax,
-      verbose: Bool,
-      file: StaticString,
-      line: UInt
-    ) -> TypeSyntaxOrExtension? {
-      switch self {
-      case .extensionBinding:
-        // Extensions should be annotated before 'extension' and the direct token
-        // parent should be ExtensionDeclSyntax
-        return findDirectParent(
-          from: token,
-          ofType: ExtensionDeclSyntax.self,
-          file: file,
-          line: line,
-          annotationKindDescription: "extension-binding"
-        ).map(TypeSyntaxOrExtension.init(_:))
-      case .syntaxResolution:
-        // Ensure the token's parent is a type syntax
-        guard let baseTypeSyntax = token.parent?.as(TypeSyntax.self) else {
-          XCTFail(
-            "Invalid type-syntax expectation placement: A qualified-name expectation should be placed right before the target type syntax (parent is '\(String(reflecting: token.parent?.kind))').",
-            file: file,
-            line: line
-          )
-          return nil
-        }
-
-        /// Find the head type-syntax (because for instance `any Encodable & Decodable`
-        /// contains the `Encodable & Decodable` nested type syntax)
-        func findHeadTypeSyntax(of typeSyntax: TypeSyntax) -> TypeSyntax {
-          // Cast the parent to type syntax, or return current type syntax
-          //
-          // Check for special-cases first (e.g., compositions)
-          if typeSyntax.parent?.is(CompositionTypeElementSyntax.self) == true,
-            let compositionSyntax = typeSyntax.parent?.parent?.parent?.as(CompositionTypeSyntax.self)
-          {
-            return findHeadTypeSyntax(of: TypeSyntax(compositionSyntax))
-          }
-          // General case
-          guard let parentTypeSyntax = typeSyntax.parent?.as(TypeSyntax.self) else { return typeSyntax }
-          // Find parent's head type syntax
-          return findHeadTypeSyntax(of: parentTypeSyntax)
-        }
-        let typeSyntax = findHeadTypeSyntax(of: baseTypeSyntax)
-
-        return TypeSyntaxOrExtension(typeSyntax)
-      }
-    }
-  }
-
-  let symbolTable: SymbolTable3
-  let moduleName: Identifier
-  let lookupFiles: [(String, SourceFileSyntax)]
-
-  func describeExpectationSyntax(_ syntax: TypeSyntaxOrExtension) -> String {
-    if let extensionDecl = syntax.as(ExtensionDeclSyntax.self) {
-      return extensionDecl._memberlessDescription
-    } else if let typeSyntax = syntax.as(TypeSyntax.self) {
-      return typeSyntax.trimmedDescription
-    } else {
-      fatalError(
-        "[SwiftLexicalLookup] Internal test error: Expected TypeSyntaxOrExtension to be either an ExtensionDeclSyntax or TypeSyntax."
+enum LexicalAssertions {
+  /// Find the direct parent of the given token and cast it to the desired
+  /// `Parent` syntax type.
+  ///
+  /// Parameters:
+  /// - annotationKindDescription: Helps make the casting-failure message more
+  ///   specific.
+  static func findDirectParent<Parent: SyntaxProtocol>(
+    from introducerToken: TokenSyntax,
+    ofType _: Parent.Type,
+    file: StaticString,
+    line: UInt,
+    annotationKindDescription: String? = nil
+  ) -> Parent? {
+    // Get parent
+    guard let rawParent = introducerToken.parent else {
+      XCTFail(
+        "Annotation lacks parent: Token '\(introducerToken.trimmedDescription)' has no parent node.",
+        file: file,
+        line: line
       )
+      return nil
     }
-  }
 
-  func assertExpectation(
-    expectation: ContextualizedAnnotation<Expectation>,
-    markersToReferences: [Character: ContextualizedAnnotation<Reference>],
-    syntaxToReferences: [NominalTypeDeclSyntax: ContextualizedAnnotation<Reference>],
-    verbose: Bool
-  ) -> [ExpectationFailure] {  //-> Set<Character> {
-    var typeQualifier = TypeQualifier(symbolTable: symbolTable, _verbose: verbose)
-
-    switch expectation.annotation {
-    case Expectation.syntaxResolution(let expectedResult):
-      guard let typeSyntax = expectation.syntax.as(TypeSyntax.self) else {
-        fatalError(
-          "[SwiftLexicalLookup] Internal test error: Expected syntax-resolution queries to find 'TypeSyntax' nodes, but got '\(expectation.syntax.kind)'."
-        )
-      }
-
-      // Print target syntax (to show the syntax kinds)
-      if verbose {
-        print("Target syntax parsed as:\n\(typeSyntax.debugDescription)\n")
-      }
-
-      // Perform the lookup
-      let lookupResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeQualifier.Failure>
-      do {
-        var memberDependencies = [ExtensionBindingResult.Dependency]()
-        lookupResult = typeQualifier.resolveSyntax(
-          typeSyntax: typeSyntax,
-          memberDependencies: &memberDependencies,
-          visitedTypeSyntax: []
-        )
-      }
-      return assertTypeSyntax(
-        expectedResult: expectedResult,
-        actualResult: lookupResult,
-        markersToReferences: markersToReferences,
-        syntaxToReferences: syntaxToReferences,
-        verbose: verbose
-      )
-    case Expectation.extensionBinding(let expectedState):
-      guard let extensionDecl = expectation.syntax.as(ExtensionDeclSyntax.self) else {
-        fatalError(
-          "[SwiftLexicalLookup] Internal test error: Expected syntax-resolution queries to find 'ExtensionDeclSyntax' nodes, but got '\(expectation.syntax.kind)'."
-        )
-      }
-
-      // Look up extended type if not already resolved
-      let actualState: ExtensionBindingState
-      // Try to get already-resolved state
-      if let existingState = symbolTable.extensionState[extensionDecl] {
-        actualState = existingState
+    // Cast to right type
+    guard let parent = rawParent.as(Parent.self) else {
+      // Explains why the casting is necessary
+      let messageQualifier: String
+      if let annotationKindDescription {
+        messageQualifier = " for \(annotationKindDescription) annotations."
       } else {
-        if verbose {
-          print("Extension `\(extensionDecl._memberlessDescription)` not already bound; initating binding.")
-        }
-
-        // Evaluate the extended type
-        var memberDependencies = [ExtensionBindingResult.Dependency]()
-        let lookupResult: Result<ResolvedNominalTypeReference, TypeQualifier.Failure> =
-          typeQualifier.resolveExtendedTypeSyntax(
-            extensionDecl: extensionDecl,
-            memberDependencies: &memberDependencies
-          )
-
-        // Diagnose type-resolution failures
-        let nominalReference: ResolvedNominalTypeReference
-        switch lookupResult {
-        case .success(let success):
-          nominalReference = success
-        case .failure(let failure):
-          XCTFail(
-            "Invalid extended type: Couldn't resolve extended type for given extension: \(failure.debugDescription)",
-            file: expectation.file,
-            line: expectation.line
-          )
-          return []
-        }
-
-        // Trigger binding and ensure we have a state
-        _ = typeQualifier.resolveNominalType(typeReference: nominalReference)
-        guard let producedState = symbolTable.extensionState[extensionDecl] else {
-          let availableExtensions = symbolTable.extensionState.keys.map(\._memberlessDescription)
-          XCTFail(
-            "No extension state: Couldn't find extension state even after nominal-type resolution; available extensions are: \(availableExtensions)",
-            file: expectation.file,
-            line: expectation.line
-          )
-          return []
-        }
-
-        actualState = producedState
+        messageQualifier = ""
       }
 
-      // FIXME: Do proper printing
-      let expectedStateDescription = String(reflecting: expectedState)
-      let actualStateDescription = String(reflecting: actualState)
-      guard expectedStateDescription == actualStateDescription else {
-        return [
-          ExpectationFailure.other(
-            failure: "Extension-state mismatch. Expected: \(expectedStateDescription)\nGot: \(actualStateDescription)"
-          )
-        ]
-      }
-      return []
+      XCTFail(
+        "Invalid annotation placement: Token '\(introducerToken.trimmedDescription)' should have a \(Parent.self) parent\(messageQualifier).",
+        file: file,
+        line: line
+      )
+      return nil
     }
 
+    return parent
   }
 
-  /// Helper for converting a qualified type name to a string description
-  func describeQualifiedName(_ name: QualifiedTypeName) -> String {
-    name._describe(describeFileID: { fileID in
-      // Get name of first matching id
-      for (fileName, file) in lookupFiles {
-        guard file.id == fileID else { continue }
-        return fileName
-      }
-      return fileID.hashValue.description
-    })
-  }
+  static func diffLexicalResults<Reference: LexicalAnnotation & Identifiable>(
+    expected: [ContextualizedAnnotation<Reference>],
+    actual: [ContextualizedAnnotation<Reference>],
+    failures: inout [LexicalMatcherExpectationFailure<Reference>]
+  ) {
+    // Convert to sets
+    let expectedMarkers = Set(expected.map(\.annotation.id))
+    let actualMarkers = Set(expected.map(\.annotation.id))
 
-  func assertTypeSyntax(
-    expectedResult: Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>,
-    actualResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeQualifier.Failure>,
-    markersToReferences: [Character: ContextualizedAnnotation<Reference>],
-    syntaxToReferences: [NominalTypeDeclSyntax: ContextualizedAnnotation<Reference>],
-    verbose: Bool,
-  ) -> [ExpectationFailure] {  // -> Set<Character> {
-    var failures = [ExpectationFailure]()
-    switch (expectedResult, actualResult) {
-    case (.success(.memberResults(let markers)), .success(.memberResults(let nominalTypes))):
-      // Find the referenced markers
-      let expectations: [ContextualizedAnnotation<Reference>] = markers.compactMap({ marker in
-        guard let targetReference = markersToReferences[marker] else {
-          failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
-          return nil
-        }
-        return targetReference
-      })
-
-      let results: [ContextualizedAnnotation<Reference>] = nominalTypes.compactMap({ nominalType in
-        guard let targetReference = syntaxToReferences[nominalType.mainDecl] else {
-          failures.append(
-            ExpectationFailure.resultReferencesUnmarkedSyntax(
-              syntaxDescription: nominalType.qualifiedName.debugDescription
-            )
-          )
-          return nil
-        }
-        return targetReference
-      })
-
-      // Don't continue if markers are undefined
-      guard !failures.isEmpty else { break }
-
-      // Diff if markers check out
-      diffLexicalResults(expected: expectations, actual: results, failures: &failures)
-    case (.success(let expectedLookupResult), .success(let actualLookupResult)):
-      // We handled members above, so map to `Bool` to facilitate the comparison.
-      if expectedLookupResult.mapMembers({ _ in false }) != actualLookupResult.mapMembers({ _ in false }) {
-        failures.append(
-          ExpectationFailure.other(
-            failure:
-              "Resolved-type mismatch. Expected: \(expectedLookupResult)\nGot: \(actualLookupResult)"
-          )
-        )
-      }
-    case (.failure(let expectedFailure), .failure(let actualFailure)):
-      // Describe the expected failure
-      func markerToQualifiedName(marker: Character) -> String {
-        guard let nominalDecl = markersToReferences[marker] else {
-          failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
-          return "_"
-        }
-        return nominalDecl.annotation.name
-      }
-      let expectedFailureDescription = expectedFailure._describeDebug(
-        resolveMininalNominal: markerToQualifiedName,
-        resolveExtendedNominal: markerToQualifiedName
-      )
-
-      // Describe the lookup failure
-      let actualFailureDescription = actualFailure._describeDebug(
-        resolveMininalNominal: { describeQualifiedName($0.qualifiedName) },
-        resolveExtendedNominal: { describeQualifiedName($0.qualifiedName) }
-      )
-
-      // Check equality
-      if expectedFailureDescription != actualFailureDescription {
-        failures.append(
-          ExpectationFailure.other(
-            failure: "Failure mismatch. Expected: '\(expectedFailureDescription)'. Got: '\(actualFailureDescription)'"
-          )
-        )
-      }
-    default:
-      failures.append(
-        ExpectationFailure.other(
-          failure:
-            "Lookup didn't succeed/fail as expected. Expected '\(expectedResult)'. Got: '\(actualResult)'"
-        )
-      )
+    // Calculate differences
+    let missingReferences = expected.filter({ !actualMarkers.contains($0.annotation.id) })
+    if !missingReferences.isEmpty {
+      failures.append(.resultMissesReferences(missingReferences))
     }
-    return failures
-  }
-}
+    let addedReferences = actual.filter({ !expectedMarkers.contains($0.annotation.id) })
+    if !addedReferences.isEmpty {
+      failures.append(.resultMissesReferences(addedReferences))
+    }
 
-func assertTypeResolution(
-  _ lookupSources: KeyValuePairs<String, LexicalLookupSource<TypeLookupMatcher>>,
-  moduleName: StaticString = "MyModule",
-  configuredRegions: ConfiguredRegions? = nil,
-  file: StaticString = #file,
-  line: UInt = #line,
-  assertSymbolTableState: (borrowing SymbolTable3) -> Void = { _ in },
-  verbose: Bool = false,
-) {
-  // Convert data formats
-  let moduleIdentifier = Identifier(canonicalName: moduleName)
-  // Map files to name & file syntax
-  let lookupFiles: [(String, SourceFileSyntax)] = lookupSources.map({ fileName, lookupSource in
-    (fileName, lookupSource.fileSyntax)
-  })
-  // Test cases should give us unique file names
-  let uniquedLookupFiles = Dictionary(uniqueKeysWithValues: lookupFiles)
-
-  _assertLexicalLookup(
-    lookupSources,
-    matcher: TypeLookupMatcher(
-      symbolTable: SymbolTable3(
-        moduleToSources: [moduleIdentifier: uniquedLookupFiles],
-        configuredRegions: configuredRegions
-      ),
-      moduleName: moduleIdentifier,
-      lookupFiles: lookupFiles
-    ),
-    file: file,
-    line: line
-  )
-}
-
-extension LexicalLookupSource.Interpolation where Matcher == TypeLookupMatcher {
-  mutating func appendInterpolation(
-    _ marker: Character,
-    name: String,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) {
-    append(reference: TypeLookupMatcher.Reference(marker: marker, name: name), file: file, line: line)
-  }
-  mutating func appendInterpolation(
-    extensionState: ExtensionBindingState,
-    name: String,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) {
-    appendInterpolation(expects: [TypeLookupMatcher.Expectation.extensionBinding(extensionState)])
-  }
-  mutating func appendInterpolation(
-    result: Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) {
-    appendInterpolation(expects: [TypeLookupMatcher.Expectation.syntaxResolution(result)])
-  }
-  mutating func appendInterpolation(
-    failure: TypeQualifierFailure<Character, Character>,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) {
-    appendInterpolation(result: Result.failure(failure), file: file, line: line)
-  }
-  mutating func appendInterpolation(
-    type: MemberLookupResult<Character>,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) {
-    appendInterpolation(result: Result.success(type), file: file, line: line)
-  }
-  mutating func appendInterpolation(
-    nominals markers: [Character],
-    file: StaticString = #file,
-    line: UInt = #line
-  ) {
-    appendInterpolation(type: MemberLookupResult.memberResults(markers), file: file, line: line)
-  }
-  mutating func appendInterpolation(
-    nominal marker: Character,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) {
-    appendInterpolation(nominals: [marker], file: file, line: line)
+    // Check order (through markers)
+    if expected.map(\.annotation.id) != actual.map(\.annotation.id) {
+      failures.append(.invalidResultOrder(expected: expected, actual: actual))
+    }
   }
 }
