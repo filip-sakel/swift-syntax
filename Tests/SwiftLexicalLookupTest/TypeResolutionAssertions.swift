@@ -30,7 +30,7 @@ struct TypeResolutionMatcher {
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
   enum Expectation {
     case syntaxResolution(Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>)
-    case extensionBinding(ExtensionBindingState)
+    case extensionBinding(ExtensionBindingState<String>)
   }
 
   let symbolTable: SymbolTable3
@@ -203,11 +203,11 @@ extension TypeResolutionMatcher: LexicalMatcher {
   /// `assertExpectation` forwards extensions here.
   private func _assertExtensionBinding(
     extensionDecl: ExtensionDeclSyntax,
-    expectedState: ExtensionBindingState,
+    expectedState: ExtensionBindingState<String>,
     verbose: Bool
   ) -> [ExpectationFailure] {
     // Look up extended type if not already resolved
-    let actualState: ExtensionBindingState
+    let actualState: SymbolTable3.ExtensionBindingState
     // Try to get already-resolved state
     if let existingState = symbolTable.extensionState[extensionDecl] {
       actualState = existingState
@@ -254,13 +254,13 @@ extension TypeResolutionMatcher: LexicalMatcher {
       actualState = producedState
     }
 
-    // FIXME: Do proper printing
-    let expectedStateDescription = String(reflecting: expectedState)
-    let actualStateDescription = String(reflecting: actualState)
+    // We use strings for the expected qualified name; just print that name
+    let expectedStateDescription = expectedState._describe(describeTypeName: \.self)
+    let actualStateDescription = actualState._describe(describeTypeName: _describeQualifiedName(_:))
     guard expectedStateDescription == actualStateDescription else {
       return [
         ExpectationFailure.other(
-          failure: "Extension-state mismatch. Expected: \(expectedStateDescription)\nGot: \(actualStateDescription)"
+          failure: "Extension-state mismatch.\nExpected: \(expectedStateDescription)\nGot: \(actualStateDescription)"
         )
       ]
     }
@@ -418,7 +418,7 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     append(reference: TypeResolutionMatcher.Reference(marker: marker, name: name), file: file, line: line)
   }
   mutating func appendInterpolation(
-    extensionState: ExtensionBindingState,
+    extensionState: ExtensionBindingState<String>,
     file: StaticString = #file,
     line: UInt = #line
   ) {

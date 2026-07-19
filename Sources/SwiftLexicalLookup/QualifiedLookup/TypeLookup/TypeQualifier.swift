@@ -1155,7 +1155,7 @@ extension TypeQualifierFailure {
       // First, group the decls by extension
       let dependency = ExtensionBindingResult.Dependency(
         baseTypeName: baseType.qualifiedName,
-        typeMember: typeMember.name,
+        typeMemberName: typeMember.name,
         resolvedDecls: memberTypeDecls
       )
       log("Recording dependency: \(dependency.debugDescription)")
@@ -1390,7 +1390,8 @@ extension TypeQualifierFailure {
             // // Old errors:
             // // .boundToUnresolvedName: We checked for this at the start of this function
             case .nonRegisteredSyntaxRoot, .cannotFixNonInvalidated, .cannotBindInvalidated, .alreadyResolved,
-              .invalidReregistration, .bindingBeforeFixingInvalidatedExtensions:
+              .invalidReregistration, .bindingBeforeFixingInvalidatedExtensions,
+              .invalidDependenceOnNonResolvedExtension:
               fatalError(
                 "[SwiftLexicalLookup] Internal error: Unexpected failure when attempting to bind extension `\(extensionDecl._memberlessDescription)`: \(failure); extension: \(extensionDecl.trimmedDescription)"
               )
@@ -1457,7 +1458,8 @@ extension TypeQualifierFailure {
               // .cannotBindInvalidated: We requested fixing; not binding.
               // .bindingBeforeFixingInvalidatedExtensions: We're fixing invalidated extensions, so this shouldn't happen.
               case .nonRegisteredSyntaxRoot, .cannotFixNonInvalidated, .cannotBindInvalidated, .alreadyResolved,
-                .invalidReregistration, .bindingBeforeFixingInvalidatedExtensions:
+                .invalidReregistration, .bindingBeforeFixingInvalidatedExtensions,
+                .invalidDependenceOnNonResolvedExtension:
                 fatalError(
                   "[SwiftLexicalLookup] Internal error: Unexpected failure when attempting to fix invalidated extension `\(invalidatedExtensionDecl._memberlessDescription)`: \(failure); extension: \(extensionDecl.trimmedDescription)"
                 )

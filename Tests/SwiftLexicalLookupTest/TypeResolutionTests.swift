@@ -22,13 +22,30 @@ extension TypeLikeSyntax: ExpressibleByStringLiteral {
     self.init(TypeSyntax(stringLiteral: value))
   }
 }
-// Convenience `String` initializer for `TypeDeclSyntax`; will
-// crash at runtime if given a non `TypeDeclSyntax`.
-extension TypeDeclSyntax: ExpressibleByStringLiteral {
-  public init(stringLiteral value: StringLiteralType) {
-    self = Syntax(DeclSyntax(stringLiteral: value)).cast(TypeDeclSyntax.self)
+
+// Convenience initializer
+extension ExtensionBindingCycle: ExpressibleByArrayLiteral where TypeName == String {
+  public init(arrayLiteral elements: (extension: String, base: StaticString, member: StaticString)...) {
+    self.init(
+      dependencyChain: elements.map({ (extensionDecl, baseTypeName, dependentMemberName) in
+        let decl = DeclSyntax(stringLiteral: extensionDecl)
+        return ExtensionBindingCycle.Dependency(
+          extensionDecl: decl.cast(ExtensionDeclSyntax.self),
+          resolvedType: baseTypeName.description,
+          dependentMember: Identifier(canonicalName: dependentMemberName)
+        )
+      })
+    )
   }
 }
+
+// // Convenience `String` initializer for `TypeDeclSyntax`; will
+// // crash at runtime if given a non `TypeDeclSyntax`.
+// extension TypeDeclSyntax: ExpressibleByStringLiteral {
+//   public init(stringLiteral value: StringLiteralType) {
+//     self = Syntax(DeclSyntax(stringLiteral: value)).cast(TypeDeclSyntax.self)
+//   }
+// }
 
 extension ResolvedNominalTypeReference {
   fileprivate static func _mockMarkerType(_ kind: SyntaxKind, marker: Character) -> ResolvedNominalTypeReference? {
@@ -416,7 +433,9 @@ final class TestQualifiedTypeName: XCTestCase {
       "MyFile.swift": """
       \("🟥", name: "_(MyFile.swift)::A")
       struct A {}
-      \(extensionState: .cannotDependOnIntroducedMembers(typeMembers: ["struct A {}"]))
+      \(extensionState: .cannotDependOnIntroducedMembers(cycle: [
+        (extension: "extension A { typealias B = A }", base: "_(MyFile.swift)::A", member: "struct A {}")
+      ]))
       extension A.B { struct A {} }
       extension A { typealias B = A }
       """ as LexicalLookupSource
