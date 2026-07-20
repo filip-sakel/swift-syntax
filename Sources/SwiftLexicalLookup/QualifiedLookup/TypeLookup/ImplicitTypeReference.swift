@@ -19,6 +19,12 @@ import SwiftSyntax
   let name: Identifier
   let introducingSyntax: TypeLikeSyntax
 
+  internal init(module: Identifier? = nil, name: Identifier, introducingSyntax: TypeLikeSyntax) {
+    self.module = module
+    self.name = name
+    self.introducingSyntax = introducingSyntax
+  }
+
   @_spi(_QualifiedLookupTests) public init(from sourceComponent: PartiallyResolvedTypeIdentifier.Component) {
     self.module = sourceComponent.module
     self.name = sourceComponent.name

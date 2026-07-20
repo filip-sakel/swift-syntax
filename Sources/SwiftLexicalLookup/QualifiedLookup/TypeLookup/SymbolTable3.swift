@@ -287,7 +287,7 @@ import SwiftSyntax
 }
 
 extension DeclGroupSyntax {
-  fileprivate func _groupTypeMembers(configuredRegions: ConfiguredRegions?) -> [Identifier: [TypeDeclSyntax]] {
+  internal func _groupTypeMembers(configuredRegions: ConfiguredRegions?) -> [Identifier: [TypeDeclSyntax]] {
     var result = [Identifier: [TypeDeclSyntax]]()
     visitDirectMembers(
       configuredRegions: configuredRegions,
@@ -298,32 +298,6 @@ extension DeclGroupSyntax {
       }
     )
     return result
-  }
-}
-
-// MARK: - Extension Dependencies
-
-@_spi(_QualifiedLookupTests) public struct ExtensionBindingCycle<TypeName: Sendable>: Sendable {
-  // TODO: Look into whether we can use the existing ExtensionBindingResult/Dependency type
-  @_spi(_QualifiedLookupTests) public struct Dependency: Sendable {
-    let extensionDecl: ExtensionDeclSyntax
-    let resolvedType: TypeName
-    let dependentMember: Identifier
-
-    @_spi(_QualifiedLookupTests) public init(
-      extensionDecl: ExtensionDeclSyntax,
-      resolvedType: TypeName,
-      dependentMember: Identifier
-    ) {
-      self.extensionDecl = extensionDecl
-      self.resolvedType = resolvedType
-      self.dependentMember = dependentMember
-    }
-  }
-  let dependencyChain: [Dependency]
-
-  @_spi(_QualifiedLookupTests) public init(dependencyChain: [ExtensionBindingCycle.Dependency]) {
-    self.dependencyChain = dependencyChain
   }
 }
 
@@ -386,8 +360,8 @@ extension SymbolTable3 {
           dependencyChain: dependencyChain.map({ (extensionDecl, dependency) in
             return ExtensionBindingCycle.Dependency(
               extensionDecl: extensionDecl,
-              resolvedType: currentExtendedType,
-              dependentMember: dependency.typeMemberName
+              extendedTypeName: currentExtendedType,
+              member: dependency.typeMemberName
             )
           })
         )
@@ -968,11 +942,11 @@ extension ExtensionBindingResult.Dependency: CustomDebugStringConvertible {
 //   }
 // }
 
-extension ExtensionBindingCycle.Dependency {
+extension QualifiedLookupDependency {
   @_spi(_QualifiedLookupTests) public func _describe(
     describeTypeName: (TypeName) -> String
   ) -> String {
-    "Dependency(extensionDecl: \(extensionDecl._memberlessDescription), resolvedType: \(describeTypeName(resolvedType)), dependentMember: \(dependentMember.name))"
+    "Dependency(extensionDecl: \(extensionDecl._memberlessDescription), resolvedType: \(describeTypeName(extendedTypeName)), dependentMember: \(member.name))"
   }
 }
 
