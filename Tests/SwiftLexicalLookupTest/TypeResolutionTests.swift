@@ -31,8 +31,9 @@ extension ExtensionBindingCycle: ExpressibleByArrayLiteral where TypeName == Str
         let decl = DeclSyntax(stringLiteral: extensionDecl)
         return ExtensionBindingCycle.Dependency(
           extensionDecl: decl.cast(ExtensionDeclSyntax.self),
-          resolvedType: baseTypeName.description,
-          dependentMember: Identifier(canonicalName: dependentMemberName)
+          extendedTypeName: baseTypeName.description,
+          member: Identifier(canonicalName: dependentMemberName),
+          typeDecls: []
         )
       })
     )

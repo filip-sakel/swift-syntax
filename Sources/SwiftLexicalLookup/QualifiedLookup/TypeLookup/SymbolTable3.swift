@@ -361,7 +361,8 @@ extension SymbolTable3 {
             return ExtensionBindingCycle.Dependency(
               extensionDecl: extensionDecl,
               extendedTypeName: currentExtendedType,
-              member: dependency.typeMemberName
+              member: dependency.typeMemberName,
+              typeDecls: []
             )
           })
         )

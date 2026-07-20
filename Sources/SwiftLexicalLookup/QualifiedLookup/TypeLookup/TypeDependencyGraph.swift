@@ -269,9 +269,11 @@ extension TypeDependencyGraph {
     // }
     let sortedDeclGroups = fileDecls + otherInternalDecls + externalDecls
 
-    var typeDecls = [TypeDeclSyntax]()
+    var typeDecls: [TypeDeclSyntax] = sortedDeclGroups.flatMap({ declGroup in
+      declGroup.typeMap.typeMembersToDecls[memberTypeName]?.decls.map(\.typeDeclSyntax) ?? []
+    })
 
-    // Process each decl group
+    // Add the dependencies
     for declGroup in sortedDeclGroups {
       // Add the matching decls
       let introducedDecls = declGroup.typeMap.typeMembersToDecls[memberTypeName]?.decls.map(\.typeDeclSyntax) ?? []
@@ -285,7 +287,8 @@ extension TypeDependencyGraph {
         QualifiedLookupDependency(
           extensionDecl: introducingExtension.node,
           extendedTypeName: baseTypeName,
-          member: memberTypeName
+          member: memberTypeName,
+          typeDecls: typeDecls
         )
       )
     }
@@ -511,7 +514,7 @@ extension TypeDependencyGraph {
             extensionDecl: transitiveDependency.dependencyExtension,
             extendedTypeName: transitiveDependencyExtendedType,
             member: transitiveDependency.member.name,
-            typeDecls:
+            typeDecls: transitiveDependency.member.decls.compactMap(\.typeDeclSyntax)
           )
         )
       }
@@ -530,6 +533,7 @@ extension TypeDependencyGraph {
       }
       currentDependencyChain.removeLast()
     }
+    return nil
   }
 
   // private func _findCyclicalDependencyImplementation(
