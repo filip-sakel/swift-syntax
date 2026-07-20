@@ -166,8 +166,9 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   ///    ```
   case invalidBaseType(Self)
 
-  /// Name lookup found invalid type redeclarations so references to that
-  /// type name are ambiguous.
+  /// Name lookup found multiple type redeclarations so references to that
+  /// type name are ambiguous; not necessarily an error, we just defer to
+  /// the type checker for disambiguation.
   ///
   /// For example:
   ///   typealias A = Bool

@@ -362,7 +362,7 @@ extension NominalType {
   /// - Postcondition: Each extension declaration or the main declaration is
   ///   guaranteed to appear just once.
   func findMemberTypes(
-    component: ImplicitTypeReferenceComponent,
+    component: ImplicitTypeReferenceComponent?,
     lookupPosition: (file: SourceFileSyntax, position: AbsolutePosition),
     importedModules: [Identifier],
     moduleMap: [SourceFileSyntax: Identifier],
@@ -380,13 +380,10 @@ extension NominalType {
           if _verbose {
             print("[Direct lookup on \(qualifiedName)] Visiting decl: \(decl.trimmedDescription)")
           }
-          // Get only types with matching names
-          guard
-            let typeDecl = decl.as(TypeDeclSyntax.self),
-            typeDecl.name.identifier == component.name
-          else {
-            return
-          }
+          // Get only types
+          guard let typeDecl = decl.as(TypeDeclSyntax.self) else { return }
+          // Ensure names match
+          if let component, typeDecl.name.identifier != component.name { return }
 
           groupTypeMembers.append(typeDecl)
         }
@@ -400,7 +397,7 @@ extension NominalType {
     }
 
     let result = _visitAccessibleDeclGroups(
-      selectedModule: component.module,
+      selectedModule: component?.module,
       lookupPosition: lookupPosition,
       importedModules: importedModules,
       moduleMap: moduleMap,

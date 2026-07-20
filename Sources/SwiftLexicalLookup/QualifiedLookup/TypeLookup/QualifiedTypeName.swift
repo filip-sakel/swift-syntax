@@ -65,6 +65,21 @@ import SwiftSyntax
     self.components = components
   }
 
+  var baseComponent: Component {
+    // Asserted at init
+    components.first!
+  }
+  /// If this is not a top-level type, break it up into a base and member.
+  var baseAndMembers: (base: QualifiedTypeNameGlobalType, member: Component)? {
+    var baseComponents = components
+    // We have at least one component according to initializer precondition
+    let member = baseComponents.popLast()!
+    guard let base = QualifiedTypeNameGlobalType(components: baseComponents) else {
+      return nil
+    }
+    return (base, member)
+  }
+
   public func addingComponents(_ tailComponents: [Component]) -> QualifiedTypeNameGlobalType {
     // Shouldn't return `nil` because `self.components` should be nonempty
     guard let newType = QualifiedTypeNameGlobalType(components: components + tailComponents) else {
@@ -115,6 +130,23 @@ public indirect enum QualifiedTypeNameNestedType: Sendable, Hashable, CustomDebu
     )
   }
 
+  /// If this is not a top-level type, break it up into a base and member.
+  var baseAndMembers: (base: QualifiedTypeNameNestedType, member: Identifier)? {
+    switch self {
+    case .base:
+      return nil
+    case .member(let base, let member):
+      return (base, member)
+    }
+    // var baseComponents = _components
+    // // We have at least one component according to initializer precondition
+    // let member = baseComponents.popLast()!
+    // guard let base = QualifiedTypeNameGlobalType(components: baseComponents) else {
+    //   return nil
+    // }
+    // return (base, member)
+  }
+
   public var debugDescription: String {
     _components.map(\.name).joined(separator: ".")
   }
@@ -133,6 +165,17 @@ public indirect enum QualifiedTypeNameNestedType: Sendable, Hashable, CustomDebu
       return globalType._describe(describeFileID: describeFileID)
     case .nestedScope(let scope, let nestedType):
       return "\(scope.id.hashValue)>\(nestedType.debugDescription)"
+    }
+  }
+
+  var baseAndMemberName: (base: QualifiedTypeName, memberName: Identifier)? {
+    switch self {
+    case .topLevel(let topLevelName):
+      guard let (topLevelBaseName, memberComponent) = topLevelName.baseAndMembers else { return nil }
+      return (QualifiedTypeName.topLevel(topLevelBaseName), memberComponent.name)
+    case .nestedScope(let scope, let nestedName):
+      guard let (nestedBaseName, memberName) = nestedName.baseAndMembers else { return nil }
+      return (QualifiedTypeName.nestedScope(scope: scope, type: nestedBaseName), memberName)
     }
   }
 
