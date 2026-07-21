@@ -120,11 +120,7 @@ public struct TypeDependencyGraph {
     /// Invariants: count >= 1; sorted by position in increasing order
     private var _mainDecls: [MappedDeclGroup<NominalTypeDeclSyntax>]
 
-    // TODO: Change to dict of ExtensionDeclSyntax -> TypeMap
-    private(set) var boundExtensions: [SymbolTable3.Module: [MappedDeclGroup<ExtensionDeclSyntax>]]
-    #if DEBUG
-    private var _boundExtensionsSet: Set<ExtensionDeclSyntax>
-    #endif
+    private(set) var boundExtensions: [SymbolTable3.Module: [SourceFileRoot<ExtensionDeclSyntax>: TypeTable]]
 
     /// FIXME: Track dependencies so we invalidate when the underlying extension is invalidated
     ///
@@ -138,9 +134,6 @@ public struct TypeDependencyGraph {
     init(mainDecl: MappedDeclGroup<NominalTypeDeclSyntax>) {
       self._mainDecls = [mainDecl]
       self.boundExtensions = [:]
-      #if DEBUG
-      self._boundExtensionsSet = []
-      #endif
       self.dependents = []
     }
 
@@ -155,37 +148,25 @@ public struct TypeDependencyGraph {
       _ mappedExtensionDecl: MappedDeclGroup<ExtensionDeclSyntax>,
       module: SymbolTable3.Module
     ) -> NominalType? {
-      // TODO: Remove
-      //
-      // var copy = self
-      // guard copy.boundExtensions[module, default: []].insert(mappedExtensionDecl).inserted else { return nil }
-      // copy.version &+= 1
-      // return copy
-      // var copy = self
-
       var copy = self
-      #if DEBUG
-      guard copy._boundExtensionsSet.insert(mappedExtensionDecl.node).inserted else { return nil }
-      #endif
+      let oldValue = copy.boundExtensions[module, default: [:]].updateValue(
+        mappedExtensionDecl.typeMap,
+        forKey: mappedExtensionDecl.declGroup
+      )
+      guard oldValue == nil else { return nil }
       copy.version &+= 1
-      copy.boundExtensions[module, default: []].append(mappedExtensionDecl)
       return copy
     }
 
     fileprivate consuming func _unbindingExtension(
-      _ boundExtension: ExtensionDeclSyntax,
+      _ boundExtension: SourceFileRoot<ExtensionDeclSyntax>,
       module: SymbolTable3.Module
     ) -> (newNominal: NominalType, extensionTypeTable: TypeTable)? {
       var copy = self
-      // FIXME: Clean up set
-      fatalError("TODO")
-      copy._boundExtensionsSet.remove(boundExtension)
-      var typeTable: TypeTable? = nil
-      // copy.boundExtensions[module, default: []].removeAll(where: {
-      //   if $0.node == boundExtension { return  }
-      // })
+      let extensionTypeTable = copy.boundExtensions[module, default: [:]].removeValue(forKey: boundExtension)
+      guard let extensionTypeTable else { return nil }
       copy.version &+= 1
-      // return (newNominal: copy, typeTable)
+      return (newNominal: copy, extensionTypeTable)
     }
 
     /// Adds the given type as a redeclaration if not already added.
@@ -305,8 +286,8 @@ extension TypeDependencyGraph {
     // Add main decl and bound extensions
     organizeDeclGroup(registeredType.mainDecl.erased())
     for (_, extensionDecls) in registeredType.boundExtensions {
-      for extensionDecl in extensionDecls {
-        organizeDeclGroup(extensionDecl.erased())
+      for (extensionDecl, typeTable) in extensionDecls {
+        organizeDeclGroup(MappedDeclGroup(declGroup: extensionDecl, typeMap: typeTable).erased())
       }
     }
 
@@ -695,7 +676,7 @@ extension TypeDependencyGraph {
       }
       guard
         let (newInvalidatedExtensionType, invalidatedExtensionTypeTable) = invalidatedExtensionType._unbindingExtension(
-          invalidatedExtension.node,
+          invalidatedExtension,
           module: invalidatedExtensionModule
         )
       else {
