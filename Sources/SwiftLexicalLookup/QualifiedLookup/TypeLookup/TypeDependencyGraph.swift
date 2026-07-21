@@ -13,24 +13,6 @@
 import SwiftIfConfig
 import SwiftSyntax
 
-struct MappedDeclGroup<DeclGroup: DeclGroupSyntax & SyntaxHashable>: Hashable {
-  let declGroup: SourceFileRoot<DeclGroup>
-  let typeMap: TypeDependencyGraph.TypeTable
-
-  var node: DeclGroup { declGroup.node }
-  var fileRoot: SourceFileSyntax { declGroup.fileRoot }
-
-  func erased() -> MappedDeclGroup<DeclGroupSyntaxType> {
-    // We're erasing so the source-file root will be retained
-    MappedDeclGroup<_>(declGroup: SourceFileRoot(DeclGroupSyntaxType(declGroup))!, typeMap: typeMap)
-  }
-
-  static func == (a: Self, b: Self) -> Bool { a.declGroup == b.declGroup }
-  func hash(into hasher: inout Hasher) {
-    hasher.combine(declGroup)
-  }
-}
-
 typealias IntroducingExtensionOrMainDecl = ExtensionDeclSyntax?
 @_spi(_QualifiedLookupTests) public struct TypeMemberDecl: Hashable, Sendable {
   let introducingExtensionOrMainDecl: ExtensionDeclSyntax?
@@ -362,13 +344,7 @@ extension TypeDependencyGraph {
     }
 
     // Map out the type
-    let mappedMainDecl = MappedDeclGroup(
-      declGroup: mainDecl,
-      typeMap: TypeTable(
-        from: mainDecl.node._groupTypeMembers(configuredRegions: configuredRegions),
-        introducedIn: nil
-      )
-    )
+    let mappedMainDecl = MappedDeclGroup.from(declGroup: mainDecl, configuredRegions: configuredRegions)
 
     // If this type is new, just register and return
     // TODO: Test following, e.g. struct A { struct B {} }; extension A { struct B {} }
@@ -383,76 +359,7 @@ extension TypeDependencyGraph {
     namesToTypes[qualifiedName] = typeWithRedeclaration
 
     return .success(NominalTypeRef(qualifiedName: qualifiedName, nominal: typeWithRedeclaration))
-
-    // TODO: Delete assertion and collection for `typeMembers` approach
-    //
-    // // Assert the parent contains us
-    // if let (baseTypeName, memberName) = qualifiedName.baseAndMemberName {
-    //   // Ensure we're in the parent's type table
-    //   let typeDecl = TypeDeclSyntax(mainDecl)
-    //   assert(
-    //     namesToTypes[baseTypeName]?.typeMembers.typeMembersToDecls[memberName]?.decls.contains(where: {
-    //       $0.typeDeclSyntax == typeDecl
-    //     }) != nil,
-    //     "[SwiftLexicalLookup] Internal error: Registering \(qualifiedName) requires that we be registered in the parent's type-lookup table."
-    //   )
-    // }
-    //
-    // // Gather the children
-    //
-    // // TODO: configuredRegions
-    //
-    // var mainDeclTypeMembers = [Identifier: TypeMember]()
-    // mainDecl.visitDirectMembers(
-    //   configuredRegions: nil,
-    //   visit: { valueDecl in
-    //     // Get only the types
-    //     guard let typeDecl = valueDecl.as(TypeDeclSyntax.self) else { return }
-    //     guard let typeName = Identifier(validating: typeDecl.name) else { return }
-    //     let newMemberDecl = TypeMemberDecl(introducingExtensionOrMainDecl: nil, typeDeclSyntax: typeDecl)
-    //     // Save
-    //     mainDeclTypeMembers[typeName, default: TypeMember(name: typeName, decls: [])].decls.append(
-    //       newMemberDecl
-    //     )
-    //   }
-    // )
   }
-}
-
-// MARK: Extension Binding
-
-extension TypeDependencyGraph.NominalType {
-  // For `typeMembers` approach:
-  //
-  // consuming fileprivate func _removingDeclGroupMembers(
-  //   declGroup: DeclGroupSyntaxType
-  // ) -> TypeDependencyGraph.ExtendedType {
-  //   var copy = self
-  //   // TODO: configuredRegions
-  //   declGroup.visitDirectMembers(
-  //     configuredRegions: nil,
-  //     visit: { [] valueDecl in
-  //       // Only types with valid name identifiers
-  //       guard
-  //         let typeDecl = valueDecl.as(TypeDeclSyntax.self),
-  //         let typeDeclName = Identifier(validating: typeDecl.name)
-  //       else { return }
-  //
-  //       // The type member must already be in the type table (because of eager loading)
-  //       guard let typeMember = copy.typeMembers.typeMembersToDecls[typeDeclName] else {
-  //         fatalError(
-  //           "[SwiftLexicalLookup] Internal error: Didn't find declaraion group's \(declGroup._memberlessDescription) member \(typeDeclName.name) in extended type state."
-  //         )
-  //       }
-  //
-  //       // Remove the type
-  //       var newTypeMember = typeMember
-  //       newTypeMember.decls.removeAll(where: { $0.typeDeclSyntax == typeDecl })
-  //       copy.typeMembers.typeMembersToDecls[typeDeclName] = newTypeMember
-  //     }
-  //   )
-  //   return copy
-  // }
 }
 
 // MARK: - Extension Dependencies
@@ -516,9 +423,6 @@ extension TypeDependencyGraph {
     // Check each dependency for conflicts
     for dependency in extensionDependencies {
       // Check dependency itself
-      //
-      // TODO: Remove
-      // let extensionMembers = TypeTable(from: currentExtensionDecl._groupTypeMembers(configuredRegions: nil), introducedIn: currentExtensionDecl)
       guard !introducedTypeTable.collidesWithDependency(dependency, whenBoundTo: currentExtendedType) else {
         // Note: We return immediately and diagnose only one cycle for simplicity since
         // extension-binding cycles are rare.
@@ -581,133 +485,9 @@ extension TypeDependencyGraph {
     }
     return nil
   }
-
-  // private func _findCyclicalDependencyImplementation(
-  //   baseTypeName: QualifiedTypeName,
-  //   typeMembers: [Identifier: [TypeDeclSyntax]],
-  //   currentExtensionDecl: ExtensionDeclSyntax,
-  //   currentExtendedType: QualifiedTypeName,
-  //   currentDependencies: [QualifiedLookupDependency<QualifiedTypeName>],
-  //   dependencyChain: inout [QualifiedLookupDependency<QualifiedTypeName>]
-  // ) -> SymbolTable3.ExtensionBindingCycle? {
-  //   #if DEBUG
-  //   guard !dependencyChain.contains(where: { $0.extensionDecl != currentExtensionDecl }) else {
-  //     fatalError(
-  //       "[SwiftLexicalLookup] Internal error: Unexpectedly found cycle in existing extension-dependency graph."
-  //     )
-  //   }
-  //   #endif
-  //
-  //   // Check current dependencies
-  //   for dependency in currentDependencies {
-  //     // // Get the extension state
-  //     // guard let dependencyExtensionState = extensionDeclsToState[dependency.extensionDecl] else {
-  //     //   fatalError(
-  //     //     "[SwiftLexicalLookup] Internal error: Extension \(currentExtensionDecl._memberlessDescription) lists \(dependency.dependentMember) as a dependency, but the dependency extension \(dependency.extensionDecl._memberlessDescription) isn't in the graph."
-  //     //   )
-  //     // }
-  //     // // Get the resolved type
-  //     // guard case .success(let dependencyExtendedType) = dependencyExtensionState.resolvedType else {
-  //     //   // Shouldn't be possible to depend on members of an unbound extension,
-  //     //   // because unbound extension don't introduce type members.
-  //     //   fatalError(
-  //     //     "[SwiftLexicalLookup] Internal error: Extension \(currentExtensionDecl._memberlessDescription) unexpectedly depends on unbound extension \(dependency.extensionDecl._memberlessDescription)."
-  //     //   )
-  //     // }
-  //     // Get the extension state
-  //
-  //     // Check if any type member collides with this dependency
-  //     for (typeMemberName, _) in typeMembers {
-  //       // Collisions require the same name and type
-  //       guard
-  //         dependency.extendedTypeName == baseTypeName,
-  //         dependency.member == typeMemberName
-  //       else {
-  //         continue
-  //       }
-  //
-  //       // This dependency collided; return
-  //       dependencyChain.append(dependency)
-  //       return ExtensionBindingCycle(dependencyChain: dependencyChain)
-  //     }
-  //
-  //     // Get extension state to retrieve transitive dependencies
-  //     guard let dependencyExtensionState = extensionsToState[dependency.extensionDecl] else {
-  //       // TODO
-  //       fatalError("TODO")
-  //     }
-  //
-  //     // Find recursive dependencies through depth-first search
-  //     for (transitiveDependencyExtensionOrMainDecl, transitiveDependencyMember) in dependencyExtensionState.dependencies {
-  //       // Skip if it's the main declaration
-  //       // TODO: Should main decls also have dependencies, e.g.?
-  //       //    struct A {
-  //       //      typealias B = A
-  //       //    }
-  //       //    extension A.B {
-  //       //      struct C {
-  //       //        typealias D = C
-  //       //      } // does `A.C` depend on
-  //       //    }
-  //       //    extension A.C.D {}
-  //       //    // Depends on `(MyFile.swift)::A>A == []`, `(MyFile.swift)::A>C == [struct C]`, `(MyFile.swift)::A.(MyFile.swift)::C>D`
-  //       //    extension A { struct A {} }
-  //       //    // Invalidates `extension A.B` -> changes `struct C` -> rewrites `QualifiedTypeName`
-  //       //  -> Add test but I think the current system handles this
-  //       //     TODO: Make sure there's no corner case
-  //       guard let dependencyExtension = transitiveDependencyExtensionOrMainDecl else { continue }
-  //       // Get the extension state
-  //       guard let dependencyExtensionState = extensionsToState[dependencyExtension] else {
-  //         fatalError(
-  //           "[SwiftLexicalLookup] Internal error: Extension \(currentExtensionDecl._memberlessDescription) lists \(dependency) as a dependency, but the dependency extension isn't in the graph."
-  //         )
-  //       }
-  //       // Get the resolved type
-  //       guard case .success(let dependencyExtendedType) = dependencyExtensionState.resolvedType else {
-  //         // Shouldn't be possible to depend on members of an unbound extension,
-  //         // because unbound extension don't introduce type members.
-  //         fatalError(
-  //           "[SwiftLexicalLookup] Internal error: Extension \(currentExtensionDecl._memberlessDescription) unexpectedly depends on unbound extension \(dependencyExtension._memberlessDescription)."
-  //         )
-  //       }
-  //
-  //       // Update the dependency chain and check for transitive cycles
-  //       dependencyChain.append(
-  //         ExtensionBindingCycle<QualifiedTypeName>.Dependency(
-  //           extensionDecl: currentExtensionDecl,
-  //           baseTypeName: currentExtendedType,
-  //           dependentMember: dependencyTypeMember.name
-  //         )
-  //       )
-  //       // Note: We stop at the first cycle. Though, there could theoretically
-  //       // be multiple cycles that we should diagnose in one step, this error
-  //       // is quite rare. Hence, we stop early for simplicity and speed.
-  //       if let cycle = _findCyclicalDependencyImplementation(
-  //         baseTypeName: baseTypeName,
-  //         typeMembers: typeMembers,
-  //         currentExtensionDecl: dependencyExtension,
-  //         currentExtendedType: dependencyExtendedType,
-  //         // FIXME: Continue here
-  //         currentDependencies: dependencyExtensionState.dependencies.map({ (, transitiveDependency) in
-  //           QualifiedLookupDependency(
-  //             extensionDecl: dependencyExtension,
-  //             baseTypeName: dependencyExtendedType,
-  //             dependentMember: transitiveDependency
-  //           )
-  //         }),
-  //         dependencyChain: &dependencyChain
-  //       ) {
-  //         return cycle
-  //       }
-  //       // Restore the original dependency chain for the next extensions
-  //       dependencyChain.removeLast()
-  //     }
-  //   }
-  //
-  //   // No cycle found
-  //   return nil
-  // }
 }
+
+// MARK: Extension Binding
 
 extension TypeDependencyGraph {
   typealias InvalidatedExtensions = [ExtensionState]
@@ -732,10 +512,7 @@ extension TypeDependencyGraph {
     }
 
     // Prepare to store extension state
-    let typeTable = TypeTable(
-      from: extensionDecl.node._groupTypeMembers(configuredRegions: configuredRegions),
-      introducedIn: extensionDecl.node
-    )
+    let mappedExtensionDecl = MappedDeclGroup.from(declGroup: extensionDecl, configuredRegions: configuredRegions)
     let dependencies = dependencyTracker.dependencies.map(ExtensionDependency.init(_from:))
 
     // Get the bound type name; if the result failed, save with dependencies (might get fixed later)
@@ -769,7 +546,7 @@ extension TypeDependencyGraph {
     let cycleResult: Result<ExtensionBindingCycle<QualifiedTypeName>, CycleDetectionFailure>? =
       _findCyclicalDependencyImplementation(
         boundTypeName: extendedTypeName,
-        introducedTypeTable: typeTable,
+        introducedTypeTable: mappedExtensionDecl.typeMap,
         currentExtensionDecl: extensionDecl.node,
         currentExtendedType: extendedTypeName,
         extensionDependencies: dependencyTracker.dependencies,
@@ -879,7 +656,6 @@ extension TypeDependencyGraph {
       resolvedType: Result.success(extendedTypeName)
     )
     // Bind to type
-    let mappedExtensionDecl = MappedDeclGroup(declGroup: extensionDecl, typeMap: typeTable)
     guard let newExtendedType = extendedType._bindingExtension(mappedExtensionDecl, module: extensionDeclModule) else {
       fatalError(
         "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl.node._memberlessDescription) has no existing state but is already bound to \(extendedType)."

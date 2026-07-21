@@ -200,21 +200,6 @@ import SwiftSyntax
   }()
 }
 
-extension DeclGroupSyntax {
-  internal func _groupTypeMembers(configuredRegions: ConfiguredRegions?) -> [Identifier: [TypeDeclSyntax]] {
-    var result = [Identifier: [TypeDeclSyntax]]()
-    visitDirectMembers(
-      configuredRegions: configuredRegions,
-      visit: { valueDecl in
-        guard let typeDecl = valueDecl.as(TypeDeclSyntax.self) else { return }
-        guard let typeIdentifier = Identifier(validating: typeDecl.name) else { return }
-        result[typeIdentifier, default: []].append(typeDecl)
-      }
-    )
-    return result
-  }
-}
-
 // MARK: Cycle Detection
 
 extension SymbolTable3 {
