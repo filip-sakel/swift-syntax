@@ -31,6 +31,49 @@ struct MappedDeclGroup<DeclGroup: DeclGroupSyntax & SyntaxHashable>: Hashable {
   }
 }
 
+typealias IntroducingExtensionOrMainDecl = ExtensionDeclSyntax?
+@_spi(_QualifiedLookupTests) public struct TypeMemberDecl: Hashable, Sendable {
+  let introducingExtensionOrMainDecl: ExtensionDeclSyntax?
+  let typeDeclSyntax: TypeDeclSyntax
+}
+@_spi(_QualifiedLookupTests) public struct TypeMember: Hashable, Sendable {
+  /// Parent type or `nil` for top-level in file scope (top-level type)
+  /// or other sequential scope (e.g. non-nested local decl)
+  // let parentType: QualifiedTypeName
+  let name: Identifier
+  fileprivate(set) var decls: [TypeMemberDecl]
+}
+
+@_spi(_QualifiedLookupTests) public struct ExtensionDependency: Sendable {
+  let dependencyExtension: ExtensionDeclSyntax, member: TypeMember
+}
+
+@_spi(_QualifiedLookupTests) public enum GenericBindingFailure<TypeName: Sendable>: Error {
+  case typeResolutionFailure(TypeQualifier.Failure)
+  case cannotFormCycle(ExtensionBindingCycle<TypeName>)
+}
+@_spi(_QualifiedLookupTests) public typealias BindingFailure = GenericBindingFailure<QualifiedTypeName>
+
+@_spi(_QualifiedLookupTests) public struct GenericExtensionState<TypeName: Sendable>: Sendable {
+  // TODO: Assumes main decls don't introduce dependencies (see discussion below)
+  // Invariant: The extensions listed must be valid and successfully bound to a type in `extensionsToState`
+  @_spi(_QualifiedLookupTests) public fileprivate(set) var dependencies: [ExtensionDependency],
+    // TODO: Remove this property
+    extensionDecl: ExtensionDeclSyntax,
+    resolvedType: Result<TypeName, GenericBindingFailure<TypeName>>
+
+  @_spi(_QualifiedLookupTests) public init(
+    dependencies: [ExtensionDependency],
+    extensionDecl: ExtensionDeclSyntax,
+    resolvedType: Result<TypeName, GenericBindingFailure<TypeName>>
+  ) {
+    self.dependencies = dependencies
+    self.extensionDecl = extensionDecl
+    self.resolvedType = resolvedType
+  }
+}
+@_spi(_QualifiedLookupTests) public typealias ExtensionState = GenericExtensionState<QualifiedTypeName>
+
 // TODO: Consider optimization where we don't issue module-lookup requests when looking
 //       for type members of internal types (external modules can't depend on internal types)
 // TODO: Think about making lookup lazy (what are the actual places where we *need* to find
@@ -38,18 +81,6 @@ struct MappedDeclGroup<DeclGroup: DeclGroupSyntax & SyntaxHashable>: Hashable {
 /// A directed acyclic graph where types are nodes and extensions are edges.
 @_spi(_QualifiedLookupTests)
 public struct TypeDependencyGraph {
-  typealias IntroducingExtensionOrMainDecl = ExtensionDeclSyntax?
-  struct TypeMemberDecl: Hashable {
-    let introducingExtensionOrMainDecl: ExtensionDeclSyntax?
-    let typeDeclSyntax: TypeDeclSyntax
-  }
-  struct TypeMember: Hashable {
-    /// Parent type or `nil` for top-level in file scope (top-level type)
-    /// or other sequential scope (e.g. non-nested local decl)
-    // let parentType: QualifiedTypeName
-    let name: Identifier
-    fileprivate(set) var decls: [TypeMemberDecl]
-  }
 
   struct TypeTable: Hashable {
     fileprivate(set) var typeMembersToDecls: [Identifier: TypeMember]
@@ -82,21 +113,7 @@ public struct TypeDependencyGraph {
     //   })
     // }
   }
-  enum BindingFailure: Error {
-    case typeResolutionFailure(TypeQualifier.Failure)
-    case cannotFormCycle(ExtensionBindingCycle<QualifiedTypeName>)
-  }
-  struct ExtensionDependency {
-    let dependencyExtension: ExtensionDeclSyntax, member: TypeMember
-  }
-  @_spi(_QualifiedLookupTests) public struct ExtensionState: Sendable {
-    // TODO: Assumes main decls don't introduce dependencies (see discussion below)
-    // Invariant: The extensions listed must be valid and successfully bound to a type in `extensionsToState`
-    fileprivate(set) var dependencies: [ExtensionDependency],
-      extensionDecl: ExtensionDeclSyntax,
-      resolvedType: Result<QualifiedTypeName, BindingFailure>
-  }
-  struct NominalType {
+  @_spi(_QualifiedLookupTests) public struct NominalType {
     /// Keeps track of mutations to assert data didn't change between calls
     fileprivate private(set) var version = 0
 
@@ -107,6 +124,8 @@ public struct TypeDependencyGraph {
     private var _boundExtensionsSet: Set<ExtensionDeclSyntax>
     #endif
 
+    /// FIXME: Track dependencies so we invalidate when the underlying extension is invalidated
+    ///
     /// Extensions dependending on qualified lookup on this extended type
     fileprivate(set) var dependents: [(ExtensionDeclSyntax, TypeMember)]
 
@@ -164,10 +183,10 @@ public struct TypeDependencyGraph {
   }
 
   /// Updates when we register nominal types and bind extensions
-  var namesToTypes: [QualifiedTypeName: NominalType]
+  @_spi(_QualifiedLookupTests) public var namesToTypes: [QualifiedTypeName: NominalType]
   // /// Updates when we register nominal types and bind extensions
   // var parentsToTypeMembers: [QualifiedTypeName: TypeTable]
-  var extensionsToState: [ExtensionDeclSyntax: ExtensionState]
+  @_spi(_QualifiedLookupTests) public var extensionsToState: [ExtensionDeclSyntax: ExtensionState]
 
   init() {
     namesToTypes = [:]
@@ -177,32 +196,37 @@ public struct TypeDependencyGraph {
 
 // MARK: Lookup
 
-@_spi(_QualifiedLookupTests) public struct DependencyTracker {
+@_spi(_QualifiedLookupTests) public struct GenericDependencyTracker<TypeName: Sendable> {
   /// Note: We don't guarantee that dependencies are unique.
-  var dependencies: [QualifiedLookupDependency<QualifiedTypeName>] = []
-}
+  var dependencies: [QualifiedLookupDependency<TypeName>]
 
-extension TypeDependencyGraph.TypeMember {
+  @_spi(_QualifiedLookupTests) public init(dependencies: [QualifiedLookupDependency<TypeName>] = []) {
+    self.dependencies = dependencies
+  }
+}
+@_spi(_QualifiedLookupTests) public typealias DependencyTracker = GenericDependencyTracker<QualifiedTypeName>
+
+extension TypeMember {
   fileprivate init(_from dependency: QualifiedLookupDependency<QualifiedTypeName>) {
     self.init(
       name: dependency.member,
       decls: dependency.typeDecls.map({
-        TypeDependencyGraph.TypeMemberDecl(introducingExtensionOrMainDecl: dependency.extensionDecl, typeDeclSyntax: $0)
+        TypeMemberDecl(introducingExtensionOrMainDecl: dependency.extensionDecl, typeDeclSyntax: $0)
       })
     )
   }
 }
 
-extension TypeDependencyGraph.ExtensionDependency {
+extension ExtensionDependency {
   fileprivate init(_from dependency: QualifiedLookupDependency<QualifiedTypeName>) {
     self.dependencyExtension = dependency.extensionDecl
-    self.member = TypeDependencyGraph.TypeMember(_from: dependency)
+    self.member = TypeMember(_from: dependency)
   }
 }
 
 // TODO: Should we also have symbol-table _version
 @_spi(_QualifiedLookupTests) public struct NominalTypeRef: Hashable, Sendable {
-  let qualifiedName: QualifiedTypeName
+  @_spi(_QualifiedLookupTests) public let qualifiedName: QualifiedTypeName
   fileprivate let version: Int
 
   init(qualifiedName: QualifiedTypeName, nominal: __shared TypeDependencyGraph.NominalType) {
@@ -881,6 +905,52 @@ extension QualifiedLookupDependency: CustomDebugStringConvertible where TypeName
       extensionDecl: \(extensionDecl._memberlessDescription), extendedTypeName: \(extendedTypeName.debugDescription)
       member: \(member.name),
       typeDecls: \(typeDecls.map(\.trimmedDescription)))
+    """
+  }
+}
+
+extension ExtensionDependency: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    "ExtensionDependency(dependencyExtension: \(dependencyExtension._memberlessDescription), member: \(member.name))"
+  }
+}
+
+extension GenericBindingFailure {
+  @_spi(_QualifiedLookupTests) public func _describe(
+    describeTypeName: (TypeName) -> String
+  ) -> String {
+    switch self {
+    case .typeResolutionFailure(let failure):
+      return failure.debugDescription
+    case .cannotFormCycle(let cycle):
+      return cycle._describe(describeTypeName: describeTypeName)
+    }
+  }
+}
+
+extension Result {
+  @_spi(_QualifiedLookupTests) public func _describe(
+    describeTypeName: (Success) -> String
+  ) -> String
+  where Failure == GenericBindingFailure<Success> {
+    switch self {
+    case .success(let success):
+      return "Result.success(\(describeTypeName(success)))"
+    case .failure(let failure):
+      return "Result.failure(\(failure._describe(describeTypeName: describeTypeName)))"
+    }
+  }
+}
+
+extension GenericExtensionState {
+  @_spi(_QualifiedLookupTests) public func _describe(
+    describeTypeName: (TypeName) -> String
+  ) -> String {
+    """
+    GenericExtensionState(
+      dependencies: \(dependencies.map(\.debugDescription)),
+      resolvedType: \(resolvedType._describe(describeTypeName: describeTypeName))
+    )
     """
   }
 }

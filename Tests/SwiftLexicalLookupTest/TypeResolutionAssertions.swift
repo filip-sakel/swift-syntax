@@ -30,7 +30,7 @@ struct TypeResolutionMatcher {
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
   enum Expectation {
     case syntaxResolution(Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>)
-    case extensionBinding(ExtensionBindingState<String>)
+    case extensionBinding(GenericExtensionState<String>)
   }
 
   let symbolTable: SymbolTable3
@@ -203,13 +203,13 @@ extension TypeResolutionMatcher: LexicalMatcher {
   /// `assertExpectation` forwards extensions here.
   private func _assertExtensionBinding(
     extensionDecl: ExtensionDeclSyntax,
-    expectedState: ExtensionBindingState<String>,
+    expectedState: GenericExtensionState<String>,
     verbose: Bool
   ) -> [ExpectationFailure] {
     // Look up extended type if not already resolved
-    let actualState: SymbolTable3.ExtensionBindingState
+    let actualState: ExtensionState
     // Try to get already-resolved state
-    if let existingState = symbolTable.extensionState[extensionDecl] {
+    if let existingState = symbolTable.dependencyGraph.extensionsToState[extensionDecl] {
       actualState = existingState
     } else {
       if verbose {
@@ -218,7 +218,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Evaluate the extended type
       var typeQualifier = TypeQualifier(symbolTable: symbolTable, _verbose: verbose)
-      var memberDependencies = [ExtensionBindingResult.Dependency]()
+      var memberDependencies = DependencyTracker()
       let lookupResult: Result<ResolvedNominalTypeReference, TypeQualifier.Failure> =
         typeQualifier.resolveExtendedTypeSyntax(
           extensionDecl: extensionDecl,
@@ -241,8 +241,8 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Trigger binding and ensure we have a state
       _ = typeQualifier.resolveNominalType(typeReference: nominalReference)
-      guard let producedState = symbolTable.extensionState[extensionDecl] else {
-        let availableExtensions = symbolTable.extensionState.keys.map(\._memberlessDescription)
+      guard let producedState = symbolTable.dependencyGraph.extensionsToState[extensionDecl] else {
+        let availableExtensions = symbolTable.dependencyGraph.extensionsToState.keys.map(\._memberlessDescription)
         return [
           ExpectationFailure.other(
             failure:
@@ -284,7 +284,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
     var typeQualifier = TypeQualifier(symbolTable: symbolTable, _verbose: verbose)
     let actualResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeQualifier.Failure>
     do {
-      var memberDependencies = [ExtensionBindingResult.Dependency]()
+      var memberDependencies = DependencyTracker()
       actualResult = typeQualifier.resolveSyntax(
         typeSyntax: typeSyntax,
         memberDependencies: &memberDependencies,
@@ -418,7 +418,7 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     append(reference: TypeResolutionMatcher.Reference(marker: marker, name: name), file: file, line: line)
   }
   mutating func appendInterpolation(
-    extensionState: ExtensionBindingState<String>,
+    extensionState: GenericExtensionState<String>,
     file: StaticString = #file,
     line: UInt = #line
   ) {

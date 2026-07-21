@@ -24,10 +24,13 @@ extension TypeLikeSyntax: ExpressibleByStringLiteral {
 }
 
 // Convenience initializer
-extension ExtensionBindingCycle: ExpressibleByArrayLiteral where TypeName == String {
-  public init(arrayLiteral elements: (extension: String, base: StaticString, member: StaticString)...) {
-    self.init(
-      dependencyChain: elements.map({ (extensionDecl, baseTypeName, dependentMemberName) in
+
+extension GenericExtensionState where TypeName == String {
+  static func invalidCycle(
+    _ cycleElements: [(extension: String, base: StaticString, member: StaticString)]
+  ) -> GenericExtensionState {
+    let cycle = ExtensionBindingCycle<String>(
+      dependencyChain: cycleElements.map({ (extensionDecl, baseTypeName, dependentMemberName) in
         let decl = DeclSyntax(stringLiteral: extensionDecl)
         return ExtensionBindingCycle.Dependency(
           extensionDecl: decl.cast(ExtensionDeclSyntax.self),
@@ -36,6 +39,13 @@ extension ExtensionBindingCycle: ExpressibleByArrayLiteral where TypeName == Str
           typeDecls: []
         )
       })
+    )
+    return GenericExtensionState(
+      // TODO: Test dependencies
+      dependencies: [],
+      // Won't be checked
+      extensionDecl: DeclSyntax(stringLiteral: "extension").cast(ExtensionDeclSyntax.self),
+      resolvedType: Result.failure(GenericBindingFailure.cannotFormCycle(cycle))
     )
   }
 }
@@ -434,7 +444,7 @@ final class TestQualifiedTypeName: XCTestCase {
       "MyFile.swift": """
       \("🟥", name: "_(MyFile.swift)::A")
       struct A {}
-      \(extensionState: .cannotDependOnIntroducedMembers(cycle: [
+      \(extensionState: .invalidCycle([
         (extension: "extension A { typealias B = A }", base: "_(MyFile.swift)::A", member: "struct A {}")
       ]))
       extension A.B { struct A {} }
