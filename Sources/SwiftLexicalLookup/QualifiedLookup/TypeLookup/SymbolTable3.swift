@@ -477,7 +477,8 @@ extension SymbolTable3 {
       isUpdatingInvalidating: isFixingInvalidating,
       to: result,
       dependencyTracker: dependencies,
-      configuredRegions: configuredRegions
+      configuredRegions: configuredRegions,
+      moduleMap: moduleMap
     )
     switch admissionResult {
     case .success(let success):
