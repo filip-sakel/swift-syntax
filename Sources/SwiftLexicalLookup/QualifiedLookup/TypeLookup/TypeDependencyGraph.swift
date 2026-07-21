@@ -168,10 +168,11 @@ public struct TypeDependencyGraph {
       return copy
     }
 
-    func addingRedeclaration(_ mainDecl: MappedDeclGroup<NominalTypeDeclSyntax>) -> NominalType? {
+    /// Adds the given type as a redeclaration if not already added.
+    func addingRedeclaration(_ mainDecl: MappedDeclGroup<NominalTypeDeclSyntax>) -> NominalType {
       // This check takes linear time w.r.t. `_mainDecls`; however, we don't
       // expect to have many redeclarations for the same type.
-      guard !_mainDecls.contains(mainDecl) else { return nil }
+      guard !_mainDecls.contains(mainDecl) else { return self }
 
       var copy = self
       copy.version &+= 1
@@ -342,10 +343,12 @@ extension TypeDependencyGraph {
 
 extension TypeDependencyGraph {
   enum NominalRegistrationFailure: Error {
-    case unexpectedReregistration(existingMainDecl: NominalTypeDeclSyntax)
+    // case unexpectedReregistration(existingMainDecl: NominalTypeDeclSyntax)
     case parentNotRegistered(parentName: QualifiedTypeName)
   }
 
+  /// Registers the given nominal-type reference or return the
+  /// existing reference.
   mutating func registerNominalTypeReference(
     qualifiedName: QualifiedTypeName,
     mainDecl: SourceFileRoot<NominalTypeDeclSyntax>,
@@ -375,10 +378,8 @@ extension TypeDependencyGraph {
       return .success(NominalTypeRef(qualifiedName: qualifiedName, nominal: freshNominal))
     }
 
-    // Ensures we don't have duplicate redeclaration (i.e. we can't register the same syntax node twice)
-    guard let typeWithRedeclaration = existingType.addingRedeclaration(mappedMainDecl) else {
-      return .failure(NominalRegistrationFailure.unexpectedReregistration(existingMainDecl: mainDecl.node))
-    }
+    // Add the redeclaration (or ignore if the decl is already added)
+    let typeWithRedeclaration = existingType.addingRedeclaration(mappedMainDecl)
     namesToTypes[qualifiedName] = typeWithRedeclaration
 
     return .success(NominalTypeRef(qualifiedName: qualifiedName, nominal: typeWithRedeclaration))
@@ -927,6 +928,11 @@ extension GenericBindingFailure {
     }
   }
 }
+extension GenericBindingFailure: CustomDebugStringConvertible where TypeName == QualifiedTypeName {
+  public var debugDescription: String {
+    _describe(describeTypeName: \.debugDescription)
+  }
+}
 
 extension Result {
   @_spi(_QualifiedLookupTests) public func _describe(
@@ -952,5 +958,10 @@ extension GenericExtensionState {
       resolvedType: \(resolvedType._describe(describeTypeName: describeTypeName))
     )
     """
+  }
+}
+extension GenericExtensionState: CustomDebugStringConvertible where TypeName == QualifiedTypeName {
+  public var debugDescription: String {
+    _describe(describeTypeName: \.debugDescription)
   }
 }

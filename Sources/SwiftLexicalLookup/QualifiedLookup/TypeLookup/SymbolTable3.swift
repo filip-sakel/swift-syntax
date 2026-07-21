@@ -486,14 +486,23 @@ extension SymbolTable3 {
     else {
       return .failure(ExtensionBindingFailure.nonRegisteredSyntaxRoot)
     }
-    return dependencyGraph._admitExtension(
+    let admissionResult = dependencyGraph._admitExtension(
       registeredExtension,
       extensionDeclModule: module,
       isUpdatingInvalidating: isFixingInvalidating,
       to: result,
       dependencyTracker: dependencies,
       configuredRegions: configuredRegions
-    ).mapError(ExtensionBindingFailure.admissionFailure)
+    )
+    switch admissionResult {
+    case .success(let success):
+      // If successfully bound, remove from `unresolvedExtensions`
+      unresolvedExtensions[registeredExtension.fileRoot]?.remove(extensionDecl)
+
+      return .success(success)
+    case .failure(let admissionFailure):
+      return .failure(ExtensionBindingFailure.admissionFailure(admissionFailure))
+    }
     // // Get file and module
     // guard
     //   let sourceFile = extensionDecl.root.as(SourceFileSyntax.self),

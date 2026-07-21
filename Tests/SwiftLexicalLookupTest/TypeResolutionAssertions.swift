@@ -422,14 +422,18 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    appendInterpolation(expects: [TypeResolutionMatcher.Expectation.extensionBinding(extensionState)])
+    appendInterpolation(
+      expects: [TypeResolutionMatcher.Expectation.extensionBinding(extensionState)],
+      file: file,
+      line: line
+    )
   }
   mutating func appendInterpolation(
     result: Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>,
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    appendInterpolation(expects: [TypeResolutionMatcher.Expectation.syntaxResolution(result)])
+    appendInterpolation(expects: [TypeResolutionMatcher.Expectation.syntaxResolution(result)], file: file, line: line)
   }
   mutating func appendInterpolation(
     failure: TypeQualifierFailure<Character, Character>,

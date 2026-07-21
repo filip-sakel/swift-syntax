@@ -1262,14 +1262,16 @@ extension TypeQualifierFailure {
     switch currentNominalResult {
     case .success(let success):
       currentNominal = success
-    case .failure(.unexpectedReregistration(existingMainDecl: _)):
-      fatalError(
-        "[SwiftLexicalLookup] Internal error: Unexpectedly found nominal type `\(typeReference.qualifiedName)` registered under a different main declaration."
-      )
     case .failure(.parentNotRegistered(let parentName)):
       fatalError(
         "[SwiftLexicalLookup] Internal error: Tried to register \(typeReference.qualifiedName.debugDescription) but the parent \(parentName.debugDescription) is unexpectedly unregistered.."
       )
+    // TODO: Remove old failure
+    //
+    // case .failure(.unexpectedReregistration(existingMainDecl: _)):
+    //   fatalError(
+    //     "[SwiftLexicalLookup] Internal error: Unexpectedly found nominal type `\(typeReference.qualifiedName)` registered under a different main declaration."
+    //   )
     }
 
     // Skip extension binding for local declarations.
