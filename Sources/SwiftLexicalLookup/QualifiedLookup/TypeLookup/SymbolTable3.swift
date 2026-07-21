@@ -139,20 +139,6 @@ import SwiftSyntax
   // var dependentExtensionsStack: [PartiallyResolvedTypeIdentifier.Component: [ExtensionDeclSyntax]]
 }
 
-// extension Collection where Element == ExtensionBindingResult.Dependency {
-//   fileprivate func _firstMatchingTypeMembers(
-//     resolvedTypeName: QualifiedTypeName,
-//     typeMembers: [Identifier: [TypeDeclSyntax]]
-//   ) -> (ExtensionBindingResult.Dependency, [TypeDeclSyntax])? {
-//     for dependency in self {
-//       guard dependency.baseTypeName == resolvedTypeName else { continue }
-//       guard let matchingType = typeMembers[dependency.typeMember] else { continue }
-//       return (dependency, matchingType)
-//     }
-//     return nil
-//   }
-// }
-
 @_spi(_QualifiedLookup) public enum ExtensionBindingState<TypeName: Sendable>: Sendable {
   /// Resolved to the given result
   case resolved(ExtensionBindingResult)
@@ -169,80 +155,9 @@ import SwiftSyntax
   case cannotDependOnIntroducedMembers(cycle: ExtensionBindingCycle<TypeName>)
 }
 
-// @_spi(_QualifiedLookup) public enum TypeSyntaxResolutionState {
-//   /// Indicates we started resolving this type syntax; helps us catch cycles.
-//   case startedResolving
-//   /// A cycle was detected.
-//   ///
-//   /// Two examples:
-//   /// 1.Type aliases:
-//   ///   typealias A = B
-//   ///   typealias B = A
-//   ///
-//   /// 2.Nested type aliases:
-//   ///   struct One { typealias A = Two.B }
-//   ///   struct Two { typealias B = One.A }
-//   case detectedCycle(cyclingSyntax: [TypeSyntax])
-//
-//   /// We resolved the given type syntax.
-//   ///
-//   /// If successful, we have a function type, tuple type,
-//   /// a composition of nominal types, or a single nominal type.
-//   ///
-//   /// There are multiple causes of failure.
-//   case resolved(
-//     Result<MemberLookupResult<QualifiedTypeName>, TypeQualifier.Failure>
-//   )
-// }
-// @_spi(_QualifiedLookup) public enum TypeResolutionState {
-//   /// Contains the
-//   case resolved(NominalType)
-//
-//   /// If we resolved to a single nominal type, we can bind extensions and update
-//   /// the resolved type.
-//   ///
-//   /// Note that extensions cannot be resolved independently, so we need to
-//   /// keep track of extensions whose extended-syntax resolution depends on
-//   /// this type. Here's an example:
-//   ///   struct A {}
-//   ///   extension A.Inner {}
-//   ///   extension A { typealias Inner = A }
-//   /// In this example, we can't resolve `A.Inner` directly since it requires
-//   /// looking up the type `Inner` on `A`, which means `A` we have to bind
-//   /// all available extensions first. Through this example, we see why even
-//   /// seemingly unrelated extensions may be necessary to obtain an extended
-//   /// nominal type.
-//   ///
-//   /// Further, note that dependent extensions can depend on other dependent
-//   /// extensions (which eventually depend on a non-dependent extension). E.g.:
-//   ///   struct A {}
-//   ///   extension A.Inner {} // Depends on `A` having an `Inner` type member
-//   ///   extension A.Outer { struct Inner {} } // Depends on `A` having an `Outer` type member
-//   ///   extension A { typealias Outer = A } // Non-dependent extension
-//   /// Say we want to get the extended nominal type of `A`; we have to bind these
-//   /// three potential extensions. First, `A.Inner` expects a type member `Inner`;
-//   /// the main declaration doesn't give us that yet. So we check the next extension,
-//   /// but `A.Outer` depends on a type member `Outer`; we keep going. Finally, the
-//   /// last extension has no dependencies so we get a type `Outer`. Hence, we can
-//   /// make progress on `A.Outer` and resolve it, giving us `A.Inner`. Finally,
-//   /// we resolve `A.Inner` and don't bind it since the type is unrelated.
-//   ///
-//   /// Important: As we bind dependent extensions, we assume the members we found
-//   /// are unique. However,
-//   ///
-//   case bindingPotentialExtensions(
-//     oldVersion: NominalType,
-//     current: NominalType,
-//     forSyntax: TypeSyntax,
-//     potentialExtensions: [ExtensionDeclSyntax],
-//   )
-//   // /// The remaining extensions we need to bind
-//   // var possibleExtensionQueue: [ExtensionDeclSyntax]
-//   // /// Extensions we were able to successfully bind
-//   // var currentlyBou§ndExtensions: [ExtensionDeclSyntax: QualifiedTypeName]
-// }
 @_spi(_QualifiedLookup) public final class SymbolTable3 {
-  @_spi(_QualifiedLookupTests) public typealias ExtensionBindingState = SwiftLexicalLookup.ExtensionBindingState<
+  @_spi(_QualifiedLookupTests)
+  public typealias ExtensionBindingState = SwiftLexicalLookup.ExtensionBindingState<
     QualifiedTypeName
   >
 
@@ -250,11 +165,9 @@ import SwiftSyntax
   @_spi(_QualifiedLookupTests) public let moduleToSources: [Module: [String: SourceFileSyntax]]
   let configuredRegions: ConfiguredRegions?
 
-  // internal var typeSyntaxState: [TypeSyntax: TypeSyntaxResolutionState] = [:]
-  // internal var typeState: [QualifiedTypeName: TypeResolutionState] = [:]
-  internal private(set) var typeState: [QualifiedTypeName: NominalType] = [:]
-  @_spi(_QualifiedLookupTests) public private(set) var extensionState: [ExtensionDeclSyntax: ExtensionBindingState] =
-    [:]
+  // internal private(set) var typeState: [QualifiedTypeName: NominalType] = [:]
+  // @_spi(_QualifiedLookupTests) public private(set) var extensionState: [ExtensionDeclSyntax: ExtensionBindingState] =
+  //   [:]
   @_spi(_QualifiedLookupTests) public private(set) lazy var unresolvedExtensions:
     [SourceFileSyntax: OrderedSet<ExtensionDeclSyntax>] = {
       var result = [SourceFileSyntax: OrderedSet<ExtensionDeclSyntax>]()
@@ -266,6 +179,7 @@ import SwiftSyntax
       }
       return result
     }()
+  @_spi(_QualifiedLookupTests) public private(set) var dependencyGraph = TypeDependencyGraph()
 
   public init(
     moduleToSources: [Module: [String: SourceFileSyntax]],
@@ -301,126 +215,129 @@ extension DeclGroupSyntax {
   }
 }
 
+// MARK: Cycle Detection
+
 extension SymbolTable3 {
   typealias ExtensionBindingCycle = SwiftLexicalLookup.ExtensionBindingCycle<QualifiedTypeName>
-  fileprivate func _findCyclicalDependency(
-    baseTypeName: QualifiedTypeName,
-    typeMembers: [Identifier: [TypeDeclSyntax]],
-    currentExtensionDecl: ExtensionDeclSyntax,
-    currentExtendedType: QualifiedTypeName,
-    currentDependencies: [ExtensionBindingResult.Dependency],
-  ) -> ExtensionBindingCycle? {
-    var dependencyChain = [(extensionDecl: ExtensionDeclSyntax, dependency: ExtensionBindingResult.Dependency)]()
-    return _findCyclicalDependencyImplementation(
-      baseTypeName: baseTypeName,
-      typeMembers: typeMembers,
-      currentExtensionDecl: currentExtensionDecl,
-      currentExtendedType: currentExtendedType,
-      currentDependencies: currentDependencies,
-      dependencyChain: &dependencyChain
-    )
-  }
+  // fileprivate func _findCyclicalDependency(
+  //   baseTypeName: QualifiedTypeName,
+  //   typeMembers: [Identifier: [TypeDeclSyntax]],
+  //   currentExtensionDecl: ExtensionDeclSyntax,
+  //   currentExtendedType: QualifiedTypeName,
+  //   currentDependencies: [ExtensionBindingResult.Dependency],
+  // ) -> ExtensionBindingCycle? {
+  //   var dependencyChain = [(extensionDecl: ExtensionDeclSyntax, dependency: ExtensionBindingResult.Dependency)]()
+  //   return _findCyclicalDependencyImplementation(
+  //     baseTypeName: baseTypeName,
+  //     typeMembers: typeMembers,
+  //     currentExtensionDecl: currentExtensionDecl,
+  //     currentExtendedType: currentExtendedType,
+  //     currentDependencies: currentDependencies,
+  //     dependencyChain: &dependencyChain
+  //   )
+  // }
 
-  /// See if the `baseTypeName` > `typeMembers` collide with the given
-  /// extension and its calculated dependencies.
-  ///
-  /// Parameters:
-  /// - dependencyChain: The path of extensions that make us depend on `currentExtensionDecl`.
-  private func _findCyclicalDependencyImplementation(
-    baseTypeName: QualifiedTypeName,
-    typeMembers: [Identifier: [TypeDeclSyntax]],
-    currentExtensionDecl: ExtensionDeclSyntax,
-    currentExtendedType: QualifiedTypeName,
-    currentDependencies: [ExtensionBindingResult.Dependency],
-    dependencyChain: inout [(extensionDecl: ExtensionDeclSyntax, dependency: ExtensionBindingResult.Dependency)]
-  ) -> ExtensionBindingCycle? {
-    #if DEBUG
-    guard !dependencyChain.contains(where: { $0.extensionDecl != currentExtensionDecl }) else {
-      fatalError(
-        "[SwiftLexicalLookup] Internal error: Unexpectedly found cycle in existing extension-dependency graph."
-      )
-    }
-    #endif
-
-    // Check current dependencies
-    for dependency in currentDependencies {
-      // Check if any type member collides with this dependency
-      for (typeMemberName, _) in typeMembers {
-        // Collisions require the same name and type
-        guard
-          dependency.baseTypeName == baseTypeName,
-          dependency.typeMemberName == typeMemberName
-        else {
-          continue
-        }
-
-        // This dependency collided; return
-        dependencyChain.append((currentExtensionDecl, dependency))
-        return ExtensionBindingCycle(
-          dependencyChain: dependencyChain.map({ (extensionDecl, dependency) in
-            return ExtensionBindingCycle.Dependency(
-              extensionDecl: extensionDecl,
-              extendedTypeName: currentExtendedType,
-              member: dependency.typeMemberName,
-              typeDecls: []
-            )
-          })
-        )
-      }
-
-      // Find recursive dependencies through depth-first search
-      for (introducingExtensionOrMainDecl, _) in dependency.resolvedDecls {
-        // If the extension is resolved, get its dependencies
-        guard
-          let introducingExtension = introducingExtensionOrMainDecl,
-          case .resolved(let introducingExtensionResult) = extensionState[introducingExtension],
-          // Only successfully resolved extensions can introduce type members.
-          case .success(let resolvedType) = introducingExtensionResult.resolution
-        else { continue }
-
-        // Update the dependency chain and check for cycles
-        dependencyChain.append((currentExtensionDecl, dependency))
-        // Note: We stop at the first cycle. Though, there could theoretically
-        // be multiple cycles that we should diagnose in one step, this error
-        // is quite rare. Hence, we stop early for simplicity and speed.
-        if let cycle = _findCyclicalDependencyImplementation(
-          baseTypeName: baseTypeName,
-          typeMembers: typeMembers,
-          currentExtensionDecl: introducingExtension,
-          currentExtendedType: resolvedType,
-          currentDependencies: introducingExtensionResult.dependencies,
-          dependencyChain: &dependencyChain
-        ) {
-          return cycle
-        }
-        // Restore the original dependency chain for the next extensions
-        dependencyChain.removeLast()
-      }
-    }
-
-    // No cycle found
-    return nil
-  }
+  // /// See if the `baseTypeName` > `typeMembers` collide with the given
+  // /// extension and its calculated dependencies.
+  // ///
+  // /// Parameters:
+  // /// - dependencyChain: The path of extensions that make us depend on `currentExtensionDecl`.
+  // private func _findCyclicalDependencyImplementation(
+  //   baseTypeName: QualifiedTypeName,
+  //   typeMembers: [Identifier: [TypeDeclSyntax]],
+  //   currentExtensionDecl: ExtensionDeclSyntax,
+  //   currentExtendedType: QualifiedTypeName,
+  //   currentDependencies: [ExtensionBindingResult.Dependency],
+  //   dependencyChain: inout [(extensionDecl: ExtensionDeclSyntax, dependency: ExtensionBindingResult.Dependency)]
+  // ) -> ExtensionBindingCycle? {
+  //   #if DEBUG
+  //   guard !dependencyChain.contains(where: { $0.extensionDecl != currentExtensionDecl }) else {
+  //     fatalError(
+  //       "[SwiftLexicalLookup] Internal error: Unexpectedly found cycle in existing extension-dependency graph."
+  //     )
+  //   }
+  //   #endif
+  //
+  //   // Check current dependencies
+  //   for dependency in currentDependencies {
+  //     // Check if any type member collides with this dependency
+  //     for (typeMemberName, _) in typeMembers {
+  //       // Collisions require the same name and type
+  //       guard
+  //         dependency.baseTypeName == baseTypeName,
+  //         dependency.typeMemberName == typeMemberName
+  //       else {
+  //         continue
+  //       }
+  //
+  //       // This dependency collided; return
+  //       dependencyChain.append((currentExtensionDecl, dependency))
+  //       return ExtensionBindingCycle(
+  //         dependencyChain: dependencyChain.map({ (extensionDecl, dependency) in
+  //           return ExtensionBindingCycle.Dependency(
+  //             extensionDecl: extensionDecl,
+  //             extendedTypeName: currentExtendedType,
+  //             member: dependency.typeMemberName,
+  //             typeDecls: []
+  //           )
+  //         })
+  //       )
+  //     }
+  //
+  //     // Find recursive dependencies through depth-first search
+  //     for (introducingExtensionOrMainDecl, _) in dependency.resolvedDecls {
+  //       // If the extension is resolved, get its dependencies
+  //       guard
+  //         let introducingExtension = introducingExtensionOrMainDecl,
+  //         case .resolved(let introducingExtensionResult) = extensionState[introducingExtension],
+  //         // Only successfully resolved extensions can introduce type members.
+  //         case .success(let resolvedType) = introducingExtensionResult.resolution
+  //       else { continue }
+  //
+  //       // Update the dependency chain and check for cycles
+  //       dependencyChain.append((currentExtensionDecl, dependency))
+  //       // Note: We stop at the first cycle. Though, there could theoretically
+  //       // be multiple cycles that we should diagnose in one step, this error
+  //       // is quite rare. Hence, we stop early for simplicity and speed.
+  //       if let cycle = _findCyclicalDependencyImplementation(
+  //         baseTypeName: baseTypeName,
+  //         typeMembers: typeMembers,
+  //         currentExtensionDecl: introducingExtension,
+  //         currentExtendedType: resolvedType,
+  //         currentDependencies: introducingExtensionResult.dependencies,
+  //         dependencyChain: &dependencyChain
+  //       ) {
+  //         return cycle
+  //       }
+  //       // Restore the original dependency chain for the next extensions
+  //       dependencyChain.removeLast()
+  //     }
+  //   }
+  //
+  //   // No cycle found
+  //   return nil
+  // }
 }
 
 // MARK: Extension Dependents
 
 extension SymbolTable3 {
-  fileprivate func _visitTransitiveDependents(
-    extensionDecl: ExtensionDeclSyntax,
-    visit: (
-      _ dependentExtension: ExtensionDeclSyntax, _ dependentExtensionResult: ExtensionBindingResult,
-      _ state: inout ExtensionBindingState?
-    ) -> Void
-  ) {
-    guard case .resolved(let extensionResolution) = extensionState[extensionDecl] else { return }
-    for dependent in extensionResolution.dependents {
-      visit(dependent, extensionResolution, &extensionState[extensionDecl])
-    }
-  }
+  // fileprivate func _visitTransitiveDependents(
+  //   extensionDecl: ExtensionDeclSyntax,
+  //   visit: (
+  //     _ dependentExtension: ExtensionDeclSyntax, _ dependentExtensionResult: ExtensionBindingResult,
+  //     _ state: inout ExtensionBindingState?
+  //   ) -> Void
+  // ) {
+  //   guard case .resolved(let extensionResolution) = extensionState[extensionDecl] else { return }
+  //   for dependent in extensionResolution.dependents {
+  //     visit(dependent, extensionResolution, &extensionState[extensionDecl])
+  //   }
+  // }
 }
 
 // MARK: Registering Nominal
+
 extension SymbolTable3 {
   // TODO: Could be a struct.
   enum NominalRegistrationFailure: Error {
@@ -431,52 +348,64 @@ extension SymbolTable3 {
   func registerNominalTypeReference(
     qualifiedName: QualifiedTypeName,
     mainDecl: NominalTypeDeclSyntax
-  ) -> Result<NominalType, NominalRegistrationFailure> {
-    let newNominal: NominalType
-    if let existingNominal = typeState[qualifiedName], existingNominal.mainDecl != mainDecl {
-      // Type already exists with different main decl; this is a redeclaration
-      return .failure(
-        NominalRegistrationFailure.invalidReregistration(existingMainDecl: existingNominal.mainDecl)
-      )
-    } else if let existingNominal = typeState[qualifiedName] {
-      // Main declaration matches existing type; don't modify
-      newNominal = existingNominal
-    } else {
-      // Create new type
-      newNominal = NominalType(
-        qualifiedName: qualifiedName,
-        mainDecl: mainDecl,
-        redeclarations: [],
-        extensions: [:]
-      )
+  ) -> Result<NominalTypeRef, TypeDependencyGraph.NominalRegistrationFailure> {
+    guard let registeredMainDecl = SourceFileRoot(mainDecl) else {
+      // TODO: Handle or eliminate error
+      fatalError("TODO")
     }
-
-    // Register and return
-    typeState[qualifiedName] = newNominal
-    return .success(newNominal)
+    return dependencyGraph.registerNominalTypeReference(
+      qualifiedName: qualifiedName,
+      mainDecl: registeredMainDecl,
+      configuredRegions: configuredRegions
+    )
+    // let newNominal: NominalType
+    // if let existingNominal = typeState[qualifiedName], existingNominal.mainDecl != mainDecl {
+    //   // Type already exists with different main decl; this is a redeclaration
+    //   return .failure(
+    //     NominalRegistrationFailure.invalidReregistration(existingMainDecl: existingNominal.mainDecl)
+    //   )
+    // } else if let existingNominal = typeState[qualifiedName] {
+    //   // Main declaration matches existing type; don't modify
+    //   newNominal = existingNominal
+    // } else {
+    //   // Create new type
+    //   newNominal = NominalType(
+    //     qualifiedName: qualifiedName,
+    //     mainDecl: mainDecl,
+    //     redeclarations: [],
+    //     extensions: [:]
+    //   )
+    // }
+    //
+    // // Register and return
+    // typeState[qualifiedName] = newNominal
+    // return .success(newNominal)
   }
 }
 
 @_spi(_QualifiedLookupTests) public enum ExtensionBindingFailure<TypeName: Sendable>: Error {
-  case alreadyResolved(ExtensionBindingResult)
-  case cannotBindInvalidated
-  case cannotFixNonInvalidated
   /// Either root isn't a source file, or said source file isn't registered
   case nonRegisteredSyntaxRoot
 
+  case admissionFailure(TypeDependencyGraph.ExtensionAdmissionFailure)
+
+  // case alreadyResolved(ExtensionBindingResult)
+  // case cannotBindInvalidated
+  // case cannotFixNonInvalidated
+
   // case boundToUnresolvedName
 
-  /// Same as NominalRegistrationFailure.invalidReregistration
-  case invalidReregistration(existingMainDecl: NominalTypeDeclSyntax)
-
-  // See todo comment below
-  case bindingBeforeFixingInvalidatedExtensions(invalidatedExtension: ExtensionDeclSyntax)
-
-  // Depends on extension with non-resolved state
-  case invalidDependenceOnNonResolvedExtension(
-    extensionDecl: ExtensionDeclSyntax,
-    nonResolvedState: ExtensionBindingState<TypeName>?
-  )
+  // /// Same as NominalRegistrationFailure.invalidReregistration
+  // case invalidReregistration(existingMainDecl: NominalTypeDeclSyntax)
+  //
+  // // See todo comment below
+  // case bindingBeforeFixingInvalidatedExtensions(invalidatedExtension: ExtensionDeclSyntax)
+  //
+  // // Depends on extension with non-resolved state
+  // case invalidDependenceOnNonResolvedExtension(
+  //   extensionDecl: ExtensionDeclSyntax,
+  //   nonResolvedState: ExtensionBindingState<TypeName>?
+  // )
 }
 
 // MARK: Nominal + Extension Binding
@@ -503,14 +432,19 @@ extension SymbolTable3 {
       (qualifiedName: QualifiedTypeName, mainDecl: NominalTypeDeclSyntax),
       TypeQualifier.Failure
     >,
-    dependencies: [ExtensionBindingResult.Dependency]
-  ) -> Result<InvalidatedExtensions, ExtensionBindingFailure> {
+    // dependencies: [ExtensionBindingResult.Dependency]
+    dependencies: DependencyTracker
+  ) -> Result<TypeDependencyGraph.InvalidatedExtensions, ExtensionBindingFailure> {
     _admitExtension(
       extensionDecl,
       isUpdatingInvalidating: false,
       to: result,
       dependencies: dependencies
     )
+  }
+
+  func getNominalTypeReference(name: QualifiedTypeName) -> NominalTypeRef? {
+    dependencyGraph.namesToTypes[name].map({ NominalTypeRef(qualifiedName: name, nominal: $0) })
   }
 
   /// Similar to `bindExtension` but for the extensions that were invalidated.
@@ -522,8 +456,9 @@ extension SymbolTable3 {
       (qualifiedName: QualifiedTypeName, mainDecl: NominalTypeDeclSyntax),
       TypeQualifier.Failure
     >,
-    dependencies: [ExtensionBindingResult.Dependency]
-  ) -> Result<InvalidatedExtensions, ExtensionBindingFailure> {
+    // dependencies: [ExtensionBindingResult.Dependency]
+    dependencies: DependencyTracker
+  ) -> Result<TypeDependencyGraph.InvalidatedExtensions, ExtensionBindingFailure> {
     _admitExtension(
       extensionDecl,
       isUpdatingInvalidating: true,
@@ -540,378 +475,430 @@ extension SymbolTable3 {
       (qualifiedName: QualifiedTypeName, mainDecl: NominalTypeDeclSyntax),
       TypeQualifier.Failure
     >,
-    dependencies: [ExtensionBindingResult.Dependency]
-  ) -> Result<InvalidatedExtensions, ExtensionBindingFailure> {
-    // Get file and module
+    // dependencies: [ExtensionBindingResult.Dependency]
+    dependencies: DependencyTracker
+  ) -> Result<TypeDependencyGraph.InvalidatedExtensions, ExtensionBindingFailure> {
+    // Get extension and module
+    // TODO: Require caller to provide SourceFileRoot
     guard
-      let sourceFile = extensionDecl.root.as(SourceFileSyntax.self),
-      let module = moduleMap[sourceFile]
+      let registeredExtension = SourceFileRoot(extensionDecl),
+      let module = moduleMap[registeredExtension.fileRoot]
     else {
       return .failure(ExtensionBindingFailure.nonRegisteredSyntaxRoot)
     }
-
-    // Ensure we haven't already bound
-    if case ExtensionBindingState.resolved(let bindingResult)? = extensionState[extensionDecl] {
-      return .failure(ExtensionBindingFailure.alreadyResolved(bindingResult))
-    }
-    switch (isFixingInvalidating, extensionState[extensionDecl]) {
-    case (false, nil), (true, .invalidated):
-      break
-    case (true, nil):
-      return .failure(ExtensionBindingFailure.cannotFixNonInvalidated)
-    case (false, .invalidated):
-      return .failure(ExtensionBindingFailure.cannotFixNonInvalidated)
-    case (_, let resolvedExtension?) /* .cannotDependOnIntroducedMembers, .resolved */:
-      assertionFailure(
-        "[SwiftLexicalLookup] Internal error: Unexpectedly found extension state despite `unresolvedExtensions` indicating the extension hasn't been bound: \(resolvedExtension)."
-      )
-    }
-
-    // TODO: This might not be necessary if we change the model,
-    // but we should check that all invalidated extensions
-    // have been handled.
-
-    // Compute the new extension state and what old extensions we've broken
-    let newExtensionState: ExtensionBindingState
-    let invalidatedExtensions: OrderedSet<ExtensionDeclSyntax>
-    switch result {
-    case .success(let (qualifiedName, mainDecl)):
-      // Get nominal type
-      let currentNominal: NominalType
-      switch registerNominalTypeReference(qualifiedName: qualifiedName, mainDecl: mainDecl) {
-      case .success(let success):
-        currentNominal = success
-      case .failure(.invalidReregistration(let existingMainDecl)):
-        return .failure(ExtensionBindingFailure.invalidReregistration(existingMainDecl: existingMainDecl))
-      }
-      // Find introduced type members
-      // TODO: configuredRegions
-      let introducedTypeMembers: [Identifier: [TypeDeclSyntax]] = extensionDecl._groupTypeMembers(
-        configuredRegions: configuredRegions
-      )
-
-      // Ensure type member validity:
-      // // TODO: Factor these checks out
-      // var dependencies = dependencies
-      // for dependency in dependencies {
-      //   // TODO: Keep track of cycles precisely (and perhaps visited decls just to be safe)
-      //   //
-      //   // Identify type members conflicting with this dependency
-      //   for (introducedTypeName, _) in introducedTypeMembers {
-      //     guard dependency.baseTypeName == qualifiedName else { continue }
-      //     guard dependency.typeMember == introducedTypeName else { continue }
-      //     // TODO: Add to cycle diagnostic
-      //   }
-      //
-      //   // Add transitive dependencies
-      //   for (introducingExtension, _) in dependency.resolvedDecls {
-      //     // Main declaration has no dependencies
-      //     guard let introducingExtension else { continue }
-      //
-      //     // Ensure we don't invalidate the extension introducing the type
-      //     // members we depend on
-      //     guard case .resolved(let introducingExtensionResult) = extensionState[introducingExtension] else {
-      //       // TODO: Make the required checks to justify this being a fatalError
-      //       fatalError(
-      //         "[SwiftLexicalLookup] Internal error: While trying to bind extension to '\(qualifiedName)', found dependency to type member `\(dependency.typeMember.name)` originating from a non-resolved/invalidated extension: \(String(reflecting: extensionState[introducingExtension]))."
-      //       )
-      //     }
-      //
-      //     dependencies.append(contentsOf: introducingExtensionResult.dependencies)
-      //   }
-      // }
-      // // 1. Can't introduce members we depend on (without a cycle)
-      // if let (_, recursiveTypeMembers) = dependencies._firstMatchingTypeMembers(
-      //   resolvedTypeName: qualifiedName,
-      //   typeMembers: introducedTypeMembers
-      // ) {
-      //   newExtensionState = ExtensionBindingState.cannotDependOnIntroducedMembers(
-      //     typeMembers: recursiveTypeMembers
-      //   )
-      //   // This extension is invalid (its definition depends on at least one
-      //   // of its type members), so we act like it doesn't introduce any
-      //   // members.
-      //   invalidatedExtensions = []
-      //   break
-      // }
-      // // 2. Can't introduce members our dependencies' declaration contexts
-      // //    depend on (without a cycle)
-      // // TODO: Either prove this is sufficient or recursively search for dependencies (see
-      // // relevant documentation in NominalType.swift)
-      // var allRecursiveTypeMembers = [TypeDeclSyntax]()
-      // for dependency in dependencies {
-      //   // We can't invalidate any of the extensions that introduced our the types
-      //   // we depend on; otherwise, we risk a cycle.
-      //   for (introducingExtension, _) in dependency.resolvedDecls {
-      //     // Main declaration has no dependencies
-      //     guard let introducingExtension = introducingExtension else { continue }
-      //
-      //     // Ensure we don't invalidate the extension introducing the type
-      //     // members we depend on
-      //     guard case .resolved(let introducingExtensionResult) = extensionState[introducingExtension] else {
-      //       // TODO: Make the required checks to justify this being a fatalError
-      //       fatalError(
-      //         "[SwiftLexicalLookup] Internal error: While trying to bind extension to '\(qualifiedName)', found dependency to type member `\(dependency.typeMember.name)` originating from a non-resolved/invalidated extension: \(String(reflecting: extensionState[introducingExtension]))."
-      //       )
-      //     }
-      //
-      //     // Continue if there are no conflicts
-      //     guard
-      //       let (_, recursiveTypeMembers) = introducingExtensionResult.dependencies._firstMatchingTypeMembers(
-      //         resolvedTypeName: qualifiedName,
-      //         typeMembers: introducedTypeMembers
-      //       )
-      //     else {
-      //       continue
-      //     }
-      //
-      //     // Record recursive members
-      //     allRecursiveTypeMembers.append(contentsOf: recursiveTypeMembers)
-      //   }
-      // }
-      // guard allRecursiveTypeMembers.isEmpty else {
-      //   // This extension is invalid (its definition depends on at least one
-      //   // of its type members), so we act like it doesn't introduce any
-      //   // members.
-      //   newExtensionState = ExtensionBindingState.cannotDependOnIntroducedMembers(typeMembers: allRecursiveTypeMembers)
-      //   invalidatedExtensions = []
-      //   break
-      // }
-
-      // 3. Invalidate extension-binding results depending on the type members
-      //    we're adding
-      // TODO: Find more efficient way to do this
-      // var invalidatedExtensionDecls = OrderedSet<ExtensionDeclSyntax>()
-      // for (invalidatedExtensionDecl, invalidatedExtensionState) in extensionState {
-      //   // We can only break resolved extensions
-      //   let extensionBindingResult: ExtensionBindingResult
-      //   switch invalidatedExtensionState {
-      //   case ExtensionBindingState.resolved(let result):
-      //     extensionBindingResult = result
-      //   case ExtensionBindingState.invalidated(_, let invalidatedExtension, _, _, _):
-      //     // TODO: DECIDE: We've introduced an extension that invalidated another
-      //     // extension, and now we're trying to bind a new extension entirely.
-      //     // Is this allowed? I.e., do we want to allow binding new extension before we finished
-      //     // fixing invalidated ones? For now, we throw an error
-      //     return .failure(
-      //       ExtensionBindingFailure.bindingBeforeFixingInvalidatedExtensions(
-      //         invalidatedExtension: invalidatedExtension
-      //       )
-      //     )
-      //   case ExtensionBindingState.cannotDependOnIntroducedMembers:
-      //     // Skip invalid, self-referential extensions
-      //     continue
-      //   }
-      //
-      //   // Get the conflict (otherwise, skip)
-      //   guard
-      //     let (firstConflictingDependency, firstConflictingTypeDecls) = extensionBindingResult.dependencies
-      //       ._firstMatchingTypeMembers(
-      //         resolvedTypeName: qualifiedName,
-      //         typeMembers: introducedTypeMembers
-      //       )
-      //   else { continue }
-      //
-      //   // Invalidate extension and add to results
-      //   self.extensionState[invalidatedExtensionDecl] = ExtensionBindingState.invalidated(
-      //     invalidatedResult: extensionBindingResult,
-      //     // We're the ones doing the invalidating
-      //     invalidatingExtension: invalidatedExtensionDecl,
-      //     invalidatingType: qualifiedName,
-      //     // Record conflict
-      //     firstConflictingDependency: firstConflictingDependency,
-      //     firstConflictingTypeDecls: firstConflictingTypeDecls
-      //   )
-      //   invalidatedExtensionDecls.append(invalidatedExtensionDecl)
-      // }
-
-      // Check for cycles
-      if let cycle = _findCyclicalDependency(
-        baseTypeName: qualifiedName,
-        typeMembers: introducedTypeMembers,
-        currentExtensionDecl: extensionDecl,
-        currentExtendedType: qualifiedName,
-        currentDependencies: dependencies
-      ) {
-        // Diagnose cycle; since binding failed, we refuse to admit the extension,
-        // so there are no invalidations.
-        newExtensionState = ExtensionBindingState.cannotDependOnIntroducedMembers(cycle: cycle)
-        invalidatedExtensions = []
-        break
-      }
-
-      // Invalidate children
-      var invalidatedExtensionDecls = [ExtensionDeclSyntax]()
-      _visitTransitiveDependents(
-        extensionDecl: extensionDecl,
-        visit: { (dependentExtension, dependentExtensionResult, state) in
-          print(
-            "Binding \(extensionDecl._memberlessDescription): Invalidating \(dependentExtension._memberlessDescription)"
-          )
-          invalidatedExtensionDecls.append(dependentExtension)
-
-          state = ExtensionBindingState.invalidated(
-            invalidatedResult: dependentExtensionResult,
-            // We're the ones doing the invalidating
-            invalidatingExtension: extensionDecl,
-            invalidatingType: qualifiedName,
-            formerDependencies: dependencies
-          )
-        }
-      )
-
-      fatalError(
-        "Binding \(extensionDecl._memberlessDescription): Deps: \(dependencies)"
-      )
-
-      // Attach to parents (so that they or other ancestors can invalidate us)
-      for dependency in dependencies {
-        for (introducingExtensionDecl, _) in dependency.resolvedDecls {
-          guard let introducingExtensionDecl else { continue }
-          fatalError(
-            "Binding \(extensionDecl._memberlessDescription): Registering as dependent of \(introducingExtensionDecl)"
-          )
-          let state = extensionState[introducingExtensionDecl]
-
-          // Add us a dependent (throw if the state's invalid)
-          guard case .resolved(var extensionResolution) = state else {
-            return .failure(
-              ExtensionBindingFailure.invalidDependenceOnNonResolvedExtension(
-                extensionDecl: introducingExtensionDecl,
-                nonResolvedState: state
-              )
-            )
-          }
-          extensionResolution.dependents.insert(extensionDecl)
-          extensionState[introducingExtensionDecl] = ExtensionBindingState.resolved(extensionResolution)
-        }
-      }
-
-      // Save extension-binding results.
-      // Note: We don't have dependents since we just invalidated them
-      newExtensionState = ExtensionBindingState.resolved(
-        ExtensionBindingResult(dependencies: dependencies, dependents: [], resolution: .success(qualifiedName))
-      )
-      invalidatedExtensions = OrderedSet(invalidatedExtensionDecls)
-
-      // Update ``NominalType``
-      var newNominal: NominalType = currentNominal
-      // Add extension
-      let insertResult = newNominal.extensions[module, default: []].append(extensionDecl)
-      assert(
-        insertResult.inserted,
-        "[SwiftLexicalLookup] Internal error: Extension was already in `extensions` despite appearing in `unresolvedExtensions"
-      )
-      // Update lookup table
-      typeState[qualifiedName] = newNominal
-    case .failure(let failure):
-      // Otherwise just save the failure
-      // Note: Since this extension failed, it doesn't introduce types and --hence-- can't
-      // have dependents.
-      newExtensionState = ExtensionBindingState.resolved(
-        ExtensionBindingResult(dependencies: dependencies, dependents: [], resolution: .failure(failure))
-      )
-      // Can't break a type's extensions since we didn't bind to one
-      invalidatedExtensions = []
-    }
-
-    // Invalidate the extensions depending on the type members that this
-    // extension introduces.
-    //
-    // Each extension `x`'s type-resolution results depend on one or more
-    // type-member results. E.g.,
-    //   struct A { typealias B = C  }
-    //   typealias B = A.B
-    //   struct C {}
-    //
-    //   extension B.C {}
-    // Here, `extension B.C` depends on `(File.swift)::A>B == [typealias B = C]` (because of `typealias B = A.B`)
-    // and `(File.swift)::A>C == []` so that `typealias B = C` resolves to `(File.swift)::C`.
-    // We denote these dependencies of an extension `x` as the list `dependencies(x)`
-    // where the dependencies appear in the order in which they appear during type resolution.
-    // Each element of the list is a tuple of the qualified type, the type identifier, and the set
-    // of type declarations to which they refer.
-    // So in the above example, `dependencies(x)={
-    //   [`(File.swift)::A`, `B`, (`typealias B = C`)],
-    //   [`(File.swift)::A`, `C`, ()]
+    return dependencyGraph._admitExtension(
+      registeredExtension,
+      extensionDeclModule: module,
+      isUpdatingInvalidating: isFixingInvalidating,
+      to: result,
+      dependencyTracker: dependencies,
+      configuredRegions: configuredRegions
+    ).mapError(ExtensionBindingFailure.admissionFailure)
+    // // Get file and module
+    // guard
+    //   let sourceFile = extensionDecl.root.as(SourceFileSyntax.self),
+    //   let module = moduleMap[sourceFile]
+    // else {
+    //   return .failure(ExtensionBindingFailure.nonRegisteredSyntaxRoot)
     // }
     //
-    // So we define the `invalidates(x,y)` function which, given an extension `x` that
-    // successfully evaluated to qualified name `τ_χ`, it checks if it
-    // invalidates an extension `y`'s type resolution. Namely, it returns true iff
-    // `x` introduces a type member μ such that `dependencies(y)` contains
-    // `(τ_x, identifier(μ), (μ_1, ..., μ_n))` so that `μ_i!=μ` for all `i=1,...,n`.
+    // // Ensure we haven't already bound
+    // if case ExtensionBindingState.resolved(let bindingResult)? = extensionState[extensionDecl] {
+    //   return .failure(ExtensionBindingFailure.alreadyResolved(bindingResult))
+    // }
+    // switch (isFixingInvalidating, extensionState[extensionDecl]) {
+    // case (false, nil), (true, .invalidated):
+    //   break
+    // case (true, nil):
+    //   return .failure(ExtensionBindingFailure.cannotFixNonInvalidated)
+    // case (false, .invalidated):
+    //   return .failure(ExtensionBindingFailure.cannotFixNonInvalidated)
+    // case (_, let resolvedExtension?) /* .cannotDependOnIntroducedMembers, .resolved */:
+    //   assertionFailure(
+    //     "[SwiftLexicalLookup] Internal error: Unexpectedly found extension state despite `unresolvedExtensions` indicating the extension hasn't been bound: \(resolvedExtension)."
+    //   )
+    // }
     //
-    // Based on `invalidates(x,y)`, we define `recursivelyInvalidates(x,y)` to handle
-    // something like
+    // // TODO: This might not be necessary if we change the model,
+    // // but we should check that all invalidated extensions
+    // // have been handled.
     //
-    // ```swift
-    // struct A {}
-    // struct B {}
+    // // Compute the new extension state and what old extensions we've broken
+    // let newExtensionState: ExtensionBindingState
+    // let invalidatedExtensions: OrderedSet<ExtensionDeclSyntax>
+    // switch result {
+    // case .success(let (qualifiedName, mainDecl)):
+    //   // Get nominal type
+    //   let currentNominal: NominalType
+    //   switch registerNominalTypeReference(qualifiedName: qualifiedName, mainDecl: mainDecl) {
+    //   case .success(let success):
+    //     currentNominal = success
+    //   case .failure(.invalidReregistration(let existingMainDecl)):
+    //     return .failure(ExtensionBindingFailure.invalidReregistration(existingMainDecl: existingMainDecl))
+    //   }
+    //   // Find introduced type members
+    //   // TODO: configuredRegions
+    //   let introducedTypeMembers: [Identifier: [TypeDeclSyntax]] = extensionDecl._groupTypeMembers(
+    //     configuredRegions: configuredRegions
+    //   )
     //
-    // extension A { typealias C = B }
-    // //        |- Depends on : `()`
-    // //        |- Resolves to: `(File.swift)::A`
-    // //        `- Introduces : `(File.swift)::A>C`
+    //   // Ensure type member validity:
+    //   // // TODO: Factor these checks out
+    //   // var dependencies = dependencies
+    //   // for dependency in dependencies {
+    //   //   // TODO: Keep track of cycles precisely (and perhaps visited decls just to be safe)
+    //   //   //
+    //   //   // Identify type members conflicting with this dependency
+    //   //   for (introducedTypeName, _) in introducedTypeMembers {
+    //   //     guard dependency.baseTypeName == qualifiedName else { continue }
+    //   //     guard dependency.typeMember == introducedTypeName else { continue }
+    //   //     // TODO: Add to cycle diagnostic
+    //   //   }
+    //   //
+    //   //   // Add transitive dependencies
+    //   //   for (introducingExtension, _) in dependency.resolvedDecls {
+    //   //     // Main declaration has no dependencies
+    //   //     guard let introducingExtension else { continue }
+    //   //
+    //   //     // Ensure we don't invalidate the extension introducing the type
+    //   //     // members we depend on
+    //   //     guard case .resolved(let introducingExtensionResult) = extensionState[introducingExtension] else {
+    //   //       // TODO: Make the required checks to justify this being a fatalError
+    //   //       fatalError(
+    //   //         "[SwiftLexicalLookup] Internal error: While trying to bind extension to '\(qualifiedName)', found dependency to type member `\(dependency.typeMember.name)` originating from a non-resolved/invalidated extension: \(String(reflecting: extensionState[introducingExtension]))."
+    //   //       )
+    //   //     }
+    //   //
+    //   //     dependencies.append(contentsOf: introducingExtensionResult.dependencies)
+    //   //   }
+    //   // }
+    //   // // 1. Can't introduce members we depend on (without a cycle)
+    //   // if let (_, recursiveTypeMembers) = dependencies._firstMatchingTypeMembers(
+    //   //   resolvedTypeName: qualifiedName,
+    //   //   typeMembers: introducedTypeMembers
+    //   // ) {
+    //   //   newExtensionState = ExtensionBindingState.cannotDependOnIntroducedMembers(
+    //   //     typeMembers: recursiveTypeMembers
+    //   //   )
+    //   //   // This extension is invalid (its definition depends on at least one
+    //   //   // of its type members), so we act like it doesn't introduce any
+    //   //   // members.
+    //   //   invalidatedExtensions = []
+    //   //   break
+    //   // }
+    //   // // 2. Can't introduce members our dependencies' declaration contexts
+    //   // //    depend on (without a cycle)
+    //   // // TODO: Either prove this is sufficient or recursively search for dependencies (see
+    //   // // relevant documentation in NominalType.swift)
+    //   // var allRecursiveTypeMembers = [TypeDeclSyntax]()
+    //   // for dependency in dependencies {
+    //   //   // We can't invalidate any of the extensions that introduced our the types
+    //   //   // we depend on; otherwise, we risk a cycle.
+    //   //   for (introducingExtension, _) in dependency.resolvedDecls {
+    //   //     // Main declaration has no dependencies
+    //   //     guard let introducingExtension = introducingExtension else { continue }
+    //   //
+    //   //     // Ensure we don't invalidate the extension introducing the type
+    //   //     // members we depend on
+    //   //     guard case .resolved(let introducingExtensionResult) = extensionState[introducingExtension] else {
+    //   //       // TODO: Make the required checks to justify this being a fatalError
+    //   //       fatalError(
+    //   //         "[SwiftLexicalLookup] Internal error: While trying to bind extension to '\(qualifiedName)', found dependency to type member `\(dependency.typeMember.name)` originating from a non-resolved/invalidated extension: \(String(reflecting: extensionState[introducingExtension]))."
+    //   //       )
+    //   //     }
+    //   //
+    //   //     // Continue if there are no conflicts
+    //   //     guard
+    //   //       let (_, recursiveTypeMembers) = introducingExtensionResult.dependencies._firstMatchingTypeMembers(
+    //   //         resolvedTypeName: qualifiedName,
+    //   //         typeMembers: introducedTypeMembers
+    //   //       )
+    //   //     else {
+    //   //       continue
+    //   //     }
+    //   //
+    //   //     // Record recursive members
+    //   //     allRecursiveTypeMembers.append(contentsOf: recursiveTypeMembers)
+    //   //   }
+    //   // }
+    //   // guard allRecursiveTypeMembers.isEmpty else {
+    //   //   // This extension is invalid (its definition depends on at least one
+    //   //   // of its type members), so we act like it doesn't introduce any
+    //   //   // members.
+    //   //   newExtensionState = ExtensionBindingState.cannotDependOnIntroducedMembers(typeMembers: allRecursiveTypeMembers)
+    //   //   invalidatedExtensions = []
+    //   //   break
+    //   // }
     //
-    // extension A.C { typealias D = A }
-    // //        |- Depends on : `(File.swift)::A>C`, `(File.swift)::A>B`
-    // //        |- Resolves to: `(File.swift)::B`
-    // //        `- Introduces : `(File.swift)::B>D`
+    //   // 3. Invalidate extension-binding results depending on the type members
+    //   //    we're adding
+    //   // TODO: Find more efficient way to do this
+    //   // var invalidatedExtensionDecls = OrderedSet<ExtensionDeclSyntax>()
+    //   // for (invalidatedExtensionDecl, invalidatedExtensionState) in extensionState {
+    //   //   // We can only break resolved extensions
+    //   //   let extensionBindingResult: ExtensionBindingResult
+    //   //   switch invalidatedExtensionState {
+    //   //   case ExtensionBindingState.resolved(let result):
+    //   //     extensionBindingResult = result
+    //   //   case ExtensionBindingState.invalidated(_, let invalidatedExtension, _, _, _):
+    //   //     // TODO: DECIDE: We've introduced an extension that invalidated another
+    //   //     // extension, and now we're trying to bind a new extension entirely.
+    //   //     // Is this allowed? I.e., do we want to allow binding new extension before we finished
+    //   //     // fixing invalidated ones? For now, we throw an error
+    //   //     return .failure(
+    //   //       ExtensionBindingFailure.bindingBeforeFixingInvalidatedExtensions(
+    //   //         invalidatedExtension: invalidatedExtension
+    //   //       )
+    //   //     )
+    //   //   case ExtensionBindingState.cannotDependOnIntroducedMembers:
+    //   //     // Skip invalid, self-referential extensions
+    //   //     continue
+    //   //   }
+    //   //
+    //   //   // Get the conflict (otherwise, skip)
+    //   //   guard
+    //   //     let (firstConflictingDependency, firstConflictingTypeDecls) = extensionBindingResult.dependencies
+    //   //       ._firstMatchingTypeMembers(
+    //   //         resolvedTypeName: qualifiedName,
+    //   //         typeMembers: introducedTypeMembers
+    //   //       )
+    //   //   else { continue }
+    //   //
+    //   //   // Invalidate extension and add to results
+    //   //   self.extensionState[invalidatedExtensionDecl] = ExtensionBindingState.invalidated(
+    //   //     invalidatedResult: extensionBindingResult,
+    //   //     // We're the ones doing the invalidating
+    //   //     invalidatingExtension: invalidatedExtensionDecl,
+    //   //     invalidatingType: qualifiedName,
+    //   //     // Record conflict
+    //   //     firstConflictingDependency: firstConflictingDependency,
+    //   //     firstConflictingTypeDecls: firstConflictingTypeDecls
+    //   //   )
+    //   //   invalidatedExtensionDecls.append(invalidatedExtensionDecl)
+    //   // }
     //
-    // extension B { typealias E = D }
-    // //        |- Depends on : ()
-    // //        |- Resolves to: `(File.swift)::B`
-    // //        `- Introduces : `(File.swift)::B>E`
+    //   // Check for cycles
+    //   if let cycle = _findCyclicalDependency(
+    //     baseTypeName: qualifiedName,
+    //     typeMembers: introducedTypeMembers,
+    //     currentExtensionDecl: extensionDecl,
+    //     currentExtendedType: qualifiedName,
+    //     currentDependencies: dependencies
+    //   ) {
+    //     // Diagnose cycle; since binding failed, we refuse to admit the extension,
+    //     // so there are no invalidations.
+    //     newExtensionState = ExtensionBindingState.cannotDependOnIntroducedMembers(cycle: cycle)
+    //     invalidatedExtensions = []
+    //     break
+    //   }
     //
-    // extension B.E { struct B {} }
-    // //       |- Depends on : `(File.swift)::B>E`, `(File.swift)::B>D`, `(File.swift)::B>A`
-    // //       |- Resolves to: `(File.swift)::A`
-    // //       `- Introduces : `(File.swift)::A>B
-    // ```
-    // TODO: This example doesn't provide an example where we need recursive invalidation.
+    //   // Invalidate children
+    //   var invalidatedExtensionDecls = [ExtensionDeclSyntax]()
+    //   _visitTransitiveDependents(
+    //     extensionDecl: extensionDecl,
+    //     visit: { (dependentExtension, dependentExtensionResult, state) in
+    //       print(
+    //         "Binding \(extensionDecl._memberlessDescription): Invalidating \(dependentExtension._memberlessDescription)"
+    //       )
+    //       invalidatedExtensionDecls.append(dependentExtension)
     //
-    // To avoid cycles, we stipulate that to bind an extension `x` (that resolved
-    // successfully), each currently bound extension `y` (also successfully evaluated)
-    // must satisfy that `invalidates(y, x) = false`.
-    // This is an example of why transitive dependencies matter:
-    // TODO: Do we need recursive invalidation?
+    //       state = ExtensionBindingState.invalidated(
+    //         invalidatedResult: dependentExtensionResult,
+    //         // We're the ones doing the invalidating
+    //         invalidatingExtension: extensionDecl,
+    //         invalidatingType: qualifiedName,
+    //         formerDependencies: dependencies
+    //       )
+    //     }
+    //   )
     //
-    // Note that this doesn't form a cycle. Extension `x` with type members τ_{x, 1}, ..., τ_{x,n}
-    // (with repetition allowed) invalidates extensions `y_j` from `j=1,..., m` when
-    // `dependencies(y_j)\cap \set{τ_{x, 1}, ..., τ_{x,n}}\ne \varnothing`. So for some `y_j`
-    // to invalidate `x`, it or one of the extensions it invalidates must contain a type member
-    // `τ_{y_j, k}=τ_{x, i}` for some k and i.
+    //   fatalError(
+    //     "Binding \(extensionDecl._memberlessDescription): Deps: \(dependencies)"
+    //   )
     //
-    // That's because for a cycle to form,
-    // the extensions we invalidate must then invalidate us (this extension).
-    // For the invalidated extensions to invalidate us, we must be relying on
-    // type members
-    // Note that invalidating extensions that depend on this extension's type
-    // members doesn't form a cycle because we checked that this extension doesn't
-    // transitively depend on said members. TODO: Refine wording
+    //   // Attach to parents (so that they or other ancestors can invalidate us)
+    //   for dependency in dependencies {
+    //     for (introducingExtensionDecl, _) in dependency.resolvedDecls {
+    //       guard let introducingExtensionDecl else { continue }
+    //       fatalError(
+    //         "Binding \(extensionDecl._memberlessDescription): Registering as dependent of \(introducingExtensionDecl)"
+    //       )
+    //       let state = extensionState[introducingExtensionDecl]
+    //
+    //       // Add us a dependent (throw if the state's invalid)
+    //       guard case .resolved(var extensionResolution) = state else {
+    //         return .failure(
+    //           ExtensionBindingFailure.invalidDependenceOnNonResolvedExtension(
+    //             extensionDecl: introducingExtensionDecl,
+    //             nonResolvedState: state
+    //           )
+    //         )
+    //       }
+    //       extensionResolution.dependents.insert(extensionDecl)
+    //       extensionState[introducingExtensionDecl] = ExtensionBindingState.resolved(extensionResolution)
+    //     }
+    //   }
+    //
+    //   // Save extension-binding results.
+    //   // Note: We don't have dependents since we just invalidated them
+    //   newExtensionState = ExtensionBindingState.resolved(
+    //     ExtensionBindingResult(dependencies: dependencies, dependents: [], resolution: .success(qualifiedName))
+    //   )
+    //   invalidatedExtensions = OrderedSet(invalidatedExtensionDecls)
+    //
+    //   // Update ``NominalType``
+    //   var newNominal: NominalType = currentNominal
+    //   // Add extension
+    //   let insertResult = newNominal.extensions[module, default: []].append(extensionDecl)
+    //   assert(
+    //     insertResult.inserted,
+    //     "[SwiftLexicalLookup] Internal error: Extension was already in `extensions` despite appearing in `unresolvedExtensions"
+    //   )
+    //   // Update lookup table
+    //   typeState[qualifiedName] = newNominal
+    // case .failure(let failure):
+    //   // Otherwise just save the failure
+    //   // Note: Since this extension failed, it doesn't introduce types and --hence-- can't
+    //   // have dependents.
+    //   newExtensionState = ExtensionBindingState.resolved(
+    //     ExtensionBindingResult(dependencies: dependencies, dependents: [], resolution: .failure(failure))
+    //   )
+    //   // Can't break a type's extensions since we didn't bind to one
+    //   invalidatedExtensions = []
+    // }
+    //
+    // // Invalidate the extensions depending on the type members that this
+    // // extension introduces.
+    // //
+    // // Each extension `x`'s type-resolution results depend on one or more
+    // // type-member results. E.g.,
+    // //   struct A { typealias B = C  }
+    // //   typealias B = A.B
+    // //   struct C {}
+    // //
+    // //   extension B.C {}
+    // // Here, `extension B.C` depends on `(File.swift)::A>B == [typealias B = C]` (because of `typealias B = A.B`)
+    // // and `(File.swift)::A>C == []` so that `typealias B = C` resolves to `(File.swift)::C`.
+    // // We denote these dependencies of an extension `x` as the list `dependencies(x)`
+    // // where the dependencies appear in the order in which they appear during type resolution.
+    // // Each element of the list is a tuple of the qualified type, the type identifier, and the set
+    // // of type declarations to which they refer.
+    // // So in the above example, `dependencies(x)={
+    // //   [`(File.swift)::A`, `B`, (`typealias B = C`)],
+    // //   [`(File.swift)::A`, `C`, ()]
+    // // }
+    // //
+    // // So we define the `invalidates(x,y)` function which, given an extension `x` that
+    // // successfully evaluated to qualified name `τ_χ`, it checks if it
+    // // invalidates an extension `y`'s type resolution. Namely, it returns true iff
+    // // `x` introduces a type member μ such that `dependencies(y)` contains
+    // // `(τ_x, identifier(μ), (μ_1, ..., μ_n))` so that `μ_i!=μ` for all `i=1,...,n`.
+    // //
+    // // Based on `invalidates(x,y)`, we define `recursivelyInvalidates(x,y)` to handle
+    // // something like
+    // //
+    // // ```swift
+    // // struct A {}
+    // // struct B {}
+    // //
+    // // extension A { typealias C = B }
+    // // //        |- Depends on : `()`
+    // // //        |- Resolves to: `(File.swift)::A`
+    // // //        `- Introduces : `(File.swift)::A>C`
+    // //
+    // // extension A.C { typealias D = A }
+    // // //        |- Depends on : `(File.swift)::A>C`, `(File.swift)::A>B`
+    // // //        |- Resolves to: `(File.swift)::B`
+    // // //        `- Introduces : `(File.swift)::B>D`
+    // //
+    // // extension B { typealias E = D }
+    // // //        |- Depends on : ()
+    // // //        |- Resolves to: `(File.swift)::B`
+    // // //        `- Introduces : `(File.swift)::B>E`
+    // //
+    // // extension B.E { struct B {} }
+    // // //       |- Depends on : `(File.swift)::B>E`, `(File.swift)::B>D`, `(File.swift)::B>A`
+    // // //       |- Resolves to: `(File.swift)::A`
+    // // //       `- Introduces : `(File.swift)::A>B
+    // // ```
+    // // TODO: This example doesn't provide an example where we need recursive invalidation.
+    // //
+    // // To avoid cycles, we stipulate that to bind an extension `x` (that resolved
+    // // successfully), each currently bound extension `y` (also successfully evaluated)
+    // // must satisfy that `invalidates(y, x) = false`.
+    // // This is an example of why transitive dependencies matter:
+    // // TODO: Do we need recursive invalidation?
+    // //
+    // // Note that this doesn't form a cycle. Extension `x` with type members τ_{x, 1}, ..., τ_{x,n}
+    // // (with repetition allowed) invalidates extensions `y_j` from `j=1,..., m` when
+    // // `dependencies(y_j)\cap \set{τ_{x, 1}, ..., τ_{x,n}}\ne \varnothing`. So for some `y_j`
+    // // to invalidate `x`, it or one of the extensions it invalidates must contain a type member
+    // // `τ_{y_j, k}=τ_{x, i}` for some k and i.
+    // //
+    // // That's because for a cycle to form,
+    // // the extensions we invalidate must then invalidate us (this extension).
+    // // For the invalidated extensions to invalidate us, we must be relying on
+    // // type members
+    // // Note that invalidating extensions that depend on this extension's type
+    // // members doesn't form a cycle because we checked that this extension doesn't
+    // // transitively depend on said members. TODO: Refine wording
+    //
+    // // Save extension
+    // extensionState[extensionDecl] = newExtensionState
+    // // Remove from unresovled
+    // unresolvedExtensions[sourceFile, default: []].remove(extensionDecl)
+    //
+    // // Return which extensions broke
+    // return .success(invalidatedExtensions)
+  }
+}
 
-    // Save extension
-    extensionState[extensionDecl] = newExtensionState
-    // Remove from unresovled
-    unresolvedExtensions[sourceFile, default: []].remove(extensionDecl)
+// MARK: Qualified Type Lookup
 
-    // Return which extensions broke
-    return .success(invalidatedExtensions)
+extension SymbolTable3 {
+  @_spi(_QualifiedLookupTests) public enum QualifiedTypeLookupFailure: Error {
+    /// Type syntax doesn't have source-file root or source-file root isn't in
+    /// module map.
+    case unregisteredSourceRoot
+
+    case lookupFailure(TypeDependencyGraph.QualifiedTypeLookupFailure)
+  }
+
+  func findTypeMember(
+    baseType: NominalTypeRef,
+    memberTypeName: Identifier,
+    introducingTypeSyntax: TypeLikeSyntax,
+    dependencyTracker: inout DependencyTracker,
+  ) -> Result<[TypeDeclSyntax], QualifiedTypeLookupFailure> {
+    // TODO: Get rid of SourceFileRoot failure (require it be passed by the caller)
+    guard
+      let registeredTypeSyntax = SourceFileRoot(introducingTypeSyntax),
+      let module = moduleMap[registeredTypeSyntax.fileRoot]
+    else {
+      return .failure(QualifiedTypeLookupFailure.unregisteredSourceRoot)
+    }
+
+    return dependencyGraph.findTypeMember(
+      baseType: baseType,
+      memberTypeName: memberTypeName,
+      origin: (typeSyntax: registeredTypeSyntax, module: module),
+      moduleMap: moduleMap,
+      dependencyTracker: &dependencyTracker
+    ).mapError(QualifiedTypeLookupFailure.lookupFailure)
   }
 }
 
 // MARK: Debug Print
 
-extension SymbolTable3: CustomDebugStringConvertible {
-  public var debugDescription: String {
-    let typesDescription = typeState.values.map(\.debugDescription)
-    let extensionsDescription = extensionState.map({ (extensionDecl, extensionState) in
-      "\(extensionDecl._memberlessDescription): \(extensionState)"
-    })
-    return "SymbolTable3(types: \(typesDescription), extensionState: \(extensionsDescription)"
-  }
-}
+// extension SymbolTable3: CustomDebugStringConvertible {
+//   public var debugDescription: String {
+//     let typesDescription = typeState.values.map(\.debugDescription)
+//     let extensionsDescription = extensionState.map({ (extensionDecl, extensionState) in
+//       "\(extensionDecl._memberlessDescription): \(extensionState)"
+//     })
+//     return "SymbolTable3(types: \(typesDescription), extensionState: \(extensionsDescription)"
+//   }
+// }
 
 extension ExtensionBindingResult.Dependency: CustomDebugStringConvertible {
   public var debugDescription: String {

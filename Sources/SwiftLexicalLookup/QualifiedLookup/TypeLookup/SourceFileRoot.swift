@@ -17,16 +17,23 @@ struct SourceFileRoot<Node: SyntaxProtocol> {
   /// Invariant: Must always be a node whose `root` is a `SourceFileSyntax`
   private(set) var node: Node
 
-  private init(_unchecked: Node) { self.node = _unchecked }
-}
-
-extension SourceFileRoot: SyntaxProtocol {
-  init?(_ node: __shared some SyntaxProtocol) {
+  private init(_unchecked: __shared Node) { self.node = _unchecked }
+  private init?(_checked node: __shared some SyntaxProtocol) {
     // Root must be source file
     guard node._syntaxNode.root.is(SourceFileSyntax.self) else { return nil }
 
     guard let node = Node(node) else { return nil }
     self.init(_unchecked: node)
+  }
+}
+
+extension SourceFileRoot: SyntaxProtocol {
+  init?(_ node: __shared some SyntaxProtocol) {
+    self.init(_checked: node)
+  }
+
+  init?(_ node: __shared Node) {
+    self.init(_checked: node)
   }
 
   /// Attempts to cast the current syntax node to a given specialized syntax type,

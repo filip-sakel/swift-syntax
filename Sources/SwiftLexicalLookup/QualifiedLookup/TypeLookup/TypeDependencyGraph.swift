@@ -89,14 +89,17 @@ public struct TypeDependencyGraph {
   struct ExtensionDependency {
     let dependencyExtension: ExtensionDeclSyntax, member: TypeMember
   }
-  struct ExtensionState {
+  @_spi(_QualifiedLookupTests) public struct ExtensionState: Sendable {
     // TODO: Assumes main decls don't introduce dependencies (see discussion below)
     // Invariant: The extensions listed must be valid and successfully bound to a type in `extensionsToState`
     fileprivate(set) var dependencies: [ExtensionDependency],
       extensionDecl: ExtensionDeclSyntax,
       resolvedType: Result<QualifiedTypeName, BindingFailure>
   }
-  struct ExtendedType {
+  struct NominalType {
+    /// Keeps track of mutations to assert data didn't change between calls
+    fileprivate private(set) var version = 0
+
     /// Invariants: count >= 1; sorted by position in increasing order
     private var _mainDecls: [MappedDeclGroup<NominalTypeDeclSyntax>]
     private(set) var boundExtensions: [SymbolTable3.Module: [MappedDeclGroup<ExtensionDeclSyntax>]]
@@ -136,21 +139,23 @@ public struct TypeDependencyGraph {
     fileprivate consuming func _bindingExtension(
       _ mappedExtensionDecl: MappedDeclGroup<ExtensionDeclSyntax>,
       module: SymbolTable3.Module
-    ) -> ExtendedType? {
+    ) -> NominalType? {
       var copy = self
       #if DEBUG
       guard copy._boundExtensionsSet.insert(mappedExtensionDecl.node).inserted else { return nil }
       #endif
+      copy.version &+= 1
       copy.boundExtensions[module, default: []].append(mappedExtensionDecl)
       return copy
     }
 
-    func addingRedeclaration(_ mainDecl: MappedDeclGroup<NominalTypeDeclSyntax>) -> ExtendedType? {
+    func addingRedeclaration(_ mainDecl: MappedDeclGroup<NominalTypeDeclSyntax>) -> NominalType? {
       // This check takes linear time w.r.t. `_mainDecls`; however, we don't
       // expect to have many redeclarations for the same type.
       guard !_mainDecls.contains(mainDecl) else { return nil }
 
       var copy = self
+      copy.version &+= 1
       // We add and sort, maintaining `_mainDecls` invariants
       copy._mainDecls.append(mainDecl)
       copy._mainDecls.sort(by: { $0.declGroup.position < $1.declGroup.position })
@@ -159,7 +164,7 @@ public struct TypeDependencyGraph {
   }
 
   /// Updates when we register nominal types and bind extensions
-  var namesToTypes: [QualifiedTypeName: ExtendedType]
+  var namesToTypes: [QualifiedTypeName: NominalType]
   // /// Updates when we register nominal types and bind extensions
   // var parentsToTypeMembers: [QualifiedTypeName: TypeTable]
   var extensionsToState: [ExtensionDeclSyntax: ExtensionState]
@@ -172,9 +177,9 @@ public struct TypeDependencyGraph {
 
 // MARK: Lookup
 
-struct DependencyTracker {
+@_spi(_QualifiedLookupTests) public struct DependencyTracker {
   /// Note: We don't guarantee that dependencies are unique.
-  var dependencies: [QualifiedLookupDependency<QualifiedTypeName>]
+  var dependencies: [QualifiedLookupDependency<QualifiedTypeName>] = []
 }
 
 extension TypeDependencyGraph.TypeMember {
@@ -195,12 +200,23 @@ extension TypeDependencyGraph.ExtensionDependency {
   }
 }
 
+// TODO: Should we also have symbol-table _version
+@_spi(_QualifiedLookupTests) public struct NominalTypeRef: Hashable, Sendable {
+  let qualifiedName: QualifiedTypeName
+  fileprivate let version: Int
+
+  init(qualifiedName: QualifiedTypeName, nominal: __shared TypeDependencyGraph.NominalType) {
+    self.qualifiedName = qualifiedName
+    self.version = nominal.version
+  }
+}
+
 extension TypeDependencyGraph {
-  enum QualifiedTypeLookupFailure: Error {
+  @_spi(_QualifiedLookupTests) public enum QualifiedTypeLookupFailure: Error {
     case invalidBase
 
-    // TODO: Fold into this error type
-    case memberLookupFailure(NominalType.MemberLookupFailure)
+    // TODO: Remove
+    // case memberLookupFailure(TypeDependencyGraph.NominalType.MemberLookupFailure)
     // enum MemberLookupFailure: Error {
     //   case fileNotInModuleMap(SourceFileSyntax)
     //   case declNotAttachedToSourceFile(DeclGroupSyntaxType)
@@ -208,14 +224,17 @@ extension TypeDependencyGraph {
     // }
   }
   func findTypeMember(
-    baseTypeName: QualifiedTypeName,
+    baseType: NominalTypeRef,
     memberTypeName: Identifier,
-    origin: (typeSyntax: SourceFileRoot<TypeLikeSyntax>, module: String),
+    origin: (typeSyntax: SourceFileRoot<TypeLikeSyntax>, module: SymbolTable3.Module),
     moduleMap: [SourceFileSyntax: SymbolTable3.Module],
     dependencyTracker: inout DependencyTracker
   ) -> Result<[TypeDeclSyntax], QualifiedTypeLookupFailure> {
     // Diagnose invalid base
-    guard let registeredType = namesToTypes[baseTypeName] else {
+    guard
+      let registeredType = namesToTypes[baseType.qualifiedName],
+      registeredType.version == baseType.version
+    else {
       return .failure(QualifiedTypeLookupFailure.invalidBase)
     }
 
@@ -231,7 +250,7 @@ extension TypeDependencyGraph {
     func organizeDeclGroup(_ declGroup: MappedDeclGroup<DeclGroupSyntaxType>) {
       if declGroup.fileRoot == origin.typeSyntax.fileRoot {
         fileDecls.append(declGroup)
-      } else if moduleMap[declGroup.fileRoot] == moduleMap[origin.typeSyntax.fileRoot] {
+      } else if moduleMap[declGroup.fileRoot] == origin.module {
         otherInternalDecls.append(declGroup)
       } else {
         externalDecls.append(declGroup)
@@ -286,7 +305,7 @@ extension TypeDependencyGraph {
       dependencyTracker.dependencies.append(
         QualifiedLookupDependency(
           extensionDecl: introducingExtension.node,
-          extendedTypeName: baseTypeName,
+          extendedTypeName: baseType.qualifiedName,
           member: memberTypeName,
           typeDecls: typeDecls
         )
@@ -307,7 +326,7 @@ extension TypeDependencyGraph {
     qualifiedName: QualifiedTypeName,
     mainDecl: SourceFileRoot<NominalTypeDeclSyntax>,
     configuredRegions: ConfiguredRegions?
-  ) -> Result<Void, NominalRegistrationFailure> {
+  ) -> Result<NominalTypeRef, NominalRegistrationFailure> {
     // Check parent is registered
     if let (qualifiedBaseName, memberName: _) = qualifiedName.baseAndMemberName,
       namesToTypes[qualifiedBaseName] == nil
@@ -327,16 +346,18 @@ extension TypeDependencyGraph {
     // If this type is new, just register and return
     // TODO: Test following, e.g. struct A { struct B {} }; extension A { struct B {} }
     guard let existingType = namesToTypes[qualifiedName] else {
-      namesToTypes[qualifiedName] = ExtendedType(mainDecl: mappedMainDecl)
-      return .success(())
+      let freshNominal = NominalType(mainDecl: mappedMainDecl)
+      namesToTypes[qualifiedName] = freshNominal
+      return .success(NominalTypeRef(qualifiedName: qualifiedName, nominal: freshNominal))
     }
+
     // Ensures we don't have duplicate redeclaration (i.e. we can't register the same syntax node twice)
     guard let typeWithRedeclaration = existingType.addingRedeclaration(mappedMainDecl) else {
       return .failure(NominalRegistrationFailure.unexpectedReregistration(existingMainDecl: mainDecl.node))
     }
     namesToTypes[qualifiedName] = typeWithRedeclaration
 
-    return .success(())
+    return .success(NominalTypeRef(qualifiedName: qualifiedName, nominal: typeWithRedeclaration))
 
     // TODO: Delete assertion and collection for `typeMembers` approach
     //
@@ -375,7 +396,7 @@ extension TypeDependencyGraph {
 
 // MARK: Extension Binding
 
-extension TypeDependencyGraph.ExtendedType {
+extension TypeDependencyGraph.NominalType {
   // For `typeMembers` approach:
   //
   // consuming fileprivate func _removingDeclGroupMembers(
@@ -665,11 +686,11 @@ extension TypeDependencyGraph {
 
 extension TypeDependencyGraph {
   typealias InvalidatedExtensions = [ExtensionState]
-  enum ExtensionAdmissionFailure: Error {
+  @_spi(_QualifiedLookupTests) public enum ExtensionAdmissionFailure: Error {
     case cannotReadmit(existingState: ExtensionState)
     case invalidDependencyExtension(extensionState: ExtensionState?)
   }
-  fileprivate mutating func _admitExtension(
+  mutating func _admitExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     extensionDeclModule: SymbolTable3.Module,
     isUpdatingInvalidating isFixingInvalidating: Bool,
@@ -774,7 +795,7 @@ extension TypeDependencyGraph {
       }
 
       // Find the referenced type
-      guard var extendedType = namesToTypes[dependencyType] else {
+      guard var nominalType = namesToTypes[dependencyType] else {
         fatalError(
           "[SwiftLexicalLookup] Internal error: Extension \(dependency.extensionDecl._memberlessDescription) bound to type \(dependencyType), which isn't in the graph."
         )
@@ -782,11 +803,11 @@ extension TypeDependencyGraph {
 
       // Mark the dependence
       assert(
-        !extendedType.dependents.contains(where: { $0.0 == extensionDecl.node }),
+        !nominalType.dependents.contains(where: { $0.0 == extensionDecl.node }),
         "[SwiftLexicalLookup] Internal error: Unexpectedly found not-yet-admitted extension \(extensionDecl.node._memberlessDescription) in dependents list of \(dependency.extensionDecl._memberlessDescription)."
       )
       // TODO: Refactor to avoid repeating this step which we already did in cycle detection
-      extendedType.dependents.append((extensionDecl.node, TypeMember(_from: dependency)))
+      nominalType.dependents.append((extensionDecl.node, TypeMember(_from: dependency)))
     }
 
     // Remove invalidated extensions
@@ -842,5 +863,24 @@ extension TypeDependencyGraph {
     namesToTypes[extendedTypeName] = newExtendedType
 
     return .success(invalidatedExtensions)
+  }
+}
+
+// MARK: Debugging
+
+extension NominalTypeRef: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    "NominalTypeRef(name: \(qualifiedName.debugDescription), version: \(version))"
+  }
+}
+
+extension QualifiedLookupDependency: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    """
+    QualifiedLookupDependency(
+      extensionDecl: \(extensionDecl._memberlessDescription), extendedTypeName: \(extendedTypeName.debugDescription)
+      member: \(member.name),
+      typeDecls: \(typeDecls.map(\.trimmedDescription)))
+    """
   }
 }

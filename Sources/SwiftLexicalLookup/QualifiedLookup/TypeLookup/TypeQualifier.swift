@@ -292,7 +292,7 @@ extension TypeQualifierFailure {
 }
 
 extension TypeQualifierFailure: CustomDebugStringConvertible
-where MinimalNominal == ResolvedNominalTypeReference, ExtendedNominal == NominalType {
+where MinimalNominal == ResolvedNominalTypeReference, ExtendedNominal == NominalTypeRef {
   public var debugDescription: String {
     _describeDebug(
       resolveMininalNominal: \.qualifiedName.debugDescription,
@@ -377,7 +377,7 @@ extension TypeQualifierFailure {
     return result
   }
 
-  public typealias Failure = TypeQualifierFailure<ResolvedNominalTypeReference, NominalType>
+  public typealias Failure = TypeQualifierFailure<ResolvedNominalTypeReference, NominalTypeRef>
 
   let symbolTable: SymbolTable3
   var requestedExtensions: OrderedSet<ExtensionDeclSyntax> = []
@@ -409,7 +409,7 @@ extension TypeQualifierFailure {
   //    to store in a property), then we need to consider that `ProtoA` != ``
   public mutating func resolveSyntax(
     typeSyntax: TypeSyntax,
-    memberDependencies: inout [ExtensionBindingResult.Dependency],
+    memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<TypeSyntax>
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(request: "Resolve syntax `\(typeSyntax.trimmedDescription)`", describe: \._debugDescription) {
@@ -423,7 +423,7 @@ extension TypeQualifierFailure {
 
   public mutating func _resolveSyntax(
     typeSyntax: TypeSyntax,
-    memberDependencies: inout [ExtensionBindingResult.Dependency],
+    memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<TypeSyntax>
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     // Ensure we're not forming a cycle
@@ -625,7 +625,7 @@ extension TypeQualifierFailure {
   /// things like extending an existential (e.g. `extension any Collection`).
   @_spi(_QualifiedLookupTests) public mutating func resolveExtendedTypeSyntax(
     extensionDecl: ExtensionDeclSyntax,
-    memberDependencies: inout [ExtensionBindingResult.Dependency]
+    memberDependencies: inout DependencyTracker
   ) -> Result<ResolvedNominalTypeReference, Failure> {
     withLogging(
       request: "Extended type syntax `\(extensionDecl.extendedType.trimmedDescription)`",
@@ -638,7 +638,7 @@ extension TypeQualifierFailure {
   /// Implements `resolveExtendedTypeSyntax`
   fileprivate mutating func _resolveExtendedTypeSyntax(
     extensionDecl: ExtensionDeclSyntax,
-    memberDependencies: inout [ExtensionBindingResult.Dependency]
+    memberDependencies: inout DependencyTracker
   ) -> Result<ResolvedNominalTypeReference, Failure> {
     // TODO: Make comment more concise
     //
@@ -692,7 +692,7 @@ extension TypeQualifierFailure {
   /// Note: We don't resolve generic parameters.
   fileprivate mutating func resolveTypeReference(
     typeComponent: ImplicitTypeReferenceComponent,
-    memberDependencies: inout [ExtensionBindingResult.Dependency],
+    memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<TypeSyntax>
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
@@ -710,7 +710,7 @@ extension TypeQualifierFailure {
   /// Implements `resolveTypeReference`
   fileprivate mutating func _resolveTypeReference(
     typeComponent: ImplicitTypeReferenceComponent,
-    memberDependencies: inout [ExtensionBindingResult.Dependency],
+    memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<TypeSyntax>
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     // Perfom unqualified lookup up to find the base type's declaration
@@ -890,7 +890,7 @@ extension TypeQualifierFailure {
   fileprivate mutating func resolveTypeDecl(
     typeDecl: TypeDeclSyntax,
     originatingSyntax: TypeLikeSyntax,
-    memberDependencies: inout [ExtensionBindingResult.Dependency],
+    memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<TypeSyntax>
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
@@ -910,7 +910,7 @@ extension TypeQualifierFailure {
   fileprivate mutating func _resolveTypeDecl(
     typeDecl: TypeDeclSyntax,
     originatingSyntax: TypeLikeSyntax,
-    memberDependencies: inout [ExtensionBindingResult.Dependency],
+    memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<TypeSyntax>
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     // We mainly handle nominal types; type aliases are trivially recursive, and we skip
@@ -1006,7 +1006,7 @@ extension TypeQualifierFailure {
   fileprivate mutating func resolveMember(
     baseType: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>,
     typeMember: ImplicitTypeReferenceComponent,
-    memberDependencies: inout [ExtensionBindingResult.Dependency],
+    memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<TypeSyntax>
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
@@ -1026,7 +1026,7 @@ extension TypeQualifierFailure {
   fileprivate mutating func _resolveMember(
     baseType: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>,
     typeMember: ImplicitTypeReferenceComponent,
-    memberDependencies: inout [ExtensionBindingResult.Dependency],
+    memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<TypeSyntax>
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     // Get base type(s), or throw (can't resolve anything without the base)
@@ -1078,7 +1078,7 @@ extension TypeQualifierFailure {
     // diagnostics.
     var results = [TypeDeclSyntax: MemberLookupResult<ResolvedNominalTypeReference>]()
     var failures = [(TypeLikeSyntax, Failure)]()
-    var nominalBaseTypes = [NominalType]()
+    var nominalBaseTypes = [NominalTypeRef]()
 
     for baseType in baseTypes {
       // We'll collect the result, and type syntax
@@ -1109,66 +1109,57 @@ extension TypeQualifierFailure {
       nominalBaseTypes.append(nominalBaseType)
 
       // Perform direct type lookup and mark dependency
-      // TODO: Figure out imported modules
-      let originatingSyntax = Syntax(typeMember.introducingSyntax)
-      guard let file = originatingSyntax.root.as(SourceFileSyntax.self) else {
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Unexpectedly had to resolve type syntax whose root isn't a source file."
+      // TODO: Remove file check
+      //
+      // let originatingSyntax = Syntax(typeMember.introducingSyntax)
+      // guard let file = originatingSyntax.root.as(SourceFileSyntax.self) else {
+      //   fatalError(
+      //     "[SwiftLexicalLookup] Internal error: Unexpectedly had to resolve type syntax whose root isn't a source file."
+      //   )
+      // }
+      let memberTypeDeclsResult: Result<[TypeDeclSyntax], SymbolTable3.QualifiedTypeLookupFailure> =
+        symbolTable.findTypeMember(
+          baseType: nominalBaseType,
+          memberTypeName: typeMember.name,
+          introducingTypeSyntax: typeMember.introducingSyntax,
+          dependencyTracker: &memberDependencies
         )
-      }
-      let lookupPosition = (file: file, position: originatingSyntax.position)
-      let memberTypeDeclsResult = nominalBaseType.findMemberTypes(
-        component: typeMember,
-        lookupPosition: lookupPosition,
-        importedModules: [],
-        moduleMap: symbolTable.moduleMap,
-        configuredRegions: symbolTable.configuredRegions,
-        _verbose: _verbose
-      )
 
       // Handle failures
-      let memberTypeDecls: [ExtensionDeclSyntax?: [TypeDeclSyntax]]
+      let memberTypeDecls: [TypeDeclSyntax]
       switch memberTypeDeclsResult {
-      case .success(let typeDecls):
-        memberTypeDecls = Dictionary(
-          typeDecls,
-          uniquingKeysWith: { _, secondExtension in
-            // A postcondition in the function docs promises this.
-            fatalError(
-              "[SwiftLexicalLookup] Internal error: `findMemberTypes` should have only generated one extension."
-            )
-          }
-        )
-      case .failure(.declNotAttachedToSourceFile), .failure(.fileNotInModuleMap):
+      case .success(let success):
+        memberTypeDecls = success
+      case .failure(.unregisteredSourceRoot):
         // We check that the root is a source file in the symbol table
         // at the top of ``resolveSyntax``.
         fatalError(
           "[SwiftLexicalLookup] Internal error: Unexpectedly asked to resolve a type declaration whose root isn't a file or a file not registered in the symbol table."
         )
-      case .failure(.selectedNonImportedModule):
+      case .failure(.lookupFailure(.invalidBase)):
         fatalError(
-          "[SwiftLexicalLookup] Internal error: Unexpectedly requested direct lookup for a module that wasn't imported."
+          "[SwiftLexicalLookup] Internal error: Base type \(nominalBaseType) was unexpectedly invalid."
         )
       }
 
-      // Save the dependency
-      //
-      // First, group the decls by extension
-      let dependency = ExtensionBindingResult.Dependency(
-        baseTypeName: baseType.qualifiedName,
-        typeMemberName: typeMember.name,
-        resolvedDecls: memberTypeDecls
-      )
-      log("Recording dependency: \(dependency.debugDescription)")
-      memberDependencies.append(dependency)
+      // TODO: Remove
+      // // Save the dependency
+      // //
+      // // First, group the decls by extension
+      // let dependency = ExtensionBindingResult.Dependency(
+      //   baseTypeName: baseType.qualifiedName,
+      //   typeMemberName: typeMember.name,
+      //   resolvedDecls: memberTypeDecls
+      // )
+      // log("Recording dependency: \(dependency.debugDescription)")
+      // memberDependencies.append(dependency)
 
       // Process the results
-      let flatMemberTypes = memberTypeDecls.flatMap(\.value)
       // 1. Skip this nominal type if it didn't contain said type member.
       //
       //    E.g. In `(Encodable & Collection<Int>).Element`, `Encodable` may not have an `Element`
       // type member.
-      guard let firstTypeDecl = flatMemberTypes.first else {
+      guard let firstTypeDecl = memberTypeDecls.first else {
         memberResult = Result.success(nil)
         continue
       }
@@ -1179,8 +1170,8 @@ extension TypeQualifierFailure {
       //      let a: A // ❌ ambiguous
       // TODO: Ensure we're not shadowing; I think
       // we can only shadow type decls from external modules
-      guard flatMemberTypes.count == 1 else {
-        memberResult = Result.failure(Failure.ambiguousTypeDecl(flatMemberTypes))
+      guard memberTypeDecls.count == 1 else {
+        memberResult = Result.failure(Failure.ambiguousTypeDecl(memberTypeDecls))
         continue
       }
       // There's just one; use that
@@ -1236,7 +1227,7 @@ extension TypeQualifierFailure {
   /// extensions bound.
   @_spi(_QualifiedLookupTests) public mutating func resolveNominalType(
     typeReference: ResolvedNominalTypeReference
-  ) -> NominalType {
+  ) -> NominalTypeRef {
     withLogging(
       request: "Extended nominal`\(typeReference.qualifiedName)`",
       describe: \.debugDescription
@@ -1248,7 +1239,7 @@ extension TypeQualifierFailure {
   /// Implements `resolveNominalType`
   fileprivate mutating func _resolveNominalType(
     typeReference: ResolvedNominalTypeReference
-  ) -> NominalType {
+  ) -> NominalTypeRef {
     // TODO: See if we actually need to check for accessible extensions even if
     // there's an ongoing request.
     // TODO: At least find a way to cache available extensions. (E.g. don't
@@ -1261,18 +1252,23 @@ extension TypeQualifierFailure {
     // 3. The symbol table has a cached/resolved version
 
     // Get the nominal type from the symbol table (or register accordingly)
-    let currentNominalResult = symbolTable.registerNominalTypeReference(
-      qualifiedName: typeReference.qualifiedName,
-      mainDecl: typeReference.mainDecl
-    )
+    let currentNominalResult: Result<NominalTypeRef, TypeDependencyGraph.NominalRegistrationFailure> =
+      symbolTable.registerNominalTypeReference(
+        qualifiedName: typeReference.qualifiedName,
+        mainDecl: typeReference.mainDecl
+      )
     // Handle reregistration (we should diagnose reregistrations and not save them in the table)
-    let currentNominal: NominalType
+    let currentNominal: NominalTypeRef
     switch currentNominalResult {
     case .success(let success):
       currentNominal = success
-    case .failure(SymbolTable3.NominalRegistrationFailure.invalidReregistration(existingMainDecl: _)):
+    case .failure(.unexpectedReregistration(existingMainDecl: _)):
       fatalError(
         "[SwiftLexicalLookup] Internal error: Unexpectedly found nominal type `\(typeReference.qualifiedName)` registered under a different main declaration."
+      )
+    case .failure(.parentNotRegistered(let parentName)):
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Tried to register \(typeReference.qualifiedName.debugDescription) but the parent \(parentName.debugDescription) is unexpectedly unregistered.."
       )
     }
 
@@ -1335,15 +1331,15 @@ extension TypeQualifierFailure {
 
       // Resolve extended type and try to bind, logging the type-resolution
       // result dependencies and invalidated extensions.
-      var (_, _, invalidatedExtensions) = withLogging(
+      var (_, _, invalidatedExtensions): (_, _, TypeDependencyGraph.InvalidatedExtensions) = withLogging(
         request: "Binding `\(extensionDecl._memberlessDescription)`",
         describe: {
           (
             extendedTypeResult: Result<ResolvedNominalTypeReference, Failure>,
-            extensionDependencies: [ExtensionBindingResult.Dependency],
-            invalidatedExtensions: SymbolTable3.InvalidatedExtensions
+            extensionDependencies: DependencyTracker,
+            invalidatedExtensions: TypeDependencyGraph.InvalidatedExtensions
           ) in
-          "\(extendedTypeResult._debugDescription); Dependencies: \(extensionDependencies.map(\.debugDescription))"
+          "\(extendedTypeResult._debugDescription); Dependencies: \(extensionDependencies.dependencies.map(\.debugDescription))"
         },
         perform: {
           // Resolve, tracking dependencies
@@ -1352,14 +1348,14 @@ extension TypeQualifierFailure {
           // this is considered a completely separate type resolution. We
           // track these dependencies in the symbol table's corresponding
           // extension state.
-          var extensionDependencies = [ExtensionBindingResult.Dependency]()
+          var extensionDependencies = DependencyTracker()
           let extendedTypeResult = $0.resolveExtendedTypeSyntax(
             extensionDecl: extensionDecl,
             memberDependencies: &extensionDependencies
           )
 
           // Register in the symbol table
-          let bindingResult: Result<SymbolTable3.InvalidatedExtensions, SymbolTable3.ExtensionBindingFailure> =
+          let bindingResult: Result<TypeDependencyGraph.InvalidatedExtensions, SymbolTable3.ExtensionBindingFailure> =
             $0.symbolTable.bindExtension(
               extensionDecl,
               // Only get the name
@@ -1376,7 +1372,21 @@ extension TypeQualifierFailure {
           case .failure(let failure):
             // Ensure we handle future failure types
             switch failure {
-            // TODO: Reduce possible failures (e.g. nonRegisteredSyntaxRoot should go)
+            case .nonRegisteredSyntaxRoot:
+              fatalError(
+                "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly not in symbol table"
+              )
+            case .admissionFailure(.cannotReadmit(let existingState)):
+              fatalError(
+                "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly readmitted; old state \(existingState)."
+              )
+            case .admissionFailure(.invalidDependencyExtension(let extensionState)):
+              fatalError(
+                "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly has wrong dependency; state \(extensionState.debugDescription)."
+              )
+            // TODO: Remove old failures handling
+            //
+            // Reduce possible failures (e.g. nonRegisteredSyntaxRoot should go)
             // (e.g. invalidated/binding modes may be able to simplify)
             //
             // Explanation:
@@ -1390,58 +1400,63 @@ extension TypeQualifierFailure {
             //
             // // Old errors:
             // // .boundToUnresolvedName: We checked for this at the start of this function
-            case .nonRegisteredSyntaxRoot, .cannotFixNonInvalidated, .cannotBindInvalidated, .alreadyResolved,
-              .invalidReregistration, .bindingBeforeFixingInvalidatedExtensions,
-              .invalidDependenceOnNonResolvedExtension:
-              fatalError(
-                "[SwiftLexicalLookup] Internal error: Unexpected failure when attempting to bind extension `\(extensionDecl._memberlessDescription)`: \(failure); extension: \(extensionDecl.trimmedDescription)"
-              )
+            // case .nonRegisteredSyntaxRoot, .cannotFixNonInvalidated, .cannotBindInvalidated, .alreadyResolved,
+            //   .invalidReregistration, .bindingBeforeFixingInvalidatedExtensions,
+            //   .invalidDependenceOnNonResolvedExtension:
+            //   fatalError(
+            //     "[SwiftLexicalLookup] Internal error: Unexpected failure when attempting to bind extension `\(extensionDecl._memberlessDescription)`: \(failure); extension: \(extensionDecl.trimmedDescription)"
+            //   )
             }
           }
         }
       )
       // Log invalidated
       log(
-        "Extension `\(extensionDecl._memberlessDescription)` invalidated: \(invalidatedExtensions.map(\._memberlessDescription))"
+        "Extension `\(extensionDecl._memberlessDescription)` invalidated: \(invalidatedExtensions.map(\.extensionDecl._memberlessDescription))"
       )
 
       // Fix invalidated extensions
       // TODO: Restructure code for simplicity
-      while let invalidatedExtensionDecl = invalidatedExtensions.first {
-        // TODO: Figure out if it's actually possible for an invalidated extension
-        // to transitively reintroduce itself (i.e. if `invalidatedExtensions` could be
-        // an array instead of a set where we just pop the first invalidated extension)
-        defer { invalidatedExtensions.remove(invalidatedExtensionDecl) }
+      while let invalidatedExtension = invalidatedExtensions.first {
+        // TODO: Could we straight-up pop during the while loop condition.
+        defer {
+          let poppedExtension = invalidatedExtensions.removeFirst()
+          assert(
+            poppedExtension.extensionDecl == invalidatedExtension.extensionDecl,
+            "[SwiftLexicalLookup] Internal error: Unexpectedly found different invalidated extension when popping."
+          )
+        }
 
         // Re-resolve with dependency tracking
-        log("Recomputing invalidated `\(invalidatedExtensionDecl._memberlessDescription)`")
+        log("Recomputing invalidated `\(invalidatedExtension.extensionDecl._memberlessDescription)`")
         let (_, _, nestedInvalidatedExtensions) = withLogging(
-          request: "Fixing invalidated `\(invalidatedExtensionDecl._memberlessDescription)`",
+          request: "Fixing invalidated `\(invalidatedExtension.extensionDecl._memberlessDescription)`",
           describe: {
             (
               extendedTypeResult: Result<ResolvedNominalTypeReference, Failure>,
-              extensionDependencies: [ExtensionBindingResult.Dependency],
-              invalidatedExtensions: SymbolTable3.InvalidatedExtensions
+              extensionDependencies: DependencyTracker,
+              invalidatedExtensions: TypeDependencyGraph.InvalidatedExtensions
             ) in
-            "\(extendedTypeResult._debugDescription); Dependencies: \(extensionDependencies.map(\.debugDescription))"
+            "\(extendedTypeResult._debugDescription); Dependencies: \(extensionDependencies.dependencies.map(\.debugDescription))"
           },
           perform: {
-            var extensionDependencies = [ExtensionBindingResult.Dependency]()
+            var extensionDependencies = DependencyTracker()
             let extendedTypeResult = $0.resolveExtendedTypeSyntax(
-              extensionDecl: invalidatedExtensionDecl,
+              extensionDecl: invalidatedExtension.extensionDecl,
               memberDependencies: &extensionDependencies
             )
 
             // Register in the symbol table
-            let nestedBindingResult: Result<SymbolTable3.InvalidatedExtensions, SymbolTable3.ExtensionBindingFailure> =
-              $0.symbolTable.fixInvalidatedExtension(
-                invalidatedExtensionDecl,
-                // Only get the name
-                to: extendedTypeResult.map({ typeReference in
-                  (typeReference.qualifiedName, typeReference.mainDecl)
-                }),
-                dependencies: extensionDependencies
-              )
+            let nestedBindingResult:
+              Result<TypeDependencyGraph.InvalidatedExtensions, SymbolTable3.ExtensionBindingFailure> =
+                $0.symbolTable.fixInvalidatedExtension(
+                  invalidatedExtension.extensionDecl,
+                  // Only get the name
+                  to: extendedTypeResult.map({ typeReference in
+                    (typeReference.qualifiedName, typeReference.mainDecl)
+                  }),
+                  dependencies: extensionDependencies
+                )
 
             // Return results or handle failures
             switch nestedBindingResult {
@@ -1450,38 +1465,52 @@ extension TypeQualifierFailure {
             case .failure(let failure):
               // Ensure we handle future failure types
               switch failure {
-              // TODO: Reduce possible failures (e.g. nonRegisteredSyntaxRoot should go)
-              // (e.g. invalidated/binding modes may be able to simplify)
-              //
-              // Explanation like above, except:
-              // .cannotFixNonInvalidated: We're processing extensions returned by `SymbolTable`'s
-              //   `bindExtension` and `fixInvalidatedExtension` which should be invalidated.
-              // .cannotBindInvalidated: We requested fixing; not binding.
-              // .bindingBeforeFixingInvalidatedExtensions: We're fixing invalidated extensions, so this shouldn't happen.
-              case .nonRegisteredSyntaxRoot, .cannotFixNonInvalidated, .cannotBindInvalidated, .alreadyResolved,
-                .invalidReregistration, .bindingBeforeFixingInvalidatedExtensions,
-                .invalidDependenceOnNonResolvedExtension:
+              case .nonRegisteredSyntaxRoot:
                 fatalError(
-                  "[SwiftLexicalLookup] Internal error: Unexpected failure when attempting to fix invalidated extension `\(invalidatedExtensionDecl._memberlessDescription)`: \(failure); extension: \(extensionDecl.trimmedDescription)"
+                  "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly not in symbol table"
+                )
+              case .admissionFailure(.cannotReadmit(let existingState)):
+                fatalError(
+                  "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly readmitted; old state \(existingState)."
+                )
+              case .admissionFailure(.invalidDependencyExtension(let extensionState)):
+                fatalError(
+                  "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly has wrong dependency; state \(extensionState.debugDescription)."
                 )
               }
+            //  TODO: Remove old failure handling
+            //
+            // Reduce possible failures (e.g. nonRegisteredSyntaxRoot should go)
+            // // (e.g. invalidated/binding modes may be able to simplify)
+            // //
+            // // Explanation like above, except:
+            // // .cannotFixNonInvalidated: We're processing extensions returned by `SymbolTable`'s
+            // //   `bindExtension` and `fixInvalidatedExtension` which should be invalidated.
+            // // .cannotBindInvalidated: We requested fixing; not binding.
+            // // .bindingBeforeFixingInvalidatedExtensions: We're fixing invalidated extensions, so this shouldn't happen.
+            // case .nonRegisteredSyntaxRoot, .cannotFixNonInvalidated, .cannotBindInvalidated, .alreadyResolved,
+            //   .invalidReregistration, .bindingBeforeFixingInvalidatedExtensions,
+            //   .invalidDependenceOnNonResolvedExtension:
+            //   fatalError(
+            //     "[SwiftLexicalLookup] Internal error: Unexpected failure when attempting to fix invalidated extension `\(invalidatedExtension._memberlessDescription)`: \(failure); extension: \(extensionDecl.trimmedDescription)"
+            //   )
             }
           }
         )
 
         // Enqueue invalidated extensions
-        invalidatedExtensions.formUnion(nestedInvalidatedExtensions)
+        invalidatedExtensions.append(contentsOf: nestedInvalidatedExtensions)
       }
     }
 
     // After binding all extensions, get the new nominal type
-    guard let finalizedNominal = symbolTable.typeState[typeReference.qualifiedName] else {
+    guard let finalizedNominalRef = symbolTable.getNominalTypeReference(name: typeReference.qualifiedName) else {
       // We checked the nominal type is regsitered at the start.
       fatalError(
         "[SwiftLexicalLookup] Internal error: Nominal type unexpectedly removed from symbol table after binding extensions."
       )
     }
 
-    return finalizedNominal
+    return finalizedNominalRef
   }
 }
