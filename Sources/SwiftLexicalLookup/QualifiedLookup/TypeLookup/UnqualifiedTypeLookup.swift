@@ -80,14 +80,34 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
     switch self {
     case .lookForExtension(let extensionDecl, let lookForSelectedMember):
       return
-        ".lookForExtension(\(extensionDecl.trimmedDescription), lookForSelectedMember: \(lookForSelectedMember))"
+        ".lookForExtension(\(extensionDecl._memberlessDescription), lookForSelectedMember: \(lookForSelectedMember))"
     case .lookForType(let type, let lookForSelectedMember):
       return
-        ".lookForType(\(type.trimmedDescription), lookForSelectedMember: \(lookForSelectedMember)))"
+        ".lookForType(\(type._memberlessDescription), lookForSelectedMember: \(lookForSelectedMember)))"
     case .lookForGenericParameters(let extensionDecl):
-      return ".lookForGenericParameters(in: \(extensionDecl.trimmedDescription))"
+      return ".lookForGenericParameters(in: \(extensionDecl._memberlessDescription))"
     case .lookInModule:
-      return "lookInModule"
+      return ".lookInModule"
+    case .lookInImports(let imports):
+      return ".lookInImports(\(imports.map(\.name)))"
+    }
+  }
+
+  /// Compact form of `debugDescription` for logging
+  func _compactDescription(lookedUpName: Identifier) -> String {
+    let memberSearchDescription = " > '\(lookedUpName.name)'"
+    switch self {
+    case .lookForExtension(let extensionDecl, let lookForSelectedMember):
+      // E.g. 'extension A {}' > 'B'
+      return
+        "'\(extensionDecl._memberlessDescription)'\(lookForSelectedMember ? memberSearchDescription : ""))"
+    case .lookForType(let type, let lookForSelectedMember):
+      return
+        "'\(type._memberlessDescription)'\(lookForSelectedMember ? memberSearchDescription : "")"
+    case .lookForGenericParameters(let extensionDecl):
+      return "'\(extensionDecl._memberlessDescription)' > generic parameters"
+    case .lookInModule:
+      return ".lookInModule"
     case .lookInImports(let imports):
       return ".lookInImports(\(imports.map(\.name)))"
     }

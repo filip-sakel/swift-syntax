@@ -37,7 +37,7 @@ extension MemberLookupResult: Equatable where Result: Equatable {}
 extension MemberLookupResult: Hashable where Result: Hashable {}
 
 extension MemberLookupResult {
-  internal func _description(describeMembers: ([Result]) -> String) -> String {
+  internal func _describe(describeMembers: ([Result]) -> String) -> String {
     switch self {
     case .function(let argumentCount):
       return ".function(argumentCount: \(argumentCount))"
@@ -53,7 +53,7 @@ extension MemberLookupResult {
 
 extension MemberLookupResult: CustomDebugStringConvertible where Result: CustomDebugStringConvertible {
   public var debugDescription: String {
-    _description(describeMembers: { members in
+    _describe(describeMembers: { members in
       members.map({ "```\($0.debugDescription)```" }).joined(separator: "\n")
     })
   }

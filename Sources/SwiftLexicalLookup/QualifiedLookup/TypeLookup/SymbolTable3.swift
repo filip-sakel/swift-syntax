@@ -880,7 +880,11 @@ extension SymbolTable3 {
     }
 
     // TODO: Add behind verbose flag
-    print("Find member '\(memberTypeName.name)' on type:\n\(_describeType(reference: baseType))")
+    let baseTypeDescription = baseType._describe(describeTypeName: _describeQualifiedName(_:))
+    let nominalTypeDescription = _describeType(reference: baseType)
+    print(
+      "Find member \(baseTypeDescription) > \(memberTypeName.name):\n\(nominalTypeDescription)"
+    )
 
     return dependencyGraph.findTypeMember(
       baseType: baseType,
@@ -922,18 +926,6 @@ extension ExtensionBindingResult.Dependency: CustomDebugStringConvertible {
     return "\(baseTypeName.debugDescription)/\(typeMemberName.name) == \(declsDescription)"
   }
 }
-
-// extension SymbolTable3.ExtensionBindingFailure: CustomDebugStringConvertible {
-//   public var debugDescription: String {
-//
-//   }
-// }
-
-// extension ExtensionBindingState: CustomDebugStringConvertible {
-//   public var debugDescription: String {
-//     "ExtensionBindingState()"
-//   }
-// }
 
 extension QualifiedLookupDependency {
   @_spi(_QualifiedLookupTests) public func _describe(
@@ -988,49 +980,44 @@ private struct _NominalTypeMemberHighlight: DiagnosticMessage {
 }
 
 extension SymbolTable3 {
-  /// Helper for `_describeType` below.
-  // fileprivate func _annotateDeclGroup(
-  //   _ declGroup: some DeclGroupSyntax,
-  //   typeTable: TypeTable,
-  //   name: String,
-  //   group: inout GroupedDiagnostics
-  // ) -> String {
-  //   let memberHighlights: [Diagnostic] = typeTable.typeMembersToDecls.enumerated().flatMap({
-  //     (i, nameAndMember) in
-  //     let (name, member): (Identifier, TypeMember) = nameAndMember
-  //     return member.decls.map({ memberDecl in
-  //       Diagnostic(
-  //         node: memberDecl.typeDeclSyntax,
-  //         message: _TypeMemberHighlight(message: "Member \(name.name) #\(i)")
-  //       )
-  //     })
-  //   })
-  //
-  //   let diagnosticSource = DiagnosticsFormatter.annotatedSource(
-  //     tree: declGroup,
-  //     diags: memberHighlights
-  //   )
-  //   return "\(name)\n\(diagnosticSource)\n\n"
-  // }
+  /// Helper for converting a qualified type name to a string description
+  @_spi(_QualifiedLookupTests) public func _describeQualifiedName(_ name: QualifiedTypeName) -> String {
+    name._describe(describeFileID: { fileID in
+      // Get name of first matching id
+      for (fileName, file) in moduleToSources.flatMap(\.value) {
+        guard file.id == fileID else { continue }
+        return fileName
+      }
+      return fileID.hashValue.description
+    })
+  }
+  /// Ditto for global names
+  @_spi(_QualifiedLookupTests) public func _describeQualifiedGlobalName(_ name: QualifiedTypeNameGlobalType) -> String {
+    _describeQualifiedName(QualifiedTypeName.topLevel(name))
+  }
+
   fileprivate func _annotateDeclGroup(
     _ declGroup: SourceFileRoot<DeclGroupSyntaxType>,
     typeTable: TypeTable,
     name: String,
+    typeName: QualifiedTypeNameGlobalType,
     using group: inout GroupedDiagnostics
   ) {
-    let memberNotes: [Diagnostic] = typeTable.typeMembersToDecls.enumerated().flatMap({
-      (i, nameAndMember) in
-      let (name, member): (Identifier, TypeMember) = nameAndMember
-      return member.decls.map({ memberDecl in
-        Diagnostic(
-          node: Syntax(memberDecl.typeDeclSyntax),
-          message: _NominalTypeMemberHighlight(message: "Member '\(name.name)' #\(i)")
-        )
+    let typeNameDescription = _describeQualifiedGlobalName(typeName)
+
+    let memberNotes: [Diagnostic] = typeTable.typeMembersToDecls.enumerated()
+      .flatMap({ (i, nameAndMember) in
+        let (memberName, member): (Identifier, TypeMember) = nameAndMember
+        return member.decls.map({ memberDecl in
+          Diagnostic(
+            node: Syntax(memberDecl.typeDeclSyntax),
+            message: _NominalTypeMemberHighlight(message: "Member '\(typeNameDescription) > \(memberName.name)'")
+          )
+        })
       })
-    })
 
     // Inform user if type has no members
-    let message = "\(name)\(memberNotes.isEmpty ? " (no type members)" : "")"
+    let message = "\(name) of \(typeNameDescription))"
 
     group.addDiagnostic(
       Diagnostic(
@@ -1063,20 +1050,35 @@ extension SymbolTable3 {
       return "nil"
     }
 
+    print("Nominal for \(_describeQualifiedGlobalName(typeName)): \(type)")
+
     // Get each decl group (main decl, redeclarations, extensions), get
     // their discovered member types, and label them
     //
     // TODO: Get rid of SourceFileRoot force unwraps
     var declGroups = [(declGroup: SourceFileRoot<DeclGroupSyntaxType>, typeTable: TypeTable, name: String)]()
-    declGroups.append((SourceFileRoot(DeclGroupSyntaxType(type.mainDecl.node))!, type.mainDecl.typeMap, "Main decl"))
-    for (index, redeclaration) in type.redeclarations.enumerated() {
+    declGroups.append(
+      (
+        SourceFileRoot(DeclGroupSyntaxType(type.mainDecl.node))!, type.mainDecl.typeMap,
+        "Decl"
+      )
+    )
+    for (index, mappedRedeclaration) in type.redeclarations.enumerated() {
       declGroups.append(
-        (SourceFileRoot(DeclGroupSyntaxType(redeclaration.node))!, redeclaration.typeMap, "Redeclaration \(index)")
+        (
+          SourceFileRoot(DeclGroupSyntaxType(mappedRedeclaration.node))!, mappedRedeclaration.typeMap,
+          "Redecl #\(index)"
+        )
       )
     }
     for (_, extensionDecls) in type.boundExtensions {
       for (extensionDecl, typeMap) in extensionDecls {
-        declGroups.append((SourceFileRoot(DeclGroupSyntaxType(extensionDecl.node))!, typeMap, "Extension"))
+        declGroups.append(
+          (
+            SourceFileRoot(DeclGroupSyntaxType(extensionDecl.node))!, typeMap,
+            "Extension"
+          )
+        )
       }
     }
 
@@ -1108,7 +1110,7 @@ extension SymbolTable3 {
 
     // Add each group decl
     for (declGroup, typeTable, name) in declGroups {
-      _annotateDeclGroup(declGroup, typeTable: typeTable, name: name, using: &group)
+      _annotateDeclGroup(declGroup, typeTable: typeTable, name: name, typeName: typeName, using: &group)
     }
 
     // Add group annotations

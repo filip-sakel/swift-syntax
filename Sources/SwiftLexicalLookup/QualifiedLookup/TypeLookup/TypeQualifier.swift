@@ -43,26 +43,58 @@ extension Result where Success == [TypeDeclSyntax], Failure: CustomDebugStringCo
     }
   }
 }
+extension Result where Success == ResolvedNominalTypeReference, Failure: CustomDebugStringConvertible {
+  fileprivate func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
+    switch self {
+    case .success(let success):
+      return ".success(\(success._describe(describeTypeName: describeTypeName))"
+    case .failure(let error):
+      return ".error(\(error.debugDescription))"
+    }
+  }
+}
+extension Result
+where Success == MemberLookupResult<ResolvedNominalTypeReference>, Failure: CustomDebugStringConvertible {
+  fileprivate func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
+    switch self {
+    case .success(let success):
+      return
+        ".success(\(success._describe(describeMembers: { $0.map({ $0._describe(describeTypeName: describeTypeName) }).joined(separator: ", ") }))"
+    case .failure(let error):
+      return ".error(\(error.debugDescription))"
+    }
+  }
+}
 
 /// The minimal defining components of a nominal type: the main declaration and the qualified name.
 /// Unlike ``NominalType``, doesn't include extensions.
+///
+/// TODO: Make into `NominalTypeRef` + `TypeLikeSyntax`
 @_spi(_QualifiedLookup) public struct ResolvedNominalTypeReference: Sendable, Hashable, CustomDebugStringConvertible {
   public let mainDecl: NominalTypeDeclSyntax
   public let qualifiedName: QualifiedTypeName
+  // public let nominalTypeRef: NominalTypeRef
   public let originatingSyntax: TypeLikeSyntax
 
   @_spi(_QualifiedLookup) public init(
     mainDecl: NominalTypeDeclSyntax,
     name: QualifiedTypeName,
+    // nominalTypeRef: NominalTypeRef,
     originatingSyntax: TypeLikeSyntax,
   ) {
     self.mainDecl = mainDecl
     self.qualifiedName = name
+    // self.nominalTypeRef = nominalTypeRef
     self.originatingSyntax = originatingSyntax
   }
 
+  @_spi(_QualifiedLookupTests) public func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
+    "\(describeTypeName(qualifiedName)) (\(mainDecl.kind))"
+    // "\(nominalTypeRef._describe(describeTypeName: describeTypeName)) \(mainDecl.kind)"
+  }
+
   public var debugDescription: String {
-    "\(qualifiedName) (\(mainDecl.kind))"
+    _describe(describeTypeName: \.debugDescription)
   }
 }
 extension ResolvedNominalTypeReference {
@@ -211,7 +243,7 @@ extension TypeQualifierFailure {
   ) -> String {
     let prefixStep = "  "
     func describeType<T>(_ memberResults: MemberLookupResult<T>, describe: (T) -> String) -> String {
-      return memberResults._description(describeMembers: { results in
+      return memberResults._describe(describeMembers: { results in
         results.map(describe).joined(separator: ", ")
       })
     }
@@ -412,13 +444,17 @@ extension TypeQualifierFailure {
     memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<TypeSyntax>
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
-    withLogging(request: "Resolve syntax `\(typeSyntax.trimmedDescription)`", describe: \._debugDescription) {
-      $0._resolveSyntax(
-        typeSyntax: typeSyntax,
-        memberDependencies: &memberDependencies,
-        visitedTypeSyntax: visitedTypeSyntax
-      )
-    }
+    withLogging(
+      request: "Resolve syntax `\(typeSyntax.trimmedDescription)`",
+      describe: { [symbolTable] in $0._describe(describeTypeName: symbolTable._describeQualifiedName(_:)) },
+      perform: {
+        $0._resolveSyntax(
+          typeSyntax: typeSyntax,
+          memberDependencies: &memberDependencies,
+          visitedTypeSyntax: visitedTypeSyntax
+        )
+      }
+    )
   }
 
   public mutating func _resolveSyntax(
@@ -629,10 +665,11 @@ extension TypeQualifierFailure {
   ) -> Result<ResolvedNominalTypeReference, Failure> {
     withLogging(
       request: "Extended type syntax `\(extensionDecl.extendedType.trimmedDescription)`",
-      describe: \._debugDescription
-    ) {
-      $0._resolveExtendedTypeSyntax(extensionDecl: extensionDecl, memberDependencies: &memberDependencies)
-    }
+      describe: { [symbolTable] in $0._describe(describeTypeName: symbolTable._describeQualifiedName(_:)) },
+      perform: {
+        $0._resolveExtendedTypeSyntax(extensionDecl: extensionDecl, memberDependencies: &memberDependencies)
+      }
+    )
   }
 
   /// Implements `resolveExtendedTypeSyntax`
@@ -695,16 +732,17 @@ extension TypeQualifierFailure {
     memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<TypeSyntax>
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
-    withLogging(
+    return withLogging(
       request: "Type reference `\(typeComponent.debugDescription)`",
-      describe: \._debugDescription
-    ) {
-      $0._resolveTypeReference(
-        typeComponent: typeComponent,
-        memberDependencies: &memberDependencies,
-        visitedTypeSyntax: visitedTypeSyntax
-      )
-    }
+      describe: { [symbolTable] in $0._describe(describeTypeName: symbolTable._describeQualifiedName(_:)) },
+      perform: {
+        $0._resolveTypeReference(
+          typeComponent: typeComponent,
+          memberDependencies: &memberDependencies,
+          visitedTypeSyntax: visitedTypeSyntax
+        )
+      }
+    )
   }
 
   /// Implements `resolveTypeReference`
@@ -757,6 +795,10 @@ extension TypeQualifierFailure {
       let enclosingTypeResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
       let lookForSelectedMember: Bool
 
+      // TODO: Use withLogging
+      logPrefix.append("Trying \(lookupResult._compactDescription(lookedUpName: typeComponent.name))")
+      defer { logPrefix.removeLast() }
+
       switch lookupResult {
       case .lookForType(let typeDecl, let findSelectedMember):
         enclosingTypeResult = resolveTypeDecl(
@@ -789,6 +831,7 @@ extension TypeQualifierFailure {
         enclosingTypeResult = extendedNominal.map({ MemberLookupResult.memberResults([$0]) })
         lookForSelectedMember = findSelectedMember
       case .lookForGenericParameters(let extensionDecl):
+        // TODO: Implement logging for all unqualified lookup results
         let matchingGenericParameterResult: Result<GenericParameterSyntax?, Failure> = withLogging(
           request: "Generic parameters",
           describe: { result in
@@ -895,15 +938,16 @@ extension TypeQualifierFailure {
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
       request: "Decl \(typeDecl.kind) `\(typeDecl.name.trimmedDescription)`",
-      describe: \._debugDescription
-    ) {
-      $0._resolveTypeDecl(
-        typeDecl: typeDecl,
-        originatingSyntax: originatingSyntax,
-        memberDependencies: &memberDependencies,
-        visitedTypeSyntax: visitedTypeSyntax
-      )
-    }
+      describe: { [symbolTable] in $0._describe(describeTypeName: symbolTable._describeQualifiedName(_:)) },
+      perform: {
+        $0._resolveTypeDecl(
+          typeDecl: typeDecl,
+          originatingSyntax: originatingSyntax,
+          memberDependencies: &memberDependencies,
+          visitedTypeSyntax: visitedTypeSyntax
+        )
+      }
+    )
   }
 
   /// Implements `resolveTypeDecl`
@@ -1229,11 +1273,12 @@ extension TypeQualifierFailure {
     typeReference: ResolvedNominalTypeReference
   ) -> NominalTypeRef {
     withLogging(
-      request: "Extended nominal`\(typeReference.qualifiedName)`",
-      describe: \.debugDescription
-    ) {
-      $0._resolveNominalType(typeReference: typeReference)
-    }
+      request: "Extended nominal`\(symbolTable._describeQualifiedName(typeReference.qualifiedName))`",
+      describe: { [symbolTable] in $0._describe(describeTypeName: symbolTable._describeQualifiedName(_:)) },
+      perform: {
+        $0._resolveNominalType(typeReference: typeReference)
+      }
+    )
   }
 
   /// Implements `resolveNominalType`
@@ -1338,12 +1383,14 @@ extension TypeQualifierFailure {
       var (_, _, invalidatedExtensions): (_, _, TypeDependencyGraph.InvalidatedExtensions) = withLogging(
         request: "Binding `\(extensionDecl._memberlessDescription)`",
         describe: {
-          (
+          [symbolTable] (
             extendedTypeResult: Result<ResolvedNominalTypeReference, Failure>,
             extensionDependencies: DependencyTracker,
             invalidatedExtensions: TypeDependencyGraph.InvalidatedExtensions
           ) in
-          "\(extendedTypeResult._debugDescription); Dependencies: \(extensionDependencies.dependencies.map(\.debugDescription))"
+          let resultDescription = extendedTypeResult._describe(describeTypeName: symbolTable._describeQualifiedName)
+          return
+            "\(resultDescription); Dependencies: \(extensionDependencies.dependencies.map(\.debugDescription))"
         },
         perform: {
           // Resolve, tracking dependencies
@@ -1363,8 +1410,14 @@ extension TypeQualifierFailure {
             $0.symbolTable.bindExtension(
               extensionDecl,
               // Only get the name
-              to: extendedTypeResult.map({ typeReference in
-                (qualifiedGlobalName, typeReference.mainDecl)
+              to: extendedTypeResult.map({ extendedTypeReference in
+                // FIXME: This assert shouldn't exist; extension decl should just give us a global type.
+                guard case .topLevel(let extendedGlobalName) = extendedTypeReference.qualifiedName else {
+                  fatalError(
+                    "[SwiftLexicalLookup] Internal error: Unexpectedly resolved extension to local type \(typeReference.qualifiedName)"
+                  )
+                }
+                return (extendedGlobalName, extendedTypeReference.mainDecl)
               }),
               dependencies: extensionDependencies
             )
@@ -1416,7 +1469,7 @@ extension TypeQualifierFailure {
       )
       // Log invalidated
       log(
-        "Extension `\(extensionDecl._memberlessDescription)` invalidated: \(invalidatedExtensions.map(\.extensionDecl._memberlessDescription))"
+        "Extension `\(extensionDecl._memberlessDescription)` invalidated: \(invalidatedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
       )
 
       // Fix invalidated extensions

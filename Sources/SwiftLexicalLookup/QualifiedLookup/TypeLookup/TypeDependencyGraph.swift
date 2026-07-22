@@ -779,9 +779,9 @@ extension NominalTypeRef: CustomDebugStringConvertible {
     switch storage {
     case .globalReference(let qualifiedName, let version):
       let nameDescription = describeTypeName(QualifiedTypeName.topLevel(qualifiedName))
-      return "NominalTypeRef.globalReference(name: \(nameDescription), version: \(version))"
+      return "\(nameDescription) (v\(version))"
     case .local(let nominalDecl):
-      return "NominalTypeRef.local(\(nominalDecl.node._memberlessDescription))"
+      return "\(nominalDecl.node._memberlessDescription) (local)"
     }
   }
 
