@@ -413,7 +413,7 @@ extension SymbolTable3 {
   /// Handles failed resolutions and resolutions that cause cycles.
   ///
   /// Returns: Broken extensions or binding failure.
-  func bindExtension(
+  func bindExtensionAndRegisterExtended(
     _ extensionDecl: ExtensionDeclSyntax,
     to result: Result<
       (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: NominalTypeDeclSyntax),
@@ -422,7 +422,24 @@ extension SymbolTable3 {
     // dependencies: [ExtensionBindingResult.Dependency]
     dependencies: DependencyTracker
   ) -> Result<TypeDependencyGraph.InvalidatedExtensions, ExtensionBindingFailure> {
-    _admitExtension(
+    // TODO: Refactor; super ugly (perhaps the caller should have this responsibility;
+    // also we get back a NominalTypeRef only to discard it)
+    if case .success(let (qualifiedName, mainDecl)) = result {
+      guard let registeredMainDecl = SourceFileRoot(mainDecl) else {
+        return .failure(ExtensionBindingFailure.nonRegisteredSyntaxRoot)
+      }
+      let nominalRegistrationResult = dependencyGraph.registerNominalTypeReference(
+        rawQualifiedName: QualifiedTypeName.topLevel(qualifiedName),
+        mainDecl: registeredMainDecl,
+        configuredRegions: configuredRegions
+      )
+
+      // Ensure we succeed (guards against future cases)
+      switch nominalRegistrationResult {
+      case .success(_): break
+      }
+    }
+    return _admitExtension(
       extensionDecl,
       isUpdatingInvalidating: false,
       to: result,
@@ -1050,8 +1067,6 @@ extension SymbolTable3 {
       return "nil"
     }
 
-    print("Nominal for \(_describeQualifiedGlobalName(typeName)): \(type)")
-
     // Get each decl group (main decl, redeclarations, extensions), get
     // their discovered member types, and label them
     //
@@ -1114,7 +1129,7 @@ extension SymbolTable3 {
     }
 
     // Add group annotations
-    result += DiagnosticsFormatter().annotateSources(in: group)
+    result += DiagnosticsFormatter(colorize: true).annotateSources(in: group)
 
     return result
   }

@@ -1407,7 +1407,7 @@ extension TypeQualifierFailure {
 
           // Register in the symbol table
           let bindingResult: Result<TypeDependencyGraph.InvalidatedExtensions, SymbolTable3.ExtensionBindingFailure> =
-            $0.symbolTable.bindExtension(
+            $0.symbolTable.bindExtensionAndRegisterExtended(
               extensionDecl,
               // Only get the name
               to: extendedTypeResult.map({ extendedTypeReference in
