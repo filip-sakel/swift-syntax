@@ -1262,10 +1262,12 @@ extension TypeQualifierFailure {
     switch currentNominalResult {
     case .success(let success):
       currentNominal = success
-    case .failure(.parentNotRegistered(let parentName)):
-      fatalError(
-        "[SwiftLexicalLookup] Internal error: Tried to register \(typeReference.qualifiedName.debugDescription) but the parent \(parentName.debugDescription) is unexpectedly unregistered.."
-      )
+    // TODO: Remove if we don't handle this failure
+    //
+    // case .failure(.parentNotRegistered(let parentName)):
+    //   fatalError(
+    //     "[SwiftLexicalLookup] Internal error: Tried to register \(typeReference.qualifiedName.debugDescription) but the parent \(parentName.debugDescription) is unexpectedly unregistered."
+    //   )
     // TODO: Remove old failure
     //
     // case .failure(.unexpectedReregistration(existingMainDecl: _)):

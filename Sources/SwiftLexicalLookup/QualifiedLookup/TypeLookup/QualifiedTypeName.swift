@@ -34,6 +34,7 @@ import SwiftSyntax
   /// A component of a qualified type name, external or internal. For instance,
   /// `Swift::Int` (external) and `_(FileA.swift)::MyType` (internal).
   public struct Component: Sendable, Hashable, CustomDebugStringConvertible {
+    // TODO: Just use the module identifier directly
     let qualifier: Qualifier
     let name: Identifier
 

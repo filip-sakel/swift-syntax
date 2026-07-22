@@ -122,8 +122,6 @@ public struct TypeDependencyGraph {
 
     private(set) var boundExtensions: [SymbolTable3.Module: [SourceFileRoot<ExtensionDeclSyntax>: TypeTable]]
 
-    /// FIXME: Track dependencies so we invalidate when the underlying extension is invalidated
-    ///
     /// Extensions dependending on qualified lookup of `member` on this type.
     ///
     /// This property is part of `NominalType` and not `ExtensionState` because
@@ -364,7 +362,9 @@ extension TypeDependencyGraph {
 extension TypeDependencyGraph {
   enum NominalRegistrationFailure: Error {
     // case unexpectedReregistration(existingMainDecl: NominalTypeDeclSyntax)
-    case parentNotRegistered(parentName: QualifiedTypeNameGlobalType)
+
+    // TODO: Remove if we remove this invariant.
+    // case parentNotRegistered(parentName: QualifiedTypeNameGlobalType)
   }
 
   /// Registers the given nominal-type reference or return the
@@ -386,12 +386,14 @@ extension TypeDependencyGraph {
       return .success(NominalTypeRef(localNominalType: mainDecl))
     }
 
-    // Check parent is registered
-    if let (qualifiedBaseName, member: _) = qualifiedName.baseAndMember,
-      namesToTypes[qualifiedBaseName] == nil
-    {
-      return .failure(NominalRegistrationFailure.parentNotRegistered(parentName: qualifiedBaseName))
-    }
+    // TODO: Remove if we remove this invariant.
+    //
+    // // Check parent is registered
+    // if let (qualifiedBaseName, member: _) = qualifiedName.baseAndMember,
+    //   namesToTypes[qualifiedBaseName] == nil
+    // {
+    //   return .failure(NominalRegistrationFailure.parentNotRegistered(parentName: qualifiedBaseName))
+    // }
 
     // Map out the type
     let mappedMainDecl = MappedDeclGroup.from(declGroup: mainDecl, configuredRegions: configuredRegions)
@@ -717,11 +719,28 @@ extension TypeDependencyGraph {
       }
       namesToTypes[extendedTypeName] = newInvalidatedExtensionType
 
-      // 3. Remove introduced types
-      // FIXME: Implement
-      // for (typeMember, typeDecls) in invalidatedExtensionTypeTable.typeMembersToDecls {
-      //   invalidatedExtensionTypeName
-      // }
+      // 3. Remove extension's introduced types
+      for (typeMember, _) in invalidatedExtensionTypeTable.typeMembersToDecls {
+        let potentialNominalType = invalidatedExtensionTypeName.addingComponents([
+          QualifiedTypeNameGlobalType.Component(
+            // TODO: Might be internal module!!
+            qualifier: .external(moduleName: invalidatedExtensionModule),
+            name: typeMember
+          )
+        ])
+        guard let removedTypeState = namesToTypes.removeValue(forKey: potentialNominalType) else { continue }
+        // Since the type goes missing, its extensions are invalidated
+        for (_, removedTypeExtensions) in removedTypeState.boundExtensions {
+          for (removedTypeExtension, _) in removedTypeExtensions {
+            guard let oldState = extensionsToState.removeValue(forKey: removedTypeExtension.node) else {
+              // TODO: Complain about non-upheld invariant
+              fatalError("")
+            }
+            invalidatedExtensions.append(oldState)
+          }
+        }
+        // FIXME: Need to also remove the type's dependents!!
+      }
 
       // 4. Add recursively invalidated transitive dependents
       for transitiveDependent in invalidatedExtensionType.dependents {
