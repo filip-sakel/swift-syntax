@@ -34,7 +34,7 @@ typealias IntroducingExtensionOrMainDecl = ExtensionDeclSyntax?
   case typeResolutionFailure(TypeQualifier.Failure)
   case cannotFormCycle(ExtensionBindingCycle<TypeName>)
 }
-@_spi(_QualifiedLookupTests) public typealias BindingFailure = GenericBindingFailure<QualifiedTypeName>
+@_spi(_QualifiedLookupTests) public typealias BindingFailure = GenericBindingFailure<QualifiedTypeNameGlobalType>
 
 @_spi(_QualifiedLookupTests) public struct GenericExtensionState<TypeName: Sendable>: Sendable {
   // TODO: Assumes main decls don't introduce dependencies (see discussion below)
@@ -54,7 +54,7 @@ typealias IntroducingExtensionOrMainDecl = ExtensionDeclSyntax?
     self.resolvedType = resolvedType
   }
 }
-@_spi(_QualifiedLookupTests) public typealias ExtensionState = GenericExtensionState<QualifiedTypeName>
+@_spi(_QualifiedLookupTests) public typealias ExtensionState = GenericExtensionState<QualifiedTypeNameGlobalType>
 
 // TODO: Consider optimization where we don't issue module-lookup requests when looking
 //       for type members of internal types (external modules can't depend on internal types)
@@ -107,8 +107,8 @@ public struct TypeDependencyGraph {
       }
     }
     func collidesWithDependency(
-      _ dependency: QualifiedLookupDependency<QualifiedTypeName>,
-      whenBoundTo baseTypeName: QualifiedTypeName
+      _ dependency: QualifiedLookupDependency<QualifiedTypeNameGlobalType>,
+      whenBoundTo baseTypeName: QualifiedTypeNameGlobalType
     ) -> Bool {
       dependency.extendedTypeName == baseTypeName && typeMembersToDecls[dependency.member] != nil
     }
@@ -185,7 +185,7 @@ public struct TypeDependencyGraph {
   }
 
   /// Updates when we register nominal types and bind extensions
-  @_spi(_QualifiedLookupTests) public var namesToTypes: [QualifiedTypeName: NominalType]
+  @_spi(_QualifiedLookupTests) public var namesToTypes: [QualifiedTypeNameGlobalType: NominalType]
   // /// Updates when we register nominal types and bind extensions
   // var parentsToTypeMembers: [QualifiedTypeName: TypeTable]
   @_spi(_QualifiedLookupTests) public var extensionsToState: [ExtensionDeclSyntax: ExtensionState]
@@ -206,10 +206,10 @@ public struct TypeDependencyGraph {
     self.dependencies = dependencies
   }
 }
-@_spi(_QualifiedLookupTests) public typealias DependencyTracker = GenericDependencyTracker<QualifiedTypeName>
+@_spi(_QualifiedLookupTests) public typealias DependencyTracker = GenericDependencyTracker<QualifiedTypeNameGlobalType>
 
 extension TypeMember {
-  fileprivate init(_from dependency: QualifiedLookupDependency<QualifiedTypeName>) {
+  fileprivate init(_from dependency: QualifiedLookupDependency<QualifiedTypeNameGlobalType>) {
     self.init(
       name: dependency.member,
       decls: dependency.typeDecls.map({
@@ -220,7 +220,7 @@ extension TypeMember {
 }
 
 extension ExtensionDependency {
-  fileprivate init(_from dependency: QualifiedLookupDependency<QualifiedTypeName>) {
+  fileprivate init(_from dependency: QualifiedLookupDependency<QualifiedTypeNameGlobalType>) {
     self.dependencyExtension = dependency.extensionDecl
     self.member = TypeMember(_from: dependency)
   }
@@ -228,12 +228,19 @@ extension ExtensionDependency {
 
 // TODO: Should we also have symbol-table _version
 @_spi(_QualifiedLookupTests) public struct NominalTypeRef: Hashable, Sendable {
-  @_spi(_QualifiedLookupTests) public let qualifiedName: QualifiedTypeName
-  fileprivate let version: Int
+  @_spi(_QualifiedLookupTests) public enum Storage: Hashable, Sendable {
+    /// Local nominal types cannot be extended
+    case local(SourceFileRoot<NominalTypeDeclSyntax>)
+    case globalReference(QualifiedTypeNameGlobalType, _version: Int)
+  }
 
-  init(qualifiedName: QualifiedTypeName, nominal: __shared TypeDependencyGraph.NominalType) {
-    self.qualifiedName = qualifiedName
-    self.version = nominal.version
+  @_spi(_QualifiedLookupTests) public let storage: Storage
+
+  init(qualifiedName: QualifiedTypeNameGlobalType, nominal: __shared TypeDependencyGraph.NominalType) {
+    storage = .globalReference(qualifiedName, _version: nominal.version)
+  }
+  init(localNominalType: SourceFileRoot<NominalTypeDeclSyntax>) {
+    storage = .local(localNominalType)
   }
 }
 
@@ -254,12 +261,24 @@ extension TypeDependencyGraph {
     memberTypeName: Identifier,
     origin: (typeSyntax: SourceFileRoot<TypeLikeSyntax>, module: SymbolTable3.Module),
     moduleMap: [SourceFileSyntax: SymbolTable3.Module],
-    dependencyTracker: inout DependencyTracker
+    dependencyTracker: inout DependencyTracker,
+    configuredRegions: ConfiguredRegions?
   ) -> Result<[TypeDeclSyntax], QualifiedTypeLookupFailure> {
+    // Get global nominal reference
+    let (baseTypeName, baseTypeVersion): (QualifiedTypeNameGlobalType, Int)
+    switch baseType.storage {
+    case .globalReference(let name, let version):
+      (baseTypeName, baseTypeVersion) = (name, version)
+    case .local(let nominalTypeDecl):
+      // Local decls don't have extensions; just look into the syntax
+      let typeMembers = nominalTypeDecl.node._groupTypeMembers(configuredRegions: configuredRegions).flatMap(\.value)
+      return .success(typeMembers)
+    }
+
     // Diagnose invalid base
     guard
-      let registeredType = namesToTypes[baseType.qualifiedName],
-      registeredType.version == baseType.version
+      let registeredType = namesToTypes[baseTypeName],
+      registeredType.version == baseTypeVersion
     else {
       return .failure(QualifiedTypeLookupFailure.invalidBase)
     }
@@ -331,7 +350,7 @@ extension TypeDependencyGraph {
       dependencyTracker.dependencies.append(
         QualifiedLookupDependency(
           extensionDecl: introducingExtension.node,
-          extendedTypeName: baseType.qualifiedName,
+          extendedTypeName: baseTypeName,
           member: memberTypeName,
           typeDecls: typeDecls
         )
@@ -345,18 +364,30 @@ extension TypeDependencyGraph {
 extension TypeDependencyGraph {
   enum NominalRegistrationFailure: Error {
     // case unexpectedReregistration(existingMainDecl: NominalTypeDeclSyntax)
-    case parentNotRegistered(parentName: QualifiedTypeName)
+    case parentNotRegistered(parentName: QualifiedTypeNameGlobalType)
   }
 
   /// Registers the given nominal-type reference or return the
   /// existing reference.
+  ///
+  /// Parameters:
+  /// - rawQualifiedName: Any qualified name, local or global
   mutating func registerNominalTypeReference(
-    qualifiedName: QualifiedTypeName,
+    rawQualifiedName: QualifiedTypeName,
     mainDecl: SourceFileRoot<NominalTypeDeclSyntax>,
     configuredRegions: ConfiguredRegions?
   ) -> Result<NominalTypeRef, NominalRegistrationFailure> {
+    // Get the global name
+    let qualifiedName: QualifiedTypeNameGlobalType
+    switch rawQualifiedName {
+    case .topLevel(let name):
+      qualifiedName = name
+    case .nestedScope:
+      return .success(NominalTypeRef(localNominalType: mainDecl))
+    }
+
     // Check parent is registered
-    if let (qualifiedBaseName, memberName: _) = qualifiedName.baseAndMemberName,
+    if let (qualifiedBaseName, member: _) = qualifiedName.baseAndMember,
       namesToTypes[qualifiedBaseName] == nil
     {
       return .failure(NominalRegistrationFailure.parentNotRegistered(parentName: qualifiedBaseName))
@@ -426,13 +457,13 @@ extension TypeDependencyGraph {
   /// - boundTypeName: The name of the type to which we're trying to bind this extension
   /// - introducedTypes: The type members we're trying to introduce
   private func _findCyclicalDependencyImplementation(
-    boundTypeName: QualifiedTypeName,
+    boundTypeName: QualifiedTypeNameGlobalType,
     introducedTypeTable: TypeTable,
     currentExtensionDecl: ExtensionDeclSyntax,
-    currentExtendedType: QualifiedTypeName,
-    extensionDependencies: [QualifiedLookupDependency<QualifiedTypeName>],
-    currentDependencyChain: inout [QualifiedLookupDependency<QualifiedTypeName>]
-  ) -> Result<ExtensionBindingCycle<QualifiedTypeName>, CycleDetectionFailure>? {
+    currentExtendedType: QualifiedTypeNameGlobalType,
+    extensionDependencies: [QualifiedLookupDependency<QualifiedTypeNameGlobalType>],
+    currentDependencyChain: inout [QualifiedLookupDependency<QualifiedTypeNameGlobalType>]
+  ) -> Result<ExtensionBindingCycle<QualifiedTypeNameGlobalType>, CycleDetectionFailure>? {
     // Check for accidental cycles
     assert(
       !currentDependencyChain.contains(where: { $0.extensionDecl != currentExtensionDecl }),
@@ -464,7 +495,7 @@ extension TypeDependencyGraph {
         )
       }
       // Map transitive dependencies to ``QualifiedLookupDependency``, getting their extended type
-      var transitiveDependencies = [QualifiedLookupDependency<QualifiedTypeName>]()
+      var transitiveDependencies = [QualifiedLookupDependency<QualifiedTypeNameGlobalType>]()
       for transitiveDependency in dependencyExtensionState.dependencies {
         guard
           let transitiveDependencyExtensionState = extensionsToState[transitiveDependency.dependencyExtension],
@@ -519,7 +550,7 @@ extension TypeDependencyGraph {
     extensionDeclModule: SymbolTable3.Module,
     isUpdatingInvalidating isFixingInvalidating: Bool,
     to result: Result<
-      (qualifiedName: QualifiedTypeName, mainDecl: NominalTypeDeclSyntax),
+      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: NominalTypeDeclSyntax),
       TypeQualifier.Failure
     >,
     dependencyTracker: DependencyTracker,
@@ -536,7 +567,7 @@ extension TypeDependencyGraph {
     let dependencies = dependencyTracker.dependencies.map(ExtensionDependency.init(_from:))
 
     // Get the bound type name; if the result failed, save with dependencies (might get fixed later)
-    let extendedTypeName: QualifiedTypeName
+    let extendedTypeName: QualifiedTypeNameGlobalType
     // let mainDecl: NominalTypeDeclSyntax
     switch result {
     case .success(let success):
@@ -562,8 +593,8 @@ extension TypeDependencyGraph {
 
     // To check admissability, ensure we don't get a cycle
     // TODO: Check if we can merge cycle detection with dependent-marking below
-    var dependencyChain = [QualifiedLookupDependency<QualifiedTypeName>]()
-    let cycleResult: Result<ExtensionBindingCycle<QualifiedTypeName>, CycleDetectionFailure>? =
+    var dependencyChain = [QualifiedLookupDependency<QualifiedTypeNameGlobalType>]()
+    let cycleResult: Result<ExtensionBindingCycle<QualifiedTypeNameGlobalType>, CycleDetectionFailure>? =
       _findCyclicalDependencyImplementation(
         boundTypeName: extendedTypeName,
         introducedTypeTable: mappedExtensionDecl.typeMap,
@@ -686,14 +717,20 @@ extension TypeDependencyGraph {
       }
       namesToTypes[extendedTypeName] = newInvalidatedExtensionType
 
-      // Collect invalidated extension
-      invalidatedExtensions.append(invalidatedExtensionState)
+      // 3. Remove introduced types
+      // FIXME: Implement
+      // for (typeMember, typeDecls) in invalidatedExtensionTypeTable.typeMembersToDecls {
+      //   invalidatedExtensionTypeName
+      // }
 
-      // 3. Add recursively invalidated transitive dependents
+      // 4. Add recursively invalidated transitive dependents
       for transitiveDependent in invalidatedExtensionType.dependents {
         guard invalidatedExtensionTypeTable.typeMembersToDecls[transitiveDependent.typeMember] != nil else { continue }
         queue.append(transitiveDependent.dependentExtension)
       }
+
+      // Collect invalidated extension
+      invalidatedExtensions.append(invalidatedExtensionState)
     }
 
     // Save extension (newly bound extension doesn't add type dependents)
@@ -717,8 +754,18 @@ extension TypeDependencyGraph {
 // MARK: Debugging
 
 extension NominalTypeRef: CustomDebugStringConvertible {
+  @_spi(_QualifiedLookupTests) public func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
+    switch storage {
+    case .globalReference(let qualifiedName, let version):
+      let nameDescription = describeTypeName(QualifiedTypeName.topLevel(qualifiedName))
+      return "NominalTypeRef.globalReference(name: \(nameDescription), version: \(version))"
+    case .local(let nominalDecl):
+      return "NominalTypeRef.local(\(nominalDecl.node._memberlessDescription))"
+    }
+  }
+
   public var debugDescription: String {
-    "NominalTypeRef(name: \(qualifiedName.debugDescription), version: \(version))"
+    _describe(describeTypeName: \.debugDescription)
   }
 }
 

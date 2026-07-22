@@ -296,7 +296,7 @@ where MinimalNominal == ResolvedNominalTypeReference, ExtendedNominal == Nominal
   public var debugDescription: String {
     _describeDebug(
       resolveMininalNominal: \.qualifiedName.debugDescription,
-      resolveExtendedNominal: \.qualifiedName.debugDescription
+      resolveExtendedNominal: \.debugDescription
     )
   }
 }
@@ -1278,7 +1278,7 @@ extension TypeQualifierFailure {
     //
     // For instance, there's no way to extend `A` in `func f() { struct A {} }`
     // since extensions may only be declared at the top level.
-    guard case .topLevel = typeReference.qualifiedName else { return currentNominal }
+    guard case .topLevel(let qualifiedGlobalName) = typeReference.qualifiedName else { return currentNominal }
 
     // Find all the extensions we need to bind
     //
@@ -1362,7 +1362,7 @@ extension TypeQualifierFailure {
               extensionDecl,
               // Only get the name
               to: extendedTypeResult.map({ typeReference in
-                (typeReference.qualifiedName, typeReference.mainDecl)
+                (qualifiedGlobalName, typeReference.mainDecl)
               }),
               dependencies: extensionDependencies
             )
@@ -1455,7 +1455,7 @@ extension TypeQualifierFailure {
                   invalidatedExtension.extensionDecl,
                   // Only get the name
                   to: extendedTypeResult.map({ typeReference in
-                    (typeReference.qualifiedName, typeReference.mainDecl)
+                    (qualifiedGlobalName, typeReference.mainDecl)
                   }),
                   dependencies: extensionDependencies
                 )
@@ -1506,7 +1506,7 @@ extension TypeQualifierFailure {
     }
 
     // After binding all extensions, get the new nominal type
-    guard let finalizedNominalRef = symbolTable.getNominalTypeReference(name: typeReference.qualifiedName) else {
+    guard let finalizedNominalRef = symbolTable.getNominalTypeReference(name: qualifiedGlobalName) else {
       // We checked the nominal type is regsitered at the start.
       fatalError(
         "[SwiftLexicalLookup] Internal error: Nominal type unexpectedly removed from symbol table after binding extensions."

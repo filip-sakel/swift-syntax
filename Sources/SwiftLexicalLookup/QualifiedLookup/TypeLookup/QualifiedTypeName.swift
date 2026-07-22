@@ -70,7 +70,7 @@ import SwiftSyntax
     components.first!
   }
   /// If this is not a top-level type, break it up into a base and member.
-  var baseAndMembers: (base: QualifiedTypeNameGlobalType, member: Component)? {
+  var baseAndMember: (base: QualifiedTypeNameGlobalType, member: Component)? {
     var baseComponents = components
     // We have at least one component according to initializer precondition
     let member = baseComponents.popLast()!
@@ -171,7 +171,7 @@ public indirect enum QualifiedTypeNameNestedType: Sendable, Hashable, CustomDebu
   var baseAndMemberName: (base: QualifiedTypeName, memberName: Identifier)? {
     switch self {
     case .topLevel(let topLevelName):
-      guard let (topLevelBaseName, memberComponent) = topLevelName.baseAndMembers else { return nil }
+      guard let (topLevelBaseName, memberComponent) = topLevelName.baseAndMember else { return nil }
       return (QualifiedTypeName.topLevel(topLevelBaseName), memberComponent.name)
     case .nestedScope(let scope, let nestedName):
       guard let (nestedBaseName, memberName) = nestedName.baseAndMembers else { return nil }

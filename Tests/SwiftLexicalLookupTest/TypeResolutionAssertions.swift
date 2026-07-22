@@ -199,6 +199,10 @@ extension TypeResolutionMatcher: LexicalMatcher {
       return fileID.hashValue.description
     })
   }
+  /// Ditto for global names
+  private func _describeQualifiedGlobalName(_ name: QualifiedTypeNameGlobalType) -> String {
+    _describeQualifiedName(QualifiedTypeName.topLevel(name))
+  }
 
   /// `assertExpectation` forwards extensions here.
   private func _assertExtensionBinding(
@@ -256,7 +260,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
     // We use strings for the expected qualified name; just print that name
     let expectedStateDescription = expectedState._describe(describeTypeName: \.self)
-    let actualStateDescription = actualState._describe(describeTypeName: _describeQualifiedName(_:))
+    let actualStateDescription = actualState._describe(describeTypeName: _describeQualifiedGlobalName(_:))
     guard expectedStateDescription == actualStateDescription else {
       return [
         ExpectationFailure.other(
@@ -349,7 +353,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
       // Describe the lookup failure
       let actualFailureDescription = actualFailure._describeDebug(
         resolveMininalNominal: { _describeQualifiedName($0.qualifiedName) },
-        resolveExtendedNominal: { _describeQualifiedName($0.qualifiedName) }
+        resolveExtendedNominal: { $0._describe(describeTypeName: _describeQualifiedName(_:)) }
       )
 
       // Check equality

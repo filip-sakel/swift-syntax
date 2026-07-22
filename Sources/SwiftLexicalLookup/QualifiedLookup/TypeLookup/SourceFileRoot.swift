@@ -13,7 +13,7 @@
 import SwiftIfConfig
 import SwiftSyntax
 
-struct SourceFileRoot<Node: SyntaxProtocol> {
+@_spi(_QualifiedLookupTests) public struct SourceFileRoot<Node: SyntaxProtocol> {
   /// Invariant: Must always be a node whose `root` is a `SourceFileSyntax`
   private(set) var node: Node
 
@@ -28,7 +28,7 @@ struct SourceFileRoot<Node: SyntaxProtocol> {
 }
 
 extension SourceFileRoot: SyntaxProtocol {
-  init?(_ node: __shared some SyntaxProtocol) {
+  public init?(_ node: __shared some SyntaxProtocol) {
     self.init(_checked: node)
   }
 
@@ -45,9 +45,9 @@ extension SourceFileRoot: SyntaxProtocol {
     return SourceFileRoot<S>(_unchecked: castNode)
   }
 
-  var _syntaxNode: Syntax { node._syntaxNode }
+  public var _syntaxNode: Syntax { node._syntaxNode }
 
-  static var structure: SyntaxNodeStructure {
+  public static var structure: SyntaxNodeStructure {
     Node.structure
   }
 

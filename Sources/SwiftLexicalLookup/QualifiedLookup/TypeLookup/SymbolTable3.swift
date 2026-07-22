@@ -339,7 +339,7 @@ extension SymbolTable3 {
       fatalError("TODO")
     }
     return dependencyGraph.registerNominalTypeReference(
-      qualifiedName: qualifiedName,
+      rawQualifiedName: qualifiedName,
       mainDecl: registeredMainDecl,
       configuredRegions: configuredRegions
     )
@@ -414,7 +414,7 @@ extension SymbolTable3 {
   func bindExtension(
     _ extensionDecl: ExtensionDeclSyntax,
     to result: Result<
-      (qualifiedName: QualifiedTypeName, mainDecl: NominalTypeDeclSyntax),
+      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: NominalTypeDeclSyntax),
       TypeQualifier.Failure
     >,
     // dependencies: [ExtensionBindingResult.Dependency]
@@ -428,7 +428,11 @@ extension SymbolTable3 {
     )
   }
 
-  func getNominalTypeReference(name: QualifiedTypeName) -> NominalTypeRef? {
+  /// Gets the final nominal-type reference with the given qualified name
+  /// using the current graph.
+  ///
+  /// Useful for getting the final version of a nominal type after binding extensions.
+  func getNominalTypeReference(name: QualifiedTypeNameGlobalType) -> NominalTypeRef? {
     dependencyGraph.namesToTypes[name].map({ NominalTypeRef(qualifiedName: name, nominal: $0) })
   }
 
@@ -438,7 +442,7 @@ extension SymbolTable3 {
   func fixInvalidatedExtension(
     _ extensionDecl: ExtensionDeclSyntax,
     to result: Result<
-      (qualifiedName: QualifiedTypeName, mainDecl: NominalTypeDeclSyntax),
+      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: NominalTypeDeclSyntax),
       TypeQualifier.Failure
     >,
     // dependencies: [ExtensionBindingResult.Dependency]
@@ -457,7 +461,7 @@ extension SymbolTable3 {
     _ extensionDecl: ExtensionDeclSyntax,
     isUpdatingInvalidating isFixingInvalidating: Bool,
     to result: Result<
-      (qualifiedName: QualifiedTypeName, mainDecl: NominalTypeDeclSyntax),
+      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: NominalTypeDeclSyntax),
       TypeQualifier.Failure
     >,
     // dependencies: [ExtensionBindingResult.Dependency]
@@ -878,7 +882,8 @@ extension SymbolTable3 {
       memberTypeName: memberTypeName,
       origin: (typeSyntax: registeredTypeSyntax, module: module),
       moduleMap: moduleMap,
-      dependencyTracker: &dependencyTracker
+      dependencyTracker: &dependencyTracker,
+      configuredRegions: configuredRegions
     ).mapError(QualifiedTypeLookupFailure.lookupFailure)
   }
 }
