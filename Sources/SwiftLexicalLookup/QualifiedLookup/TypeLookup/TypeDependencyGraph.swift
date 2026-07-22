@@ -56,6 +56,31 @@ typealias IntroducingExtensionOrMainDecl = ExtensionDeclSyntax?
 }
 @_spi(_QualifiedLookupTests) public typealias ExtensionState = GenericExtensionState<QualifiedTypeNameGlobalType>
 
+@_spi(_QualifiedLookupTests) public struct TypeTable: Hashable {
+  fileprivate(set) var typeMembersToDecls: [Identifier: TypeMember]
+
+  init(
+    from namesToDecls: [Identifier: [TypeDeclSyntax]],
+    introducedIn introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl
+  ) {
+    typeMembersToDecls = [:]
+    for (name, typeDecls) in namesToDecls {
+      typeMembersToDecls[name] = TypeMember(
+        name: name,
+        decls: typeDecls.map({
+          TypeMemberDecl(introducingExtensionOrMainDecl: introducingExtensionOrMainDecl, typeDeclSyntax: $0)
+        })
+      )
+    }
+  }
+  func collidesWithDependency(
+    _ dependency: QualifiedLookupDependency<QualifiedTypeNameGlobalType>,
+    whenBoundTo baseTypeName: QualifiedTypeNameGlobalType
+  ) -> Bool {
+    dependency.extendedTypeName == baseTypeName && typeMembersToDecls[dependency.member] != nil
+  }
+}
+
 // TODO: Consider optimization where we don't issue module-lookup requests when looking
 //       for type members of internal types (external modules can't depend on internal types)
 // TODO: Think about making lookup lazy (what are the actual places where we *need* to find
@@ -89,33 +114,9 @@ typealias IntroducingExtensionOrMainDecl = ExtensionDeclSyntax?
 ///       }
 @_spi(_QualifiedLookupTests)
 public struct TypeDependencyGraph {
-  struct TypeTable: Hashable {
-    fileprivate(set) var typeMembersToDecls: [Identifier: TypeMember]
-
-    init(
-      from namesToDecls: [Identifier: [TypeDeclSyntax]],
-      introducedIn introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl
-    ) {
-      typeMembersToDecls = [:]
-      for (name, typeDecls) in namesToDecls {
-        typeMembersToDecls[name] = TypeMember(
-          name: name,
-          decls: typeDecls.map({
-            TypeMemberDecl(introducingExtensionOrMainDecl: introducingExtensionOrMainDecl, typeDeclSyntax: $0)
-          })
-        )
-      }
-    }
-    func collidesWithDependency(
-      _ dependency: QualifiedLookupDependency<QualifiedTypeNameGlobalType>,
-      whenBoundTo baseTypeName: QualifiedTypeNameGlobalType
-    ) -> Bool {
-      dependency.extendedTypeName == baseTypeName && typeMembersToDecls[dependency.member] != nil
-    }
-  }
   @_spi(_QualifiedLookupTests) public struct NominalType {
     /// Keeps track of mutations to assert data didn't change between calls
-    fileprivate private(set) var version = 0
+    internal private(set) var version = 0
 
     /// Invariants: count >= 1; sorted by position in increasing order
     private var _mainDecls: [MappedDeclGroup<NominalTypeDeclSyntax>]
@@ -138,6 +139,10 @@ public struct TypeDependencyGraph {
     var mainDecl: MappedDeclGroup<NominalTypeDeclSyntax> {
       // By invariant above that `_mainDecls.count >= 1`
       _mainDecls[0]
+    }
+    var redeclarations: [MappedDeclGroup<NominalTypeDeclSyntax>] {
+      // By invariant above that `_mainDecls.count >= 1`
+      Array(_mainDecls[1...])
     }
 
     /// Returns a new version of the extended type, adding the given extension.
@@ -331,11 +336,8 @@ extension TypeDependencyGraph {
     // }
     let sortedDeclGroups = fileDecls + otherInternalDecls + externalDecls
 
-    var typeDecls: [TypeDeclSyntax] = sortedDeclGroups.flatMap({ declGroup in
-      declGroup.typeMap.typeMembersToDecls[memberTypeName]?.decls.map(\.typeDeclSyntax) ?? []
-    })
-
-    // Add the dependencies
+    // Add members from each decl group and register the dependencies
+    var typeDecls = [TypeDeclSyntax]()
     for declGroup in sortedDeclGroups {
       // Add the matching decls
       let introducedDecls = declGroup.typeMap.typeMembersToDecls[memberTypeName]?.decls.map(\.typeDeclSyntax) ?? []

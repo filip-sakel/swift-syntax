@@ -406,7 +406,8 @@ func assertTypeResolution(
       lookupFiles: lookupFiles
     ),
     file: file,
-    line: line
+    line: line,
+    verbose: verbose
   )
 }
 

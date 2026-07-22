@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+// TODO: Maybe move to testing
+import SwiftDiagnostics
 import SwiftIfConfig
 import SwiftSyntax
 
@@ -877,6 +879,9 @@ extension SymbolTable3 {
       return .failure(QualifiedTypeLookupFailure.unregisteredSourceRoot)
     }
 
+    // TODO: Add behind verbose flag
+    print("Find member '\(memberTypeName.name)' on type:\n\(_describeType(reference: baseType))")
+
     return dependencyGraph.findTypeMember(
       baseType: baseType,
       memberTypeName: memberTypeName,
@@ -963,5 +968,152 @@ extension ExtensionBindingState {
       let cycleDescription = cycle._describe(describeTypeName: describeTypeName)
       return "ExtensionBindingState.cannotDependOnIntroducedMembers(\(cycleDescription))"
     }
+  }
+}
+
+// Debug Type State
+
+/// Helper `DiagnosticMessage` for `_describeType` below.
+private struct _NominalTypeHighlight: DiagnosticMessage {
+  let message: String
+
+  var diagnosticID: MessageID { MessageID(domain: "SwiftLexicalLookup", id: "DebugTypeHighlight") }
+  var severity: DiagnosticSeverity { DiagnosticSeverity.note }
+}
+private struct _NominalTypeMemberHighlight: DiagnosticMessage {
+  let message: String
+
+  var diagnosticID: MessageID { MessageID(domain: "SwiftLexicalLookup", id: "DebugTypeMemberHighlight") }
+  var severity: DiagnosticSeverity { DiagnosticSeverity.note }
+}
+
+extension SymbolTable3 {
+  /// Helper for `_describeType` below.
+  // fileprivate func _annotateDeclGroup(
+  //   _ declGroup: some DeclGroupSyntax,
+  //   typeTable: TypeTable,
+  //   name: String,
+  //   group: inout GroupedDiagnostics
+  // ) -> String {
+  //   let memberHighlights: [Diagnostic] = typeTable.typeMembersToDecls.enumerated().flatMap({
+  //     (i, nameAndMember) in
+  //     let (name, member): (Identifier, TypeMember) = nameAndMember
+  //     return member.decls.map({ memberDecl in
+  //       Diagnostic(
+  //         node: memberDecl.typeDeclSyntax,
+  //         message: _TypeMemberHighlight(message: "Member \(name.name) #\(i)")
+  //       )
+  //     })
+  //   })
+  //
+  //   let diagnosticSource = DiagnosticsFormatter.annotatedSource(
+  //     tree: declGroup,
+  //     diags: memberHighlights
+  //   )
+  //   return "\(name)\n\(diagnosticSource)\n\n"
+  // }
+  fileprivate func _annotateDeclGroup(
+    _ declGroup: SourceFileRoot<DeclGroupSyntaxType>,
+    typeTable: TypeTable,
+    name: String,
+    using group: inout GroupedDiagnostics
+  ) {
+    let memberNotes: [Diagnostic] = typeTable.typeMembersToDecls.enumerated().flatMap({
+      (i, nameAndMember) in
+      let (name, member): (Identifier, TypeMember) = nameAndMember
+      return member.decls.map({ memberDecl in
+        Diagnostic(
+          node: Syntax(memberDecl.typeDeclSyntax),
+          message: _NominalTypeMemberHighlight(message: "Member '\(name.name)' #\(i)")
+        )
+      })
+    })
+
+    // Inform user if type has no members
+    let message = "\(name)\(memberNotes.isEmpty ? " (no type members)" : "")"
+
+    group.addDiagnostic(
+      Diagnostic(
+        node: declGroup.node,
+        message: _NominalTypeHighlight(message: message),
+        highlights: typeTable.typeMembersToDecls.flatMap(\.value.decls).map({ Syntax($0.typeDeclSyntax) }),
+      )
+    )
+    // TODO: Ideally, we should emit only the diagnostic above with `memberNotes`
+    // passed in the `notes` initializer parameter once
+    // https://github.com/swiftlang/swift-syntax/issues/2166 is resolved
+    for noteDiagnostic in memberNotes {
+      group.addDiagnostic(noteDiagnostic)
+    }
+  }
+
+  // TODO: Maybe use group diagnostics
+  fileprivate func _describeType(reference: NominalTypeRef) -> String {
+    // Get the global name (otherwise trivial)
+    let (typeName, referenceVersion): (QualifiedTypeNameGlobalType, Int)
+    switch reference.storage {
+    case .globalReference(let name, let version):
+      (typeName, referenceVersion) = (name, version)
+    case .local(let nominalDecl):
+      return nominalDecl.trimmedDescription
+    }
+
+    // Get the nominal type
+    guard let type: TypeDependencyGraph.NominalType = dependencyGraph.namesToTypes[typeName] else {
+      return "nil"
+    }
+
+    // Get each decl group (main decl, redeclarations, extensions), get
+    // their discovered member types, and label them
+    //
+    // TODO: Get rid of SourceFileRoot force unwraps
+    var declGroups = [(declGroup: SourceFileRoot<DeclGroupSyntaxType>, typeTable: TypeTable, name: String)]()
+    declGroups.append((SourceFileRoot(DeclGroupSyntaxType(type.mainDecl.node))!, type.mainDecl.typeMap, "Main decl"))
+    for (index, redeclaration) in type.redeclarations.enumerated() {
+      declGroups.append(
+        (SourceFileRoot(DeclGroupSyntaxType(redeclaration.node))!, redeclaration.typeMap, "Redeclaration \(index)")
+      )
+    }
+    for (_, extensionDecls) in type.boundExtensions {
+      for (extensionDecl, typeMap) in extensionDecls {
+        declGroups.append((SourceFileRoot(DeclGroupSyntaxType(extensionDecl.node))!, typeMap, "Extension"))
+      }
+    }
+
+    var group = GroupedDiagnostics()
+
+    // Add uniqued files to group
+    let uniquedSourceFiles = Set(declGroups.map(\.declGroup.fileRoot))
+    for file in uniquedSourceFiles {
+      let name: String = {
+        // TODO: Perhaps find more efficient way of getting file names
+        for (sourceName, sourceFile) in moduleToSources.flatMap(\.value) {
+          if sourceFile == file {
+            return sourceName
+          }
+        }
+        fatalError("[SwiftLexicalLookup] Internal error: Admitted file not in symbol-table sources.")
+      }()
+
+      group.addSourceFile(tree: file, displayName: name)
+    }
+
+    // Build the result
+    var result = ""
+
+    // Warn about version mismatch
+    if type.version != referenceVersion {
+      result += "Reference version mismatch; actual is \(type.version), but referenced \(referenceVersion)"
+    }
+
+    // Add each group decl
+    for (declGroup, typeTable, name) in declGroups {
+      _annotateDeclGroup(declGroup, typeTable: typeTable, name: name, using: &group)
+    }
+
+    // Add group annotations
+    result += DiagnosticsFormatter().annotateSources(in: group)
+
+    return result
   }
 }

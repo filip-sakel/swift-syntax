@@ -15,16 +15,16 @@ import SwiftSyntax
 
 struct MappedDeclGroup<DeclGroup: DeclGroupSyntax & SyntaxHashable> {
   let declGroup: SourceFileRoot<DeclGroup>
-  let typeMap: TypeDependencyGraph.TypeTable
+  let typeMap: TypeTable
 
   var node: DeclGroup { declGroup.node }
   var fileRoot: SourceFileSyntax { declGroup.fileRoot }
 }
 
 extension MappedDeclGroup: Hashable {
-  static func == (a: Self, b: Self) -> Bool { a.declGroup == b.declGroup }
+  static func == (a: Self, b: Self) -> Bool { a.node == b.node }
   func hash(into hasher: inout Hasher) {
-    hasher.combine(declGroup)
+    hasher.combine(node)
   }
 }
 
@@ -34,7 +34,7 @@ extension MappedDeclGroup {
   static func from(declGroup: SourceFileRoot<DeclGroup>, configuredRegions: ConfiguredRegions?) -> MappedDeclGroup {
     MappedDeclGroup(
       declGroup: declGroup,
-      typeMap: TypeDependencyGraph.TypeTable(
+      typeMap: TypeTable(
         from: declGroup.node._groupTypeMembers(configuredRegions: configuredRegions),
         introducedIn: declGroup.as(ExtensionDeclSyntax.self)
       )
