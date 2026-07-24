@@ -487,7 +487,7 @@ extension SymbolTable3 {
     dependencies: DependencyTracker
   ) -> Result<TypeDependencyGraph.InvalidatedExtensions, ExtensionBindingFailure> {
     // Get extension and module
-    // TODO: Require caller to provide SourceFileRoot
+    // TODO: Make caller provide SourceFileRoot
     guard
       let registeredExtension = SourceFileRoot(extensionDecl),
       let module = moduleMap[registeredExtension.fileRoot]
@@ -503,6 +503,34 @@ extension SymbolTable3 {
       configuredRegions: configuredRegions,
       moduleMap: moduleMap
     )
+
+    // Log results
+    //
+    // TODO: Add behind verbose flag
+    //
+    // Whether we're binding or fixing invalidated
+    let actionVerb = isFixingInvalidating ? "rebinding invalidated" : "binding"
+    // Describe resolution result
+    let resolutionResult: String
+    switch result {
+    case .success(let (qualifiedName, _)):
+      resolutionResult = ".success(\(_describeQualifiedGlobalName(qualifiedName)))"
+    case .failure(let failure):
+      resolutionResult = ".failure(\(failure._describe(describeTypeName: _describeQualifiedName(_:))))"
+    }
+    // Describe dependencies
+    let dependencyDescription = dependencies.dependencies.map({
+      $0._describe(describeTypeName: _describeQualifiedGlobalName(_:))
+    })
+    // New graph description
+    let dependencyGraphDescription = _describeDependencyGraph()
+    print(String(repeating: "-", count: 80))
+    print(
+      "After \(actionVerb) extension `\(extensionDecl._memberlessDescription)` to \(resolutionResult) with dependencies: \(dependencyDescription), new dependency graph is:"
+    )
+    print(dependencyGraphDescription)
+    print(String(repeating: "-", count: 80) + "\n")
+
     switch admissionResult {
     case .success(let success):
       // If successfully bound, remove from `unresolvedExtensions`
@@ -896,14 +924,13 @@ extension SymbolTable3 {
       return .failure(QualifiedTypeLookupFailure.unregisteredSourceRoot)
     }
 
-    // TODO: Add behind verbose flag
-    let baseTypeDescription = baseType._describe(describeTypeName: _describeQualifiedName(_:))
-    let dependencyGraphDescription = _describeDependencyGraph()
-    print(
-      "Find member \(baseTypeDescription) > \(memberTypeName.name):\n\(dependencyGraphDescription)"
-    )
+    // TODO: Remove
+    // let baseTypeDescription = baseType._describe(describeTypeName: _describeQualifiedName(_:))
+    // print(
+    //   "Find member \(baseTypeDescription) > \(memberTypeName.name):\n\(dependencyGraphDescription)"
+    // )
 
-    return dependencyGraph.findTypeMember(
+    return dependencyGraph.findMemberType(
       baseType: baseType,
       memberTypeName: memberTypeName,
       origin: (typeSyntax: registeredTypeSyntax, module: module),

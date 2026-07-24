@@ -325,11 +325,15 @@ extension TypeQualifierFailure {
 
 extension TypeQualifierFailure: CustomDebugStringConvertible
 where MinimalNominal == ResolvedNominalTypeReference, ExtendedNominal == NominalTypeRef {
-  public var debugDescription: String {
+  func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
     _describeDebug(
-      resolveMininalNominal: \.qualifiedName.debugDescription,
-      resolveExtendedNominal: \.debugDescription
+      resolveMininalNominal: { describeTypeName($0.qualifiedName) },
+      resolveExtendedNominal: { $0._describe(describeTypeName: describeTypeName) }
     )
+  }
+
+  public var debugDescription: String {
+    _describe(describeTypeName: \.debugDescription)
   }
 }
 

@@ -444,10 +444,12 @@ final class TestQualifiedTypeName: XCTestCase {
       "MyFile.swift": """
       \("🟥", name: "_(MyFile.swift)::A")
       struct A {}
+
       \(extensionState: .invalidCycle([
         (extension: "extension A { typealias B = A }", base: "_(MyFile.swift)::A", member: "struct A {}")
       ]))
       extension A.B { struct A {} }
+
       extension A { typealias B = A }
       """ as LexicalLookupSource
     ])

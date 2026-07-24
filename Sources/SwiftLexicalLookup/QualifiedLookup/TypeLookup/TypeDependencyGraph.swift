@@ -260,7 +260,7 @@ extension TypeDependencyGraph {
     //   case selectedNonImportedModule(selectedModule: Identifier)
     // }
   }
-  func findTypeMember(
+  func findMemberType(
     baseType: NominalTypeRef,
     memberTypeName: Identifier,
     origin: (typeSyntax: SourceFileRoot<TypeLikeSyntax>, module: SymbolTable3.Module),
@@ -274,7 +274,8 @@ extension TypeDependencyGraph {
     case .globalReference(let name, let version):
       (baseTypeName, baseTypeVersion) = (name, version)
     case .local(let nominalTypeDecl):
-      // Local decls don't have extensions; just look into the syntax
+      // Local decls don't have extensions (=> no dependencies generated); just
+      // look into the main declaration.
       let typeMembers = nominalTypeDecl.node._groupTypeMembers(configuredRegions: configuredRegions).flatMap(\.value)
       return .success(typeMembers)
     }
@@ -921,10 +922,21 @@ extension TypeDependencyGraph {
         }
 
         // Show the registered name
-        _attachNote(to: nominalTypeDecl.node, message: "\(declLabel) registered '\(typeNameDescription)'")
+        _attachNote(
+          to: nominalTypeDecl.node,
+          message: "\(declLabel) registered '\(typeNameDescription)' (v\(type.version))"
+        )
 
         // Mark each member in the type table
         _markMemberTypes(baseTypeName: typeNameDescription, typeTable: nominalTypeDecl.typeMap)
+      }
+
+      // Add dependent extensions (to main declaration)
+      for (member, dependentExtension) in type.dependents {
+        _attachNote(
+          to: type.mainDecl.node,
+          message: "Member type '\(member)' depended on by `\(dependentExtension.node._memberlessDescription)`"
+        )
       }
 
       // Check bound-extension state points to us as the resolved type
@@ -967,6 +979,29 @@ extension TypeDependencyGraph {
 
         // Indicate the extension is bound to us
         _attachNote(to: boundExtension.node, message: "Extension resolved and bound to '\(typeNameDescription)'")
+
+        // Mark dependencies
+        for dependency in extensionState.dependencies {
+          let memberName = dependency.member.name.name
+          // Get dependency extension's type
+          guard
+            let dependencyExtensionState = extensionsToState[dependency.dependencyExtension],
+            case .success(let dependencyExtendedType) = dependencyExtensionState.resolvedType
+          else {
+            _attachError(
+              to: boundExtension.node.extendedType,
+              message:
+                "Extension resolution depends on member '\(memberName)' found in non-bound extension `\(dependency.dependencyExtension._memberlessDescription)` with type \(extensionsToState[dependency.dependencyExtension].debugDescription)."
+            )
+            continue
+          }
+          // Add dependency
+          let dependencyTypeDescription = describeTypeName(dependencyExtendedType)
+          _attachNote(
+            to: boundExtension.node.extendedType,
+            message: "Depends on '\(dependencyTypeDescription)' > '\(memberName)'"
+          )
+        }
 
         // Mark each member in the type table
         _markMemberTypes(baseTypeName: typeNameDescription, typeTable: typeMap)
