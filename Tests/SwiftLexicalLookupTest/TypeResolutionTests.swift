@@ -406,60 +406,37 @@ final class TestQualifiedTypeName: XCTestCase {
   // MARK: Extensions
 
   func testSimpleExtension() {
-    assertTypeResolution(
-      [
-        "MyFile.swift": """
-        \("🟥", name: "_(MyFile.swift)::A")
-        struct A {}
+    assertTypeResolution([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::A")
+      struct A {}
 
-        extension A {
-          \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
-          struct B {}
-        }
-        func f(_: \(nominal: "🟩")A.B)
-        // Test that incremental binding still works with a second request
-        func g(_: \(nominal: "🟩")A.B)
-        """ as LexicalLookupSource
-      ],
-      verbose: true
-    )
+      extension A {
+        \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
+        struct B {}
+      }
+      func f(_: \(nominal: "🟩")A.B)
+      // Test that incremental binding still works with a second request
+      func g(_: \(nominal: "🟩")A.B)
+      """ as LexicalLookupSource
+    ])
   }
   func testTypeInExtension() {
-    // assertTypeResolution(
-    //   [
-    //     "MyFile.swift": """
-    //     \("🟥", name: "_(MyFile.swift)::A")
-    //     struct A {}
-    //
-    //     extension A {
-    //       \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
-    //       struct B {
-    //         func f(_: \(nominal: "🟩")B)
-    //       }
-    //       func g(_: \(nominal: "🟩")B)
-    //     }
-    //     func h(_: \(nominal: "🟩")A.B)
-    //     """ as LexicalLookupSource
-    //   ],
-    //   verbose: true
-    // )
-    assertTypeResolution(
-      [
-        "MyFile.swift": """
-        \("🟥", name: "_(MyFile.swift)::A")
-        struct A {}
+    assertTypeResolution([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::A")
+      struct A {}
 
-        extension A {
-          \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
-          struct B {
-            func f(_: \(nominal: "🟩")B)
-          }
-          func g(_: \(nominal: "🟩")B)
+      extension A {
+        \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
+        struct B {
+          func f(_: \(nominal: "🟩")B)
         }
-        """ as LexicalLookupSource
-      ],
-      verbose: true
-    )
+        func g(_: \(nominal: "🟩")B)
+      }
+      func h(_: \(nominal: "🟩")A.B)
+      """ as LexicalLookupSource
+    ])
   }
 
   func testSimpleRecursiveExtension() {
