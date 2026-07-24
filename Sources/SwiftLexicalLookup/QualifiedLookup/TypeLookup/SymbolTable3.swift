@@ -898,9 +898,9 @@ extension SymbolTable3 {
 
     // TODO: Add behind verbose flag
     let baseTypeDescription = baseType._describe(describeTypeName: _describeQualifiedName(_:))
-    let nominalTypeDescription = _describeType(reference: baseType)
+    let dependencyGraphDescription = _describeDependencyGraph()
     print(
-      "Find member \(baseTypeDescription) > \(memberTypeName.name):\n\(nominalTypeDescription)"
+      "Find member \(baseTypeDescription) > \(memberTypeName.name):\n\(dependencyGraphDescription)"
     )
 
     return dependencyGraph.findTypeMember(
@@ -982,20 +982,6 @@ extension ExtensionBindingState {
 
 // Debug Type State
 
-/// Helper `DiagnosticMessage` for `_describeType` below.
-private struct _NominalTypeHighlight: DiagnosticMessage {
-  let message: String
-
-  var diagnosticID: MessageID { MessageID(domain: "SwiftLexicalLookup", id: "DebugTypeHighlight") }
-  var severity: DiagnosticSeverity { DiagnosticSeverity.note }
-}
-private struct _NominalTypeMemberHighlight: DiagnosticMessage {
-  let message: String
-
-  var diagnosticID: MessageID { MessageID(domain: "SwiftLexicalLookup", id: "DebugTypeMemberHighlight") }
-  var severity: DiagnosticSeverity { DiagnosticSeverity.note }
-}
-
 extension SymbolTable3 {
   /// Helper for converting a qualified type name to a string description
   @_spi(_QualifiedLookupTests) public func _describeQualifiedName(_ name: QualifiedTypeName) -> String {
@@ -1012,123 +998,36 @@ extension SymbolTable3 {
   @_spi(_QualifiedLookupTests) public func _describeQualifiedGlobalName(_ name: QualifiedTypeNameGlobalType) -> String {
     _describeQualifiedName(QualifiedTypeName.topLevel(name))
   }
+}
 
-  fileprivate func _annotateDeclGroup(
-    _ declGroup: SourceFileRoot<DeclGroupSyntaxType>,
-    typeTable: TypeTable,
-    name: String,
-    typeName: QualifiedTypeNameGlobalType,
-    using group: inout GroupedDiagnostics
-  ) {
-    let typeNameDescription = _describeQualifiedGlobalName(typeName)
+extension SymbolTable3 {
+  @_spi(_QualifiedLookupTests) public func _describeDependencyGraph() -> String {
+    var result = ""
+    var group = GroupedDiagnostics()
 
-    let memberNotes: [Diagnostic] = typeTable.typeMembersToDecls.enumerated()
-      .flatMap({ (i, nameAndMember) in
-        let (memberName, member): (Identifier, TypeMember) = nameAndMember
-        return member.decls.map({ memberDecl in
-          Diagnostic(
-            node: Syntax(memberDecl.typeDeclSyntax),
-            message: _NominalTypeMemberHighlight(message: "Member '\(typeNameDescription) > \(memberName.name)'")
-          )
-        })
-      })
+    // Add all registered files
+    var addedNames = Set<String>()
+    for (moduleIdentifier, moduleFiles) in moduleToSources {
+      for (fileName, fileSyntax) in moduleFiles {
+        let fileIdentifier = "\(moduleIdentifier.name)/\(fileName)"
+        // Don't readmit duplicate file names
+        // TODO: Should handle modules
+        guard addedNames.insert(fileIdentifier).inserted else {
+          result += "Duplicate file identifier \(fileIdentifier)\n"
+          continue
+        }
 
-    // Inform user if type has no members
-    let message = "\(name) of \(typeNameDescription))"
-
-    group.addDiagnostic(
-      Diagnostic(
-        node: declGroup.node,
-        message: _NominalTypeHighlight(message: message),
-        highlights: typeTable.typeMembersToDecls.flatMap(\.value.decls).map({ Syntax($0.typeDeclSyntax) }),
-      )
-    )
-    // TODO: Ideally, we should emit only the diagnostic above with `memberNotes`
-    // passed in the `notes` initializer parameter once
-    // https://github.com/swiftlang/swift-syntax/issues/2166 is resolved
-    for noteDiagnostic in memberNotes {
-      group.addDiagnostic(noteDiagnostic)
-    }
-  }
-
-  // TODO: Maybe use group diagnostics
-  fileprivate func _describeType(reference: NominalTypeRef) -> String {
-    // Get the global name (otherwise trivial)
-    let (typeName, referenceVersion): (QualifiedTypeNameGlobalType, Int)
-    switch reference.storage {
-    case .globalReference(let name, let version):
-      (typeName, referenceVersion) = (name, version)
-    case .local(let nominalDecl):
-      return nominalDecl.trimmedDescription
-    }
-
-    // Get the nominal type
-    guard let type: TypeDependencyGraph.NominalType = dependencyGraph.namesToTypes[typeName] else {
-      return "nil"
-    }
-
-    // Get each decl group (main decl, redeclarations, extensions), get
-    // their discovered member types, and label them
-    //
-    // TODO: Get rid of SourceFileRoot force unwraps
-    var declGroups = [(declGroup: SourceFileRoot<DeclGroupSyntaxType>, typeTable: TypeTable, name: String)]()
-    declGroups.append(
-      (
-        SourceFileRoot(DeclGroupSyntaxType(type.mainDecl.node))!, type.mainDecl.typeMap,
-        "Decl"
-      )
-    )
-    for (index, mappedRedeclaration) in type.redeclarations.enumerated() {
-      declGroups.append(
-        (
-          SourceFileRoot(DeclGroupSyntaxType(mappedRedeclaration.node))!, mappedRedeclaration.typeMap,
-          "Redecl #\(index)"
-        )
-      )
-    }
-    for (_, extensionDecls) in type.boundExtensions {
-      for (extensionDecl, typeMap) in extensionDecls {
-        declGroups.append(
-          (
-            SourceFileRoot(DeclGroupSyntaxType(extensionDecl.node))!, typeMap,
-            "Extension"
-          )
-        )
+        group.addSourceFile(tree: fileSyntax, displayName: fileIdentifier)
       }
     }
 
-    var group = GroupedDiagnostics()
-
-    // Add uniqued files to group
-    let uniquedSourceFiles = Set(declGroups.map(\.declGroup.fileRoot))
-    for file in uniquedSourceFiles {
-      let name: String = {
-        // TODO: Perhaps find more efficient way of getting file names
-        for (sourceName, sourceFile) in moduleToSources.flatMap(\.value) {
-          if sourceFile == file {
-            return sourceName
-          }
-        }
-        fatalError("[SwiftLexicalLookup] Internal error: Admitted file not in symbol-table sources.")
-      }()
-
-      group.addSourceFile(tree: file, displayName: name)
+    // Add dependency-graph diagnostics
+    let diagnostics = dependencyGraph._describeWithDiagnostics(describeTypeName: _describeQualifiedGlobalName(_:))
+    for diagnostic in diagnostics {
+      group.addDiagnostic(diagnostic)
     }
 
-    // Build the result
-    var result = ""
-
-    // Warn about version mismatch
-    if type.version != referenceVersion {
-      result += "Reference version mismatch; actual is \(type.version), but referenced \(referenceVersion)"
-    }
-
-    // Add each group decl
-    for (declGroup, typeTable, name) in declGroups {
-      _annotateDeclGroup(declGroup, typeTable: typeTable, name: name, typeName: typeName, using: &group)
-    }
-
-    // Add group annotations
+    // Print to result
     result += DiagnosticsFormatter(colorize: true).annotateSources(in: group)
 
     return result

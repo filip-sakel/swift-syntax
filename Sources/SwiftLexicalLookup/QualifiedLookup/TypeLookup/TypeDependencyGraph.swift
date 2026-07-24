@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+import SwiftDiagnostics
 import SwiftIfConfig
 import SwiftSyntax
 
@@ -591,7 +592,7 @@ extension TypeDependencyGraph {
     // Get the bound type
     guard let extendedType = namesToTypes[extendedTypeName] else {
       fatalError(
-        "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl.node._memberlessDescription) bound to type \(extendedTypeName), which isn't in the graph."
+        "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl.node._memberlessDescription) bound to type '\(extendedTypeName)', which isn't in the graph."
       )
     }
 
@@ -654,7 +655,7 @@ extension TypeDependencyGraph {
       // Find the referenced type
       guard var nominalType = namesToTypes[dependencyType] else {
         fatalError(
-          "[SwiftLexicalLookup] Internal error: Extension \(dependency.extensionDecl._memberlessDescription) bound to type \(dependencyType), which isn't in the graph."
+          "[SwiftLexicalLookup] Internal error: Extension \(dependency.extensionDecl._memberlessDescription) bound to type '\(dependencyType)', which isn't in the graph."
         )
       }
 
@@ -763,7 +764,7 @@ extension TypeDependencyGraph {
     // Bind to type
     guard let newExtendedType = extendedType._bindingExtension(mappedExtensionDecl, module: extensionDeclModule) else {
       fatalError(
-        "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl.node._memberlessDescription) has no existing state but is already bound to \(extendedType)."
+        "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl.node._memberlessDescription) has no existing state but is already bound to '\(extendedType)'."
       )
     }
     namesToTypes[extendedTypeName] = newExtendedType
@@ -854,5 +855,146 @@ extension GenericExtensionState {
 extension GenericExtensionState: CustomDebugStringConvertible where TypeName == QualifiedTypeName {
   public var debugDescription: String {
     _describe(describeTypeName: \.debugDescription)
+  }
+}
+
+// TypeDependencyGraph description
+
+private struct _DependencyGraphDiagnostic: DiagnosticMessage {
+  let message: String
+  let severity: DiagnosticSeverity
+
+  var diagnosticID: MessageID { MessageID(domain: "SwiftLexicalLookup", id: "TypeDependencyGraphDiagnostic") }
+}
+
+extension TypeDependencyGraph {
+  @_spi(_QualifiedLookupTests) public func _describeWithDiagnostics(
+    describeTypeName: (QualifiedTypeNameGlobalType) -> String
+  ) -> [Diagnostic] {
+    var diagnostics = [Diagnostic]()
+    /// Attach a note to the given node.
+    func _attachNote(to node: some SyntaxProtocol, message: String) {
+      diagnostics.append(
+        Diagnostic(node: node, message: _DependencyGraphDiagnostic(message: message, severity: .note))
+      )
+    }
+    /// Attach an error to the given node.
+    func _attachError(to node: some SyntaxProtocol, message: String) {
+      diagnostics.append(
+        Diagnostic(node: node, message: _DependencyGraphDiagnostic(message: message, severity: .error))
+      )
+    }
+    /// Annotate each member type declaration in the `typeTable`
+    /// of the type named `baseTypeName`.
+    ///
+    /// E.g. The type alias in 'struct A { typealias B = Int }' gets
+    /// annotated `Type member '_(MyFile.swift)::A' > 'B'`.
+    func _markMemberTypes(baseTypeName: String, typeTable: TypeTable) {
+      for (memberName, member) in typeTable.typeMembersToDecls {
+        for memberDecl in member.decls {
+          _attachNote(to: memberDecl.typeDeclSyntax, message: "Type member '\(baseTypeName)' > '\(memberName.name)'")
+        }
+      }
+    }
+
+    // Add all main decls and their extensions
+    //
+    // Keep track of visited types to diagnose types that are registered under different names.
+    var visitedTypes = [NominalTypeDeclSyntax: QualifiedTypeNameGlobalType]()
+    // Keep track of correctly bound, annotated extensions. Allows us to diagnose
+    // extensions that successfully resolved but haven't bound to the nominal type.
+    var annotatedExtensions = Set<ExtensionDeclSyntax>()
+    for (typeName, type) in namesToTypes {
+      let typeNameDescription = describeTypeName(typeName)
+
+      // Check each main decl mapped to exactly one visited type
+      let mainDecls = [type.mainDecl] + type.redeclarations
+      for (index, nominalTypeDecl) in mainDecls.enumerated() {
+        // User-friendly description
+        let declLabel = index == 0 ? "Main decl" : "Redeclaration #\(index)"
+
+        // Ensure this type decl is mapped to only one name
+        guard visitedTypes.updateValue(typeName, forKey: nominalTypeDecl.node) == nil else {
+          // This nominal-type declaration was already registered under a different name
+          _attachError(to: nominalTypeDecl.node, message: "\(declLabel) also registered under '\(typeNameDescription)'")
+          continue
+        }
+
+        // Show the registered name
+        _attachNote(to: nominalTypeDecl.node, message: "\(declLabel) registered '\(typeNameDescription)'")
+
+        // Mark each member in the type table
+        _markMemberTypes(baseTypeName: typeNameDescription, typeTable: nominalTypeDecl.typeMap)
+      }
+
+      // Check bound-extension state points to us as the resolved type
+      for (boundExtension, typeMap) in type.boundExtensions.flatMap(\.value) {
+        // Get the extension state (continue on failure)
+        guard let extensionState = extensionsToState[boundExtension.node] else {
+          _attachError(
+            to: boundExtension.node,
+            message: "Extension bound to '\(typeNameDescription)' but has no state."
+          )
+          continue
+        }
+
+        // Ensure the extension state's resolved type points to us
+        switch extensionState.resolvedType {
+        case .success(typeName):
+          break
+        case .success(let otherName):
+          // Can't bind to other name
+          _attachError(
+            to: boundExtension.node,
+            message:
+              "Extension bound to '\(typeNameDescription)', but its state says it resolved to '\(describeTypeName(otherName))'"
+          )
+          continue
+        case .failure(let failure):
+          // Failed extension shouldn't be bound
+          _attachError(
+            to: boundExtension.node,
+            message:
+              "Extension bound to '\(typeNameDescription)', but its state says it failed to resolve: \(failure._describe(describeTypeName: describeTypeName))"
+          )
+        }
+
+        // Register this bound extension as visited
+        //
+        // (Steps above should have diagnosed duplicate binding so we don't
+        //  care about the result of `insert`)
+        annotatedExtensions.insert(boundExtension.node)
+
+        // Indicate the extension is bound to us
+        _attachNote(to: boundExtension.node, message: "Extension resolved and bound to '\(typeNameDescription)'")
+
+        // Mark each member in the type table
+        _markMemberTypes(baseTypeName: typeNameDescription, typeTable: typeMap)
+      }
+    }
+
+    // Print failed extensions; diagnose resolved but unexpectedly-unbound extensions
+    for (extensionDecl, extensionState) in extensionsToState {
+      // We already annotated if we inserted to `visitedBoundExtensions`
+      guard !annotatedExtensions.contains(extensionDecl) else { continue }
+
+      // Print/diagnose extension state
+      switch extensionState.resolvedType {
+      case .success(let resolvedTypeName):
+        // Successfully resolved extensions should be bound to a `NominalType`
+        let resolvedNameDescription = describeTypeName(resolvedTypeName)
+        _attachError(
+          to: extensionDecl,
+          message: "Extension successfully resolved to but didn't bind to '\(resolvedNameDescription)'."
+        )
+      case .failure(let failure):
+        _attachNote(
+          to: extensionDecl,
+          message: "Extension binding failed: \(failure._describe(describeTypeName: describeTypeName))"
+        )
+      }
+    }
+
+    return diagnostics
   }
 }
