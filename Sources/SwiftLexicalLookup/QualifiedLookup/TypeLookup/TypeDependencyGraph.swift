@@ -196,6 +196,13 @@ public struct TypeDependencyGraph {
       copy.version &+= 1
       return (newNominal: copy, extensionTypeTable)
     }
+    fileprivate consuming func _updatingDependents(
+      _ newDependents: [TypeDependent]
+    ) -> NominalType {
+      var copy = self
+      copy.dependents = newDependents
+      return copy
+    }
 
     /// Adds the given type as a redeclaration if not already added.
     func addingRedeclaration(_ mainDecl: MappedDeclGroup<NominalTypeDeclSyntax>) -> NominalType {
@@ -621,23 +628,31 @@ extension TypeDependencyGraph {
   /// - modifiedTypeName: The type that changed and requires invalidating dependent
   ///   extensions.
   /// - modifiedMembers: The direct dependents (extensions) of the `modifiedType` type.
+  /// - invalidatedExtensions: A list of unspecified order containg the invalidated
+  ///   extensions.
   ///
-  /// Returns: All invalidated extensions's state
+  /// Returns: The new dependent extensions after removing the invalidated ones.
+  /// TODO: Make recursive
   fileprivate mutating func _invalidateDependents(
     modifiedTypeName: QualifiedTypeNameGlobalType,
     modifiedMembers: TypeTable,
     directDependents: [TypeDependent],
+    invalidatedExtensions: inout [ExtensionState],
     moduleMap: [SourceFileSyntax: SymbolTable3.Module],
-  ) -> [ExtensionState] {
-    // Invalidate all extensions that depend on type members we've added
-    var queue = [SourceFileRoot<ExtensionDeclSyntax>]()
+  ) -> [TypeDependent] {
+    // For each dependent extension, either invalidate or keep it in the
+    // new-dependents list.
+    var newDependents = [TypeDependent]()
+
+    // TODO: Verify that this order of invalidating is fine
     for dependent in directDependents {
-      guard modifiedMembers.typeMembersToDecls[dependent.memberType] != nil else { continue }
-      queue.append(dependent.dependentExtension)
-    }
-    var invalidatedExtensions = [ExtensionState]()
-    // TODO: Consider if this order of invalidating is fine
-    while let invalidatedExtension = queue.popLast() {
+      // Get the invalidated extension (or retain dependent)
+      guard modifiedMembers.typeMembersToDecls[dependent.memberType] != nil else {
+        newDependents.append(dependent)
+        continue
+      }
+      let invalidatedExtension = dependent.dependentExtension
+
       // Ensure extension has a known module (needed later)
       guard let invalidatedExtensionModule: SymbolTable3.Module = moduleMap[invalidatedExtension.fileRoot] else {
         fatalError(
@@ -654,16 +669,19 @@ extension TypeDependencyGraph {
 
       // Invalidate
       //
-      // 1. Remove extension state
+      // 1. Remove extension state & record invalidated extension
       extensionsToState[invalidatedExtension.node] = nil
+      invalidatedExtensions.append(invalidatedExtensionState)
 
       // 2. Update the extended type
       //
-      // If the extension was unbound, it doesn't have children to invalidate
+      // If the extension was unbound, we don't have any children to invalidate
       // or a bound type to update, so we're done
       guard case .success(let invalidatedExtensionTypeName) = invalidatedExtensionState.resolvedType else {
         continue
       }
+      // FIXME: Remove the dependents from the invalidated type
+
       // Remove the members from the extended type
       guard let invalidatedExtensionType = namesToTypes[invalidatedExtensionTypeName] else {
         fatalError(
@@ -680,7 +698,19 @@ extension TypeDependencyGraph {
           "[SwiftLexicalLookup] Internal error: Extension \(invalidatedExtension.node._memberlessDescription) unexpectedly not in `boundExtensions` of \(invalidatedExtensionType)."
         )
       }
-      namesToTypes[invalidatedExtensionTypeName] = newInvalidatedExtensionType
+
+      // Recursively invalidate the invalidate extension's dependents
+      let newTransitiveDependents = _invalidateDependents(
+        modifiedTypeName: invalidatedExtensionTypeName,
+        modifiedMembers: invalidatedExtensionTypeTable,
+        directDependents: invalidatedExtensionType.dependents,
+        invalidatedExtensions: &invalidatedExtensions,
+        moduleMap: moduleMap
+      )
+      let finalInvalidatedExtensionType = newInvalidatedExtensionType._updatingDependents(newTransitiveDependents)
+
+      // Update
+      namesToTypes[invalidatedExtensionTypeName] = finalInvalidatedExtensionType
 
       // 3. Remove extension's introduced types
       for (typeMember, _) in invalidatedExtensionTypeTable.typeMembersToDecls {
@@ -705,19 +735,9 @@ extension TypeDependencyGraph {
         // FIXME: Need to also remove the type's dependents!!
       }
 
-      // 4. Add recursively invalidated transitive dependents
-      for transitiveDependent in invalidatedExtensionType.dependents {
-        guard invalidatedExtensionTypeTable.typeMembersToDecls[transitiveDependent.memberType] != nil else {
-          continue
-        }
-        queue.append(transitiveDependent.dependentExtension)
-      }
-
-      // Collect invalidated extension
-      invalidatedExtensions.append(invalidatedExtensionState)
     }
 
-    return invalidatedExtensions
+    return newDependents
   }
 }
 
@@ -843,7 +863,7 @@ extension TypeDependencyGraph {
       else {
         // Ensure we don't register a dependent twice (debug-only)
         fatalError(
-          "[SwiftLexicalLookup] Internal error: Unexpectedly found not-yet-admitted extension \(extensionDecl.node._memberlessDescription) in dependents list of '\(dependency.extendedTypeName)'."
+          "[SwiftLexicalLookup] Internal error: Unexpectedly found not-yet-admitted extension `\(extensionDecl.node._memberlessDescription)` in dependents list of '\(dependency.extendedTypeName)'."
         )
       }
       namesToTypes[dependency.extendedTypeName] = nominalWithDependents
@@ -860,12 +880,15 @@ extension TypeDependencyGraph {
         )
       }
 
-      invalidatedExtensions = _invalidateDependents(
+      var invalidatedExtensionsTmp = [ExtensionState]()
+      let newTypeDependents = _invalidateDependents(
         modifiedTypeName: extendedTypeName,
         modifiedMembers: mappedExtensionDecl.typeMap,
         directDependents: extendedType.dependents,
+        invalidatedExtensions: &invalidatedExtensionsTmp,
         moduleMap: moduleMap
       )
+      invalidatedExtensions = invalidatedExtensionsTmp
 
       // Bind to type
       guard
@@ -875,7 +898,8 @@ extension TypeDependencyGraph {
           "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl.node._memberlessDescription) has no existing state but is already bound to '\(extendedType)'."
         )
       }
-      namesToTypes[extendedTypeName] = newExtendedType
+      let finalExtendedType = newExtendedType._updatingDependents(newTypeDependents)
+      namesToTypes[extendedTypeName] = finalExtendedType
     case .failure:
       // Extensions that aren't bound to a type, don't introduce new type
       // members so they can't have any dependent.
