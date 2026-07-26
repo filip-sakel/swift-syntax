@@ -526,7 +526,7 @@ extension SymbolTable3 {
     let dependencyGraphDescription = _describeDependencyGraph()
     print(String(repeating: "-", count: 80))
     print(
-      "After \(actionVerb) extension `\(extensionDecl._memberlessDescription)` to \(resolutionResult) with dependencies: \(dependencyDescription), new dependency graph is:"
+      "After \(actionVerb) extension `\(extensionDecl._memberlessDescription)` to \(resolutionResult) with dependencies: \(dependencyDescription); admission result: \(admissionResult), new dependency graph is:"
     )
     print(dependencyGraphDescription)
     print(String(repeating: "-", count: 80) + "\n")
