@@ -1166,7 +1166,7 @@ extension TypeQualifierFailure {
       //   )
       // }
       let memberTypeDeclsResult: Result<[TypeDeclSyntax], SymbolTable3.QualifiedTypeLookupFailure> =
-        symbolTable.findTypeMember(
+        symbolTable.findMemberType(
           baseType: nominalBaseType,
           memberTypeName: typeMember.name,
           introducingTypeSyntax: typeMember.introducingSyntax,

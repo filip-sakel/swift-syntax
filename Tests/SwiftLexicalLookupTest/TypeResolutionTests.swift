@@ -27,13 +27,13 @@ extension TypeLikeSyntax: ExpressibleByStringLiteral {
 
 extension GenericExtensionState where TypeName == String {
   static func invalidCycle(
-    _ cycleElements: [(extension: String, base: StaticString, member: StaticString)]
+    _ cycleElements: [(extension: String?, base: StaticString, member: StaticString)]
   ) -> GenericExtensionState {
     let cycle = ExtensionBindingCycle<String>(
-      dependencyChain: cycleElements.map({ (extensionDecl, baseTypeName, dependentMemberName) in
-        let decl = DeclSyntax(stringLiteral: extensionDecl)
+      dependencyChain: cycleElements.map({ (extensionDeclOrMainDecl, baseTypeName, dependentMemberName) in
+        let decl = extensionDeclOrMainDecl.map(DeclSyntax.init(stringLiteral:))
         return ExtensionBindingCycle.Dependency(
-          extensionDecl: decl.cast(ExtensionDeclSyntax.self),
+          introducingExtensionOrMainDecl: decl?.cast(ExtensionDeclSyntax.self),
           extendedTypeName: baseTypeName.description,
           member: Identifier(canonicalName: dependentMemberName),
           typeDecls: []

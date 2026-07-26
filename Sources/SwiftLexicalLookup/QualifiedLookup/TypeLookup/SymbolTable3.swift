@@ -910,7 +910,7 @@ extension SymbolTable3 {
     case lookupFailure(TypeDependencyGraph.QualifiedTypeLookupFailure)
   }
 
-  func findTypeMember(
+  func findMemberType(
     baseType: NominalTypeRef,
     memberTypeName: Identifier,
     introducingTypeSyntax: TypeLikeSyntax,
@@ -925,10 +925,15 @@ extension SymbolTable3 {
     }
 
     // TODO: Remove
-    // let baseTypeDescription = baseType._describe(describeTypeName: _describeQualifiedName(_:))
-    // print(
-    //   "Find member \(baseTypeDescription) > \(memberTypeName.name):\n\(dependencyGraphDescription)"
-    // )
+    let baseTypeDescription = baseType._describe(describeTypeName: _describeQualifiedName(_:))
+    print(
+      "Finding member \(baseTypeDescription) > \(memberTypeName.name)"
+    )
+    defer {
+      print(
+        "New deps for member-type lookup: \(dependencyTracker.dependencies.map({ $0._describe(describeTypeName: _describeQualifiedGlobalName(_:)) }))"
+      )
+    }
 
     return dependencyGraph.findMemberType(
       baseType: baseType,
@@ -975,7 +980,7 @@ extension QualifiedLookupDependency {
   @_spi(_QualifiedLookupTests) public func _describe(
     describeTypeName: (TypeName) -> String
   ) -> String {
-    "Dependency(extensionDecl: \(extensionDecl._memberlessDescription), resolvedType: \(describeTypeName(extendedTypeName)), dependentMember: \(member.name))"
+    "Dependency(introducingExtensionOrMainDecl: \((introducingExtensionOrMainDecl?._memberlessDescription).debugDescription), resolvedType: \(describeTypeName(extendedTypeName)), dependentMember: \(member.name))"
   }
 }
 
