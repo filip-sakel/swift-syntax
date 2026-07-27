@@ -154,7 +154,7 @@ import SwiftSyntax
       // firstConflictingDependency: ExtensionBindingResult.Dependency,
       // firstConflictingTypeDecls: [TypeDeclSyntax]
   )
-  case cannotDependOnIntroducedMembers(cycle: ExtensionBindingCycle<TypeName>)
+  case cannotDependOnIntroducedMembers(cycle: GenericExtensionBindingCycle<TypeName>)
 }
 
 @_spi(_QualifiedLookup) public final class SymbolTable3 {
@@ -205,7 +205,7 @@ import SwiftSyntax
 // MARK: Cycle Detection
 
 extension SymbolTable3 {
-  typealias ExtensionBindingCycle = SwiftLexicalLookup.ExtensionBindingCycle<QualifiedTypeName>
+  typealias ExtensionBindingCycle = SwiftLexicalLookup.GenericExtensionBindingCycle<QualifiedTypeName>
   // fileprivate func _findCyclicalDependency(
   //   baseTypeName: QualifiedTypeName,
   //   typeMembers: [Identifier: [TypeDeclSyntax]],

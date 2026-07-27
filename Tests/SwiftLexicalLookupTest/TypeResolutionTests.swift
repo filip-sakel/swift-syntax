@@ -27,24 +27,24 @@ extension TypeLikeSyntax: ExpressibleByStringLiteral {
 
 extension GenericExtensionState where TypeName == String {
   static func invalidCycle(
-    _ cycleElements: [(extension: String?, base: StaticString, member: StaticString)],
+    _ cycleElements: [(introducingDecl: String?, extension: String, base: StaticString)],
     conflictingMember: StaticString
   ) -> GenericExtensionState {
-    let cycle = ExtensionBindingCycle<String>(
-      dependencyChain: cycleElements.map({ (extensionDeclOrMainDecl, baseTypeName, dependentMemberName) in
-        let decl = extensionDeclOrMainDecl.map(DeclSyntax.init(stringLiteral:))
-        return ExtensionBindingCycle.Dependency(
-          introducingExtensionOrMainDecl: decl?.cast(ExtensionDeclSyntax.self),
-          extendedTypeName: baseTypeName.description,
-          member: Identifier(canonicalName: dependentMemberName),
-          typeDecls: []
+    let cycle = GenericExtensionBindingCycle<String>(
+      dependencyPath: cycleElements.map({ (introducingTypeDecl, extensionDecl, baseTypeName) in
+        let introducingTypeDecl = introducingTypeDecl.map(DeclSyntax.init(stringLiteral:))
+        let extensionDecl = DeclSyntax.init(stringLiteral: extensionDecl)
+        return GenericDependencyCycleElement(
+          introducingTypeDecl: introducingTypeDecl.map(Syntax.init(_:))?.cast(TypeDeclSyntax.self),
+          extensionDecl: extensionDecl.cast(ExtensionDeclSyntax.self),
+          boundType: baseTypeName.description,
         )
       }),
       dependencyMember: Identifier(canonicalName: conflictingMember)
     )
     return GenericExtensionState(
       // TODO: Test dependencies
-      dependencies: [],
+      _uncheckedDependencies: [],
       // Won't be checked
       extensionDecl: DeclSyntax(stringLiteral: "extension").cast(ExtensionDeclSyntax.self),
       resolvedType: Result.failure(GenericBindingFailure.cannotFormCycle(cycle))
@@ -449,8 +449,8 @@ final class TestQualifiedTypeName: XCTestCase {
         struct A {}
 
         \(extensionState: .invalidCycle([
-          (extension: "extension A { typealias B = A }", base: "_(MyFile.swift)::A", member: "struct A {}")
-        ], conflictingMember: "A"))
+          (introducingDecl: "typealias B = A", extension: "extension A { typealias B = A }", base: "_(MyFile.swift)::A")
+        ], conflictingMember: "struct A {}"))
         extension A.B { struct A {} }
 
         extension A { typealias B = A }
@@ -468,6 +468,62 @@ final class TestQualifiedTypeName: XCTestCase {
       extension A { typealias B = A }
       extension A.B { typealias B = OtherType }
       """ as LexicalLookupSource
+    ])
+  }
+
+  func testPathologicalV3() {
+    assertTypeResolution([
+      "MyFile.swift": """
+      struct T_0 {}
+      struct T_1 {}
+      struct T_2 {}
+      struct T_3 {}
+
+      extension T_0 { typealias Last = T_3 }
+      //        |- Depends on : ()
+      //        `- Introduces : T_0>Last
+      //
+      //              `- ℹ️ note:  For `T_0`'s member `Last` to resolve to `output.T_3`,
+      //                          `T_0` must not contain any type member named `T_3`.
+
+      extension T_0.Last { typealias Prev = T_2 }
+      //        |- Depends on : T_0>Last, T_0>T_3
+      //        |- Resolves to: T_3
+      //        `- Introduces : T_3>Prev
+      //
+      //           `- ℹ️ note: `T_0`'s member `Last` is declared in `extension T_0.Last`
+
+      // j=3
+      extension T_3.Prev { typealias Prev = T_1 }
+      //        |- Depends on : T_3>Prev, T_3>T_2
+      //        |- Resolves to: T_2
+      //        `- Introduces : T_2>Prev
+      //
+      //           `- ℹ️ note: `T_3`'s member `Prev` is declared in `extension T_0.Last`
+
+
+      // j=2
+      extension T_2.Prev { typealias Prev = T_0 }
+      //        |- Depends on : T_2>Prev, T_2>T_1
+      //        |- Resolves to: T_1
+      //        `- Introduces : T_1>Prev
+      //
+      //           `- ℹ️ note: `T_2`'s member `Prev` is declared in `extension T_3.Prev`
+
+      \(extensionState: .invalidCycle([
+          (introducingDecl: "", extension: "extension A { typealias B = A }", base: "_(MyFile.swift)::A")
+        ], conflictingMember: "struct A {}"))
+      extension T_1.Prev { struct T_3 {} }
+      //        |- Depends on : T_1>Prev, T_1>T_0
+      //        |- Resolves to: T_0
+      //        `- Introduces : T_0>T_3     <- collides with the first extension's empty dependency
+      //
+      //           `- ℹ️ note: `T_1`'s member `Prev` is declared in `extension T_2.Prev`
+      // `- ❌ error: Resolving `extension T_1.Prev` to the extended type `T_0` requires that `T_0`
+      //           have no type member `T_3`, but the extension introduces `T_3`.
+
+      extension T_1 { struct T_0 {} }
+      """
     ])
   }
 
