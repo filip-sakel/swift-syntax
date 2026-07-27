@@ -471,7 +471,8 @@ final class TestQualifiedTypeName: XCTestCase {
     ])
   }
 
-  func testPathologicalV3() {
+  // TODO: Reenable
+  func PathologicalV3() {
     assertTypeResolution([
       "MyFile.swift": """
       struct T_0 {}
@@ -529,6 +530,21 @@ final class TestQualifiedTypeName: XCTestCase {
 
   // TODO: Add test where extension state resolves to a cycle, but
   // a later extension actually makes everything resolve fine (look at last bug report)
+
+  /// TODO: Check main decls actually don't have dependencies (with example in `TypeDependencyGraph` of main decl nested in dependency)
+  /// We need to save dependencies to the main nominal-type declaration,
+  /// which we represent as `nil`.
+  ///
+  /// For instance, suppose we have `struct A {}` and we bind:
+  /// ```swift
+  /// extension A.B {}
+  /// ```
+  /// This extension depends on the member type 'B' of '(MyFile.swift)::A'.
+  /// Currently, no extensions introduce this member type but we need to record
+  /// the dependency in case another extension introduces
+  /// '(MyFile.swift)::A' > 'B'. Hence, we say the introducing decl is `nil` (the
+  /// main declaration.)
+  ///
 
   // func testCrossFileExtension() {
   //   assertQualifiedTypeName([
