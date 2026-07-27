@@ -27,7 +27,8 @@ extension TypeLikeSyntax: ExpressibleByStringLiteral {
 
 extension GenericExtensionState where TypeName == String {
   static func invalidCycle(
-    _ cycleElements: [(extension: String?, base: StaticString, member: StaticString)]
+    _ cycleElements: [(extension: String?, base: StaticString, member: StaticString)],
+    conflictingMember: StaticString
   ) -> GenericExtensionState {
     let cycle = ExtensionBindingCycle<String>(
       dependencyChain: cycleElements.map({ (extensionDeclOrMainDecl, baseTypeName, dependentMemberName) in
@@ -38,7 +39,8 @@ extension GenericExtensionState where TypeName == String {
           member: Identifier(canonicalName: dependentMemberName),
           typeDecls: []
         )
-      })
+      }),
+      dependencyMember: Identifier(canonicalName: conflictingMember)
     )
     return GenericExtensionState(
       // TODO: Test dependencies
@@ -440,19 +442,22 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testSimpleRecursiveExtension() {
-    assertTypeResolution([
-      "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::A")
-      struct A {}
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        \("🟥", name: "_(MyFile.swift)::A")
+        struct A {}
 
-      \(extensionState: .invalidCycle([
-        (extension: "extension A { typealias B = A }", base: "_(MyFile.swift)::A", member: "struct A {}")
-      ]))
-      extension A.B { struct A {} }
+        \(extensionState: .invalidCycle([
+          (extension: "extension A { typealias B = A }", base: "_(MyFile.swift)::A", member: "struct A {}")
+        ], conflictingMember: "A"))
+        extension A.B { struct A {} }
 
-      extension A { typealias B = A }
-      """ as LexicalLookupSource
-    ])
+        extension A { typealias B = A }
+        """ as LexicalLookupSource
+      ],
+      verbose: true
+    )
   }
   func testRedeclarationWithRecursiveExtension() {
     assertTypeResolution([
@@ -465,6 +470,10 @@ final class TestQualifiedTypeName: XCTestCase {
       """ as LexicalLookupSource
     ])
   }
+
+  // TODO: Add test where extension state resolves to a cycle, but
+  // a later extension actually makes everything resolve fine (look at last bug report)
+
   // func testCrossFileExtension() {
   //   assertQualifiedTypeName([
   //     "FileA.swift": """

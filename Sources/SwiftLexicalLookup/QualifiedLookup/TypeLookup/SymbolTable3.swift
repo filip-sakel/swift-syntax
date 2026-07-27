@@ -522,11 +522,17 @@ extension SymbolTable3 {
     let dependencyDescription = dependencies.dependencies.map({
       $0._describe(describeTypeName: _describeQualifiedGlobalName(_:))
     })
+    // Describe result
+    let admissionResultDescriptions = admissionResult.map({ results in
+      results.map({ result in
+        "\(result.extensionDecl._memberlessDescription) -> \(result.resolvedType._describe(describeTypeName: _describeQualifiedGlobalName(_:)))"
+      }).joined(separator: ", ")
+    })
     // New graph description
     let dependencyGraphDescription = _describeDependencyGraph()
     print(String(repeating: "-", count: 80))
     print(
-      "After \(actionVerb) extension `\(extensionDecl._memberlessDescription)` to \(resolutionResult) with dependencies: \(dependencyDescription); admission result: \(admissionResult), new dependency graph is:"
+      "After \(actionVerb) extension `\(extensionDecl._memberlessDescription)` to \(resolutionResult) with dependencies: \(dependencyDescription); admission result: \(admissionResultDescriptions), new dependency graph is:"
     )
     print(dependencyGraphDescription)
     print(String(repeating: "-", count: 80) + "\n")
@@ -973,25 +979,6 @@ extension ExtensionBindingResult.Dependency: CustomDebugStringConvertible {
       declsDescription = flattenedDeclDescriptions.joined(separator: ", ")
     }
     return "\(baseTypeName.debugDescription)/\(typeMemberName.name) == \(declsDescription)"
-  }
-}
-
-extension QualifiedLookupDependency {
-  @_spi(_QualifiedLookupTests) public func _describe(
-    describeTypeName: (TypeName) -> String
-  ) -> String {
-    "Dependency(introducingExtensionOrMainDecl: \((introducingExtensionOrMainDecl?._memberlessDescription).debugDescription), resolvedType: \(describeTypeName(extendedTypeName)), dependentMember: \(member.name))"
-  }
-}
-
-extension ExtensionBindingCycle {
-  @_spi(_QualifiedLookupTests) public func _describe(
-    describeTypeName: (TypeName) -> String
-  ) -> String {
-    let dependencyChainDescription = dependencyChain.map({
-      $0._describe(describeTypeName: describeTypeName)
-    })
-    return "ExtensionBindingCycle(dependencyChain: \(dependencyChainDescription))"
   }
 }
 
