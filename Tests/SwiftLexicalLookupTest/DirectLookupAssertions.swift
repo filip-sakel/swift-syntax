@@ -19,7 +19,7 @@ import XCTest
 /// declaration-name references.
 struct DirectLookupMatcher {
   /// Marks a given 'ValueDeclSyntax' in source.
-  struct Reference {
+  struct Definition {
     let valueDeclMarker: Character
   }
 
@@ -37,7 +37,7 @@ struct DirectLookupMatcher {
 // MARK: `Reference` Conformances
 
 // Vacuous conformances (`Reference` is unihabited)
-extension DirectLookupMatcher.Reference: LexicalAnnotation, Identifiable, CustomStringConvertible {
+extension DirectLookupMatcher.Definition: LexicalAnnotation, Identifiable, CustomStringConvertible {
   typealias SyntaxReference = ValueDeclSyntax  //TypeMemberSyntax<ValueDeclSyntax>
   func findSyntaxFromToken(
     _ token: SwiftSyntax.TokenSyntax,
@@ -92,8 +92,8 @@ extension DirectLookupMatcher: LexicalMatcher {
 
   func assertExpectation(
     expectation: ContextualizedAnnotation<Expectation>,
-    markersToReferences: [Character: ContextualizedAnnotation<Reference>],
-    syntaxToReferences: [ValueDeclSyntax: ContextualizedAnnotation<Reference>],
+    markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
+    syntaxToDefinitions: [ValueDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool
   ) -> [ExpectationFailure] {
     var failures = [ExpectationFailure]()
@@ -103,8 +103,8 @@ extension DirectLookupMatcher: LexicalMatcher {
       name: expectation.annotation.nameReference,
       kind: expectation.annotation.kind
     )
-    .compactMap({ valueDecl -> ContextualizedAnnotation<Reference>? in
-      guard let valueDecl = syntaxToReferences[valueDecl] else {
+    .compactMap({ valueDecl -> ContextualizedAnnotation<Definition>? in
+      guard let valueDecl = syntaxToDefinitions[valueDecl] else {
         failures.append(
           ExpectationFailure.resultReferencesUnmarkedSyntax(syntaxDescription: valueDecl.trimmedDescription)
         )
@@ -115,8 +115,8 @@ extension DirectLookupMatcher: LexicalMatcher {
 
     // Map the expectations to definitions
     let expectedResults = expectation.annotation.results
-      .compactMap({ marker -> ContextualizedAnnotation<Reference>? in
-        guard let valueDecl = markersToReferences[marker] else {
+      .compactMap({ marker -> ContextualizedAnnotation<Definition>? in
+        guard let valueDecl = markersToDefinitions[marker] else {
           failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
           return nil
         }
@@ -161,6 +161,8 @@ extension Identifier: ExpressibleByStringLiteral {
   }
 }
 
+/// Specifies the `DeclNameReferenceBase` and `MemberKind` to use
+/// as filters when performing direct lookup on the given declaration.
 struct TestLookup {
   var name: DeclNameReferenceBase
   var kind: MemberKind
@@ -177,7 +179,7 @@ extension LexicalLookupSource.Interpolation where Matcher == DirectLookupMatcher
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    append(reference: DirectLookupMatcher.Reference(valueDeclMarker: marker), file: file, line: line)
+    append(definition: DirectLookupMatcher.Definition(valueDeclMarker: marker), file: file, line: line)
   }
   mutating func appendInterpolation(
     members: KeyValuePairs<TestLookup, [Character]>,

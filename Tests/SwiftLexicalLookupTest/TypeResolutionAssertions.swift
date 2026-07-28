@@ -22,7 +22,7 @@ import XCTest
 /// and `ExtensionDeclSyntax`
 struct TypeResolutionMatcher {
   /// A marker and the resolved qualified name of the annotated `NominalTypeDeclSyntax`.
-  struct Reference {
+  struct Definition {
     let marker: Character
     let name: String
   }
@@ -38,9 +38,9 @@ struct TypeResolutionMatcher {
   let lookupFiles: [(String, SourceFileSyntax)]
 }
 
-// MARK: `Reference` Conformances
+// MARK: `Definition` Conformances
 
-extension TypeResolutionMatcher.Reference: LexicalAnnotation, Identifiable, CustomStringConvertible {
+extension TypeResolutionMatcher.Definition: LexicalAnnotation, Identifiable, CustomStringConvertible {
   typealias SyntaxReference = NominalTypeDeclSyntax
   func findSyntaxFromToken(
     _ token: SwiftSyntax.TokenSyntax,
@@ -154,8 +154,8 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
   func assertExpectation(
     expectation: ContextualizedAnnotation<Expectation>,
-    markersToReferences: [Character: ContextualizedAnnotation<Reference>],
-    syntaxToReferences: [NominalTypeDeclSyntax: ContextualizedAnnotation<Reference>],
+    markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
+    syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool
   ) -> [ExpectationFailure] {
     switch expectation.annotation {
@@ -169,8 +169,8 @@ extension TypeResolutionMatcher: LexicalMatcher {
       return _assertTypeSyntax(
         typeSyntax: typeSyntax,
         expectedResult: expectedResult,
-        markersToReferences: markersToReferences,
-        syntaxToReferences: syntaxToReferences,
+        markersToDefinitions: markersToDefinitions,
+        syntaxToDefinitions: syntaxToDefinitions,
         verbose: verbose
       )
     case .extensionBinding(let expectedState):
@@ -259,8 +259,8 @@ extension TypeResolutionMatcher: LexicalMatcher {
   private func _assertTypeSyntax(
     typeSyntax: TypeSyntax,
     expectedResult: Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>,
-    markersToReferences: [Character: ContextualizedAnnotation<Reference>],
-    syntaxToReferences: [NominalTypeDeclSyntax: ContextualizedAnnotation<Reference>],
+    markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
+    syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool,
   ) -> [ExpectationFailure] {
     // Print target syntax (to show the syntax kinds)
@@ -284,17 +284,17 @@ extension TypeResolutionMatcher: LexicalMatcher {
     var failures = [ExpectationFailure]()
     switch (expectedResult, actualResult) {
     case (.success(.memberResults(let markers)), .success(.memberResults(let nominalTypes))):
-      // Find the referenced markers
-      let expectations: [ContextualizedAnnotation<Reference>] = markers.compactMap({ marker in
-        guard let targetReference = markersToReferences[marker] else {
+      // Find the referenced definitions
+      let expectations: [ContextualizedAnnotation<Definition>] = markers.compactMap({ marker in
+        guard let targetDefinition = markersToDefinitions[marker] else {
           failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
           return nil
         }
-        return targetReference
+        return targetDefinition
       })
 
-      let results: [ContextualizedAnnotation<Reference>] = nominalTypes.compactMap({ nominalType in
-        guard let targetReference = syntaxToReferences[nominalType.mainDecl] else {
+      let results: [ContextualizedAnnotation<Definition>] = nominalTypes.compactMap({ nominalType in
+        guard let targetDefinition = syntaxToDefinitions[nominalType.mainDecl] else {
           failures.append(
             ExpectationFailure.resultReferencesUnmarkedSyntax(
               syntaxDescription: nominalType.qualifiedName.debugDescription
@@ -302,7 +302,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
           )
           return nil
         }
-        return targetReference
+        return targetDefinition
       })
 
       // Don't continue if markers are undefined
@@ -323,7 +323,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
     case (.failure(let expectedFailure), .failure(let actualFailure)):
       // Describe the expected failure
       func markerToQualifiedName(marker: Character) -> String {
-        guard let nominalDecl = markersToReferences[marker] else {
+        guard let nominalDecl = markersToDefinitions[marker] else {
           failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
           return "_"
         }
@@ -404,7 +404,7 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    append(reference: TypeResolutionMatcher.Reference(marker: marker, name: name), file: file, line: line)
+    append(definition: TypeResolutionMatcher.Definition(marker: marker, name: name), file: file, line: line)
   }
   mutating func appendInterpolation(
     extensionState: GenericExtensionState<String>,

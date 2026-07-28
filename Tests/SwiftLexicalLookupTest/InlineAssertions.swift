@@ -14,7 +14,7 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
-/// An annotation (used for ``LexicalMatcher`` references and expectations)
+/// An annotation (used for ``LexicalMatcher`` definitions and expectations)
 /// associates testing data with a syntax node in the given ``LexicalLookupSource``.
 ///
 /// Used by ``_assertLexicalLookup``.
@@ -33,27 +33,27 @@ struct ContextualizedAnnotation<Annotation: LexicalAnnotation> {
 }
 
 /// A matcher asserts a particular expectation with access to the
-/// lexical information and references collected by `_assertLexicalLookup`.
+/// lexical information and definitions collected by `_assertLexicalLookup`.
 protocol LexicalMatcher {
-  associatedtype Reference: LexicalAnnotation, Identifiable, CustomStringConvertible
+  associatedtype Definition: LexicalAnnotation, Identifiable, CustomStringConvertible
   associatedtype Expectation: LexicalAnnotation
-  typealias ExpectationFailure = LexicalMatcherExpectationFailure<Reference>
+  typealias ExpectationFailure = LexicalMatcherExpectationFailure<Definition>
 
   /// Asserts the given expectation by returning failures.
   ///
   /// ### Implementation Note
   ///
-  /// We're given two maps for references:
-  /// 1. the markers->references map helps us convert markers from expectations
-  ///    to actual references
-  /// 2. the syntax->references map helps us convert the lookup output's syntax
-  ///    to actual references
+  /// We're given two maps for definitions:
+  /// 1. the markers->definitions map helps us convert markers from expectations
+  ///    to actual definitions
+  /// 2. the syntax->definitions map helps us convert the lookup output's syntax
+  ///    to actual definitions
   /// Then, you can use methods like ``LexicalAssertionUtilities/diffLexicalResults``
-  /// to diff the expected vs lookup-produced references.
+  /// to diff the expected vs lookup-produced definitions.
   func assertExpectation(
     expectation: ContextualizedAnnotation<Expectation>,
-    markersToReferences: [Reference.ID: ContextualizedAnnotation<Reference>],
-    syntaxToReferences: [Reference.SyntaxReference: ContextualizedAnnotation<Reference>],
+    markersToDefinitions: [Definition.ID: ContextualizedAnnotation<Definition>],
+    syntaxToDefinitions: [Definition.SyntaxReference: ContextualizedAnnotation<Definition>],
     verbose: Bool
   ) -> [ExpectationFailure]
 
@@ -61,14 +61,14 @@ protocol LexicalMatcher {
   func describeContextualizedExpectation(_ expectation: ContextualizedAnnotation<Expectation>) -> String
 }
 
-/// A source file annotated with references and expectations on those references.
+/// A source file annotated with definitions and expectations on those definitions.
 ///
 /// All annotations should be placed before the target token.
 ///
 /// Look for examples in `assertTypeResolution` and related assertion methods.
 struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral, ExpressibleByStringInterpolation {
   enum Annotation {
-    case reference(reference: Matcher.Reference)
+    case definition(definition: Matcher.Definition)
     case expectations(expectations: [Matcher.Expectation])
   }
   enum Component {
@@ -86,11 +86,11 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
       components.append(.stringFragment(literal))
     }
     mutating func append(
-      reference: Matcher.Reference,
+      definition: Matcher.Definition,
       file: StaticString = #file,
       line: UInt = #line
     ) {
-      components.append(.annotation(annotation: .reference(reference: reference), file: file, line: line))
+      components.append(.annotation(annotation: .definition(definition: definition), file: file, line: line))
     }
     mutating func appendInterpolation(
       expects expectations: [Matcher.Expectation],
@@ -101,7 +101,7 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
     }
   }
 
-  /// The source with all references/expectations removed
+  /// The source with all definitions/expectations removed
   let fileSource: String
   /// Parsed `source`
   let fileSyntax: SourceFileSyntax
@@ -167,37 +167,37 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
 
 /// Used by ``LexicalMatcher/assertExpectation`` to report errors back
 /// to `_assertLexicalLookup`.
-enum LexicalMatcherExpectationFailure<Reference: LexicalAnnotation & Identifiable> {
+enum LexicalMatcherExpectationFailure<Definition: LexicalAnnotation & Identifiable> {
   /// This expectation references a marker that wasn't declared in source
-  case referencesUndefinedMarker(Reference.ID)
+  case referencesUndefinedMarker(Definition.ID)
   /// The produced lookup result produces a syntax that hasn't
   /// been annotated with a marker
   case resultReferencesUnmarkedSyntax(syntaxDescription: String)
   /// The result didn't produce the expected marker
-  case resultMissesReferences([ContextualizedAnnotation<Reference>])
+  case resultMissesDefinitions([ContextualizedAnnotation<Definition>])
   /// The result added an additional (unexpected) marker
-  case resultAddsReferences([ContextualizedAnnotation<Reference>])
+  case resultAddsDefinitions([ContextualizedAnnotation<Definition>])
   /// Results are in the wrong order
   case invalidResultOrder(
-    expected: [ContextualizedAnnotation<Reference>],
-    actual: [ContextualizedAnnotation<Reference>]
+    expected: [ContextualizedAnnotation<Definition>],
+    actual: [ContextualizedAnnotation<Definition>]
   )
   /// Wrong result type. E.g., expected failure, but succeeded
   case other(failure: String)
 
   /// Converts this failure to a string for `XCTFail`.
-  func describe(describeReference: (ContextualizedAnnotation<Reference>) -> String) -> String {
+  func describe(describeDefinition: (ContextualizedAnnotation<Definition>) -> String) -> String {
     switch self {
     case .referencesUndefinedMarker(let marker):
       "Expectation references undefined marker '\(marker)'"
     case .resultReferencesUnmarkedSyntax(let syntaxDescription):
       "Lookup result references syntax that wasn't marked: `\(syntaxDescription)`"
-    case .resultMissesReferences(let references):
-      "Lookup didn't find expected result '\(references.map(describeReference))'"
-    case .resultAddsReferences(let references):
-      "Lookup introduced unexpected result '\(references.map(describeReference))'"
+    case .resultMissesDefinitions(let definitions):
+      "Lookup didn't find expected result '\(definitions.map(describeDefinition))'"
+    case .resultAddsDefinitions(let definitions):
+      "Lookup introduced unexpected result '\(definitions.map(describeDefinition))'"
     case .invalidResultOrder(let expected, let actual):
-      "Lookup returned results in wrong order. Expected: \(expected.map(describeReference)). Got: \(actual.map(describeReference))"
+      "Lookup returned results in wrong order. Expected: \(expected.map(describeDefinition)). Got: \(actual.map(describeDefinition))"
     case .other(let failure):
       failure
     }
@@ -212,7 +212,7 @@ enum LexicalMatcherExpectationFailure<Reference: LexicalAnnotation & Identifiabl
 /// You should wrap this method using a custom `Matcher`
 /// for each use-case. See `assertTypeResolution` as an example.
 ///
-/// Note: We don't diagnose unused reference annotations.
+/// Note: We don't diagnose unused definition annotations.
 func _assertLexicalLookup<Matcher: LexicalMatcher>(
   _ lookupSources: KeyValuePairs<String, LexicalLookupSource<Matcher>>,
   matcher: Matcher,
@@ -220,12 +220,12 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
   line: UInt,
   verbose: Bool = false
 ) {
-  // Find the expected syntax for each reference and expectation.
+  // Find the expected syntax for each definition and expectation.
   //
-  // See why we create two maps to references: markers->references, and
-  // syntax->references in `LexicalMatcher/assertExpectation`
-  var markersToReferences = [Matcher.Reference.ID: ContextualizedAnnotation<Matcher.Reference>]()
-  var syntaxToReferences = [Matcher.Reference.SyntaxReference: ContextualizedAnnotation<Matcher.Reference>]()
+  // See why we create two maps to definitions: markers->definitions, and
+  // syntax->definitions in `LexicalMatcher/assertExpectation`
+  var markersToDefinitions = [Matcher.Definition.ID: ContextualizedAnnotation<Matcher.Definition>]()
+  var syntaxToDefinitions = [Matcher.Definition.SyntaxReference: ContextualizedAnnotation<Matcher.Definition>]()
   var contextualizedExpectations = [ContextualizedAnnotation<Matcher.Expectation>]()
   for (_, lookupSource) in lookupSources {
     for (annotationSourceIndex, annotation, file, line) in lookupSource.annotations {
@@ -242,11 +242,11 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
 
       // Find the annotated syntax and save
       switch annotation {
-      case .reference(let reference):
+      case .definition(let definition):
         // Ensure we're not overwriting a previous one.
-        guard markersToReferences[reference.id] == nil else {
+        guard markersToDefinitions[definition.id] == nil else {
           XCTFail(
-            "Duplicate reference marker '\(reference.id)': Unexpectedly found the same marker in a different lexical reference.",
+            "Duplicate definition marker '\(definition.id)': Unexpectedly found the same marker in a different lexical definition.",
             file: file,
             line: line
           )
@@ -254,16 +254,16 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
         }
 
         // Find annotated syntax
-        guard let referenceSyntax = reference.findSyntaxFromToken(token, verbose: verbose, file: file, line: line)
+        guard let definitionSyntax = definition.findSyntaxFromToken(token, verbose: verbose, file: file, line: line)
         else {
           // We leave diagnostics to `findSyntaxFromToken` since they'll be more precise
           continue
         }
 
         // Ensure this syntax has only one marker
-        if let existingReferenceID = syntaxToReferences[referenceSyntax] {
+        if let existingDefinitionID = syntaxToDefinitions[definitionSyntax] {
           XCTFail(
-            "Duplicate marker: Syntax '\(referenceSyntax.trimmedDescription)' was already annotated with '\(existingReferenceID)' and can't be re-referenced as '\(reference.id)'",
+            "Duplicate marker: Syntax '\(definitionSyntax.trimmedDescription)' was already annotated with '\(existingDefinitionID)' and can't be re-defined as '\(definition.id)'",
             file: file,
             line: line
           )
@@ -271,14 +271,14 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
         }
 
         // Save
-        let contextualizedReference = ContextualizedAnnotation(
-          annotation: reference,
-          syntax: referenceSyntax,
+        let contextualizedDefinition = ContextualizedAnnotation(
+          annotation: definition,
+          syntax: definitionSyntax,
           file: file,
           line: line
         )
-        markersToReferences[reference.id] = contextualizedReference
-        syntaxToReferences[referenceSyntax] = contextualizedReference
+        markersToDefinitions[definition.id] = contextualizedDefinition
+        syntaxToDefinitions[definitionSyntax] = contextualizedDefinition
       case .expectations(let expectations):
         for expectation in expectations {
           // Find annotated syntax (like above)
@@ -297,18 +297,18 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
       }
     }
 
-    // Try to match each expectation with at least one reference
+    // Try to match each expectation with at least one definition
     for contextualizedExpectation in contextualizedExpectations {
       // Assert the expectations
       let failures = matcher.assertExpectation(
         expectation: contextualizedExpectation,
-        markersToReferences: markersToReferences,
-        syntaxToReferences: syntaxToReferences,
+        markersToDefinitions: markersToDefinitions,
+        syntaxToDefinitions: syntaxToDefinitions,
         verbose: verbose
       )
       let syntaxDescription = matcher.describeContextualizedExpectation(contextualizedExpectation)
       for failure in failures {
-        let failureDescription = failure.describe(describeReference: \.annotation.description)
+        let failureDescription = failure.describe(describeDefinition: \.annotation.description)
         XCTFail(
           "[Lookup of `\(syntaxDescription)`] \(failureDescription)",
           file: contextualizedExpectation.file,
@@ -364,10 +364,10 @@ enum LexicalAssertionUtilities {
     return parent
   }
 
-  static func diffLexicalResults<Reference: LexicalAnnotation & Identifiable>(
-    expected: [ContextualizedAnnotation<Reference>],
-    actual: [ContextualizedAnnotation<Reference>],
-    failures: inout [LexicalMatcherExpectationFailure<Reference>]
+  static func diffLexicalResults<Definition: LexicalAnnotation & Identifiable>(
+    expected: [ContextualizedAnnotation<Definition>],
+    actual: [ContextualizedAnnotation<Definition>],
+    failures: inout [LexicalMatcherExpectationFailure<Definition>]
   ) {
     // Convert to sets
     let expectedMarkers = Set(expected.map(\.annotation.id))
@@ -378,17 +378,17 @@ enum LexicalAssertionUtilities {
     }
 
     // Calculate differences
-    let missingReferences = expected.filter({ !actualMarkers.contains($0.annotation.id) })
-    if !missingReferences.isEmpty {
-      failures.append(.resultMissesReferences(missingReferences))
+    let missingDefinitions = expected.filter({ !actualMarkers.contains($0.annotation.id) })
+    if !missingDefinitions.isEmpty {
+      failures.append(.resultMissesDefinitions(missingDefinitions))
     }
-    let addedReferences = actual.filter({ !expectedMarkers.contains($0.annotation.id) })
-    if !addedReferences.isEmpty {
-      failures.append(.resultAddsReferences(addedReferences))
+    let addedDefinitions = actual.filter({ !expectedMarkers.contains($0.annotation.id) })
+    if !addedDefinitions.isEmpty {
+      failures.append(.resultAddsDefinitions(addedDefinitions))
     }
 
     // Check order (if there are no misses/additions)
-    if missingReferences.isEmpty, addedReferences.isEmpty,
+    if missingDefinitions.isEmpty, addedDefinitions.isEmpty,
       expected.map(\.annotation.id) != actual.map(\.annotation.id)
     {
       failures.append(.invalidResultOrder(expected: expected, actual: actual))
