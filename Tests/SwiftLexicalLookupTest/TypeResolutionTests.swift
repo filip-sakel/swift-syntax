@@ -455,8 +455,7 @@ final class TestQualifiedTypeName: XCTestCase {
 
         extension A { typealias B = A }
         """ as LexicalLookupSource
-      ],
-      verbose: true
+      ]
     )
   }
   func testRedeclarationWithRecursiveExtension() {

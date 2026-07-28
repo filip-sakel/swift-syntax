@@ -343,7 +343,7 @@ public struct TypeDependencyGraph {
 }
 @_spi(_QualifiedLookupTests) public typealias DependencyTracker = GenericDependencyTracker<QualifiedTypeNameGlobalType>
 
-// FIXME: ADD symbol-table _version
+// FIXME: Move to _global_ symbol-table _version
 @_spi(_QualifiedLookupTests) public struct NominalTypeRef: Hashable, Sendable {
   @_spi(_QualifiedLookupTests) public enum Storage: Hashable, Sendable {
     /// Local nominal types cannot be extended
@@ -582,6 +582,14 @@ extension TypeDependencyGraph {
     extension: ExtensionDeclSyntax,
     state: ExtensionState
   )
+  /// Calls visit with the current dependency path until it
+  /// returns a (non-nil) `T` result, which we forward to the caller.
+  ///
+  /// Parameters:
+  /// - path: External (non-recursive) callers should just provide the starter element
+  ///   with a `DependencyPathElement/introducingMemberType` of `nil`.
+  /// - visit: The path provided will only have `introducingMemberType == nil` in
+  ///   the first element.
   fileprivate func _findFirstDependency<T>(
     path: [DependencyPathElement],
     where visit: (_ dependency: ExtensionDependency, _ path: [DependencyPathElement]) -> T?
@@ -664,9 +672,10 @@ extension TypeDependencyGraph {
           return nil
         }
 
-        let mappedPath: [DependencyCycleElement] = path.map({ chainElement in
+        let mappedPath: [DependencyCycleElement] = path.dropFirst().map({ chainElement in
           DependencyCycleElement(
-            introducingTypeDecl: chainElement.introducingMemberType?.typeDeclSyntax,
+            // Only the first element has `nil` by `_findFirstDependency` invariant.
+            introducingTypeDecl: chainElement.introducingMemberType!.typeDeclSyntax,
             extensionDecl: chainElement.extension,
             boundType: chainElement.boundType,
           )
@@ -1285,7 +1294,7 @@ extension GenericDependencyCycleElement {
   @_spi(_QualifiedLookupTests) public func _describe(
     describeTypeName: (TypeName) -> String
   ) -> String {
-    "DependencyCycleElement(introducingTypeDecl: \(introducingTypeDecl?._memberlessDescription ?? "nil"), extensionDecl: `\(extensionDecl._memberlessDescription)`, boundType: \(describeTypeName(boundType))"
+    "DependencyCycleElement(introducingTypeDecl: \(introducingTypeDecl?._memberlessDescription ?? "nil"), extensionDecl: `\(extensionDecl._memberlessDescription)`, boundType: '\(describeTypeName(boundType))'"
   }
 }
 
