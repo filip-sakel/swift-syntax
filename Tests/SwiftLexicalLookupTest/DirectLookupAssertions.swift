@@ -17,7 +17,7 @@ import XCTest
 
 /// Asserts that the annotated `ValueDeclSyntax` matches the given
 /// declaration-name references.
-struct DeclNameMatcher {
+struct DirectLookupMatcher {
   /// Marks a given 'ValueDeclSyntax' in source.
   struct Reference {
     let valueDeclMarker: Character
@@ -37,7 +37,7 @@ struct DeclNameMatcher {
 // MARK: `Reference` Conformances
 
 // Vacuous conformances (`Reference` is unihabited)
-extension DeclNameMatcher.Reference: LexicalAnnotation, Identifiable, CustomStringConvertible {
+extension DirectLookupMatcher.Reference: LexicalAnnotation, Identifiable, CustomStringConvertible {
   typealias SyntaxReference = ValueDeclSyntax  //TypeMemberSyntax<ValueDeclSyntax>
   func findSyntaxFromToken(
     _ token: SwiftSyntax.TokenSyntax,
@@ -64,7 +64,7 @@ extension DeclNameMatcher.Reference: LexicalAnnotation, Identifiable, CustomStri
 
 // MARK: `Expectation` Conformances
 
-extension DeclNameMatcher.Expectation: LexicalAnnotation {
+extension DirectLookupMatcher.Expectation: LexicalAnnotation {
   typealias SyntaxReference = DeclGroupSyntaxType
 
   func findSyntaxFromToken(
@@ -84,7 +84,7 @@ extension DeclNameMatcher.Expectation: LexicalAnnotation {
 
 // MARK: `LexicalMatcher` Conformance
 
-extension DeclNameMatcher: LexicalMatcher {
+extension DirectLookupMatcher: LexicalMatcher {
   func describeContextualizedExpectation(_ expectation: ContextualizedAnnotation<Expectation>) -> String {
     // Remove member block for readability
     "`\(expectation.syntax._memberlessDescription)` > \(expectation.annotation.nameReference) \(expectation.annotation.kind)"
@@ -137,7 +137,7 @@ extension DeclNameMatcher: LexicalMatcher {
 // MARK: Assert Function
 
 func assertDirectLookup(
-  _ lookupSource: LexicalLookupSource<DeclNameMatcher>,
+  _ lookupSource: LexicalLookupSource<DirectLookupMatcher>,
   configuredRegions: ConfiguredRegions? = nil,
   file: StaticString = #file,
   line: UInt = #line,
@@ -145,7 +145,7 @@ func assertDirectLookup(
 ) {
   _assertLexicalLookup(
     ["MyFile": lookupSource],
-    matcher: DeclNameMatcher(lookupFile: lookupSource.fileSyntax),
+    matcher: DirectLookupMatcher(lookupFile: lookupSource.fileSyntax),
     file: file,
     line: line,
     verbose: verbose
@@ -171,13 +171,13 @@ struct TestLookup {
   }
 }
 
-extension LexicalLookupSource.Interpolation where Matcher == DeclNameMatcher {
+extension LexicalLookupSource.Interpolation where Matcher == DirectLookupMatcher {
   mutating func appendInterpolation(
     _ marker: Character,
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    append(reference: DeclNameMatcher.Reference(valueDeclMarker: marker), file: file, line: line)
+    append(reference: DirectLookupMatcher.Reference(valueDeclMarker: marker), file: file, line: line)
   }
   mutating func appendInterpolation(
     members: KeyValuePairs<TestLookup, [Character]>,
@@ -186,7 +186,7 @@ extension LexicalLookupSource.Interpolation where Matcher == DeclNameMatcher {
   ) {
     appendInterpolation(
       expects: members.map({
-        DeclNameMatcher.Expectation(nameReference: DeclNameReference(baseName: $0.name), kind: $0.kind, results: $1)
+        DirectLookupMatcher.Expectation(nameReference: DeclNameReference(baseName: $0.name), kind: $0.kind, results: $1)
       }),
       file: file,
       line: line
