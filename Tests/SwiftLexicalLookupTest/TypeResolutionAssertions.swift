@@ -140,10 +140,10 @@ extension TypeResolutionMatcher.Expectation: LexicalAnnotation {
 // MARK: `LexicalMatcher` Conformance
 
 extension TypeResolutionMatcher: LexicalMatcher {
-  func describeExpectationSyntax(_ syntax: TypeSyntaxOrExtension) -> String {
-    if let extensionDecl = syntax.as(ExtensionDeclSyntax.self) {
+  func describeContextualizedExpectation(_ expectation: ContextualizedAnnotation<Expectation>) -> String {
+    if let extensionDecl = expectation.syntax.as(ExtensionDeclSyntax.self) {
       return extensionDecl._memberlessDescription
-    } else if let typeSyntax = syntax.as(TypeSyntax.self) {
+    } else if let typeSyntax = expectation.syntax.as(TypeSyntax.self) {
       return typeSyntax.trimmedDescription
     } else {
       fatalError(

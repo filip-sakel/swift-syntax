@@ -58,7 +58,7 @@ protocol LexicalMatcher {
   ) -> [ExpectationFailure]
 
   /// Describes the expectation's syntax to provide more useful `XCTFail` messages.
-  func describeExpectationSyntax(_ syntax: Expectation.SyntaxReference) -> String
+  func describeContextualizedExpectation(_ expectation: ContextualizedAnnotation<Expectation>) -> String
 }
 
 /// A source file annotated with references and expectations on those references.
@@ -306,7 +306,7 @@ func _assertLexicalLookup<Matcher: LexicalMatcher>(
         syntaxToReferences: syntaxToReferences,
         verbose: verbose
       )
-      let syntaxDescription = matcher.describeExpectationSyntax(contextualizedExpectation.syntax)
+      let syntaxDescription = matcher.describeContextualizedExpectation(contextualizedExpectation)
       for failure in failures {
         let failureDescription = failure.describe(describeReference: \.annotation.description)
         XCTFail(
@@ -371,7 +371,11 @@ enum LexicalAssertionUtilities {
   ) {
     // Convert to sets
     let expectedMarkers = Set(expected.map(\.annotation.id))
-    let actualMarkers = Set(expected.map(\.annotation.id))
+    let actualMarkers = Set(actual.map(\.annotation.id))
+
+    if expected.map(\.annotation.id) != actual.map(\.annotation.id) {
+      print("Comparing \(expected) vs \(actual)")
+    }
 
     // Calculate differences
     let missingReferences = expected.filter({ !actualMarkers.contains($0.annotation.id) })
@@ -380,11 +384,13 @@ enum LexicalAssertionUtilities {
     }
     let addedReferences = actual.filter({ !expectedMarkers.contains($0.annotation.id) })
     if !addedReferences.isEmpty {
-      failures.append(.resultMissesReferences(addedReferences))
+      failures.append(.resultAddsReferences(addedReferences))
     }
 
-    // Check order (through markers)
-    if expected.map(\.annotation.id) != actual.map(\.annotation.id) {
+    // Check order (if there are no misses/additions)
+    if missingReferences.isEmpty, addedReferences.isEmpty,
+      expected.map(\.annotation.id) != actual.map(\.annotation.id)
+    {
       failures.append(.invalidResultOrder(expected: expected, actual: actual))
     }
   }

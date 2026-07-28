@@ -506,6 +506,7 @@ final class TestDirectLookup: XCTestCase {
         // init
         TestLookup(.`init`(arguments: []), kind: .includeStatic): ["4️⃣"],
         TestLookup(.`init`(arguments: nil), kind: .includeStatic): ["4️⃣"],
+        TestLookup(.unnamedCall(arguments: []), kind: .includeStatic): ["4️⃣"],
 
         // call as function
         TestLookup(.identifier(identifier: "callAsFunction", arguments: [])): ["5️⃣"],
@@ -519,9 +520,6 @@ final class TestDirectLookup: XCTestCase {
 
         // Static call as function
         TestLookup(.identifier(identifier: "callAsFunction", arguments: []), kind: .includeStatic): ["8️⃣"],
-
-        // static unnamed points to both the init and static callAsFunction
-        TestLookup(.unnamedCall(arguments: []), kind: .includeStatic): ["4️⃣", "8️⃣"],
 
         // deinit
         TestLookup(.deinit): ["9️⃣"]

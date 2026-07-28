@@ -12,7 +12,6 @@
 
 import SwiftIfConfig
 @_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) @_spi(Experimental) import SwiftLexicalLookup
-import SwiftParser
 import SwiftSyntax
 import XCTest
 
@@ -27,7 +26,6 @@ struct DeclNameMatcher {
   /// Annotates `ValueDeclSyntax` with the expected declaration-name references
   /// and the other results that each reference should yield.
   struct Expectation {
-    // let nameReferences: [(nameReference: DeclNameReference, otherResults: [Character])]
     let nameReference: DeclNameReference
     let kind: MemberKind
     let results: [Character]
@@ -35,47 +33,6 @@ struct DeclNameMatcher {
 
   let lookupFile: SourceFileSyntax
 }
-
-// // MARK: Enclosing Decl Group
-//
-// struct TypeMemberSyntax<Node: SyntaxProtocol>: SyntaxProtocol, SyntaxHashable {
-//   let node: Node
-//   let enclosingdeclGroup: DeclGroupSyntaxType
-//
-//   /// Walk up the tree to find the enclosing decl group.
-//   /// Returns `nil` if `syntax` is declared in a local context (e.g. in a
-//   /// `while` body)
-//   private static func _findEnclosingDeclGroup(of syntax: some SyntaxProtocol) -> DeclGroupSyntaxType? {
-//     // Local declarations are introduced by code-item lists
-//     guard let parent = syntax.parent, !parent.is(CodeBlockItemListSyntax.self) else { return nil }
-//
-//     // Cast the parent to a decl group, or check its parent
-//     guard let declGroupParent = parent.as(DeclGroupSyntaxType.self) else {
-//       return _findEnclosingDeclGroup(of: parent)
-//     }
-//
-//     // Found the parent
-//     return declGroupParent
-//   }
-//
-//   init?(_ node: Node) {
-//     guard let enclosingdeclGroup = Self._findEnclosingDeclGroup(of: node) else {
-//       return nil
-//     }
-//
-//     self.node = node
-//     self.enclosingdeclGroup = enclosingdeclGroup
-//   }
-//
-//   init?(_ rawNode: __shared some SyntaxProtocol) {
-//     guard let castNode = Node(rawNode) else { return nil }
-//     self.init(castNode)
-//   }
-//
-//   var _syntaxNode: Syntax { node._syntaxNode }
-//
-//   static var structure: SyntaxNodeStructure { Node.structure }
-// }
 
 // MARK: `Reference` Conformances
 
@@ -87,18 +44,7 @@ extension DeclNameMatcher.Reference: LexicalAnnotation, Identifiable, CustomStri
     verbose: Bool,
     file: StaticString,
     line: UInt
-  ) -> ValueDeclSyntax? {  // TypeMemberSyntax<ValueDeclSyntax>? {
-    // // The parent must be a value declaration nested under a declaration
-    // // group (nominal type or extension).
-    // //
-    // // Note: We don't accept local declarations (nested within a `while` body, etc.)
-    // LexicalAssertionUtilities.findDirectParent(
-    //   from: token,
-    //   ofType: TypeMemberSyntax<ValueDeclSyntax>.self,
-    //   file: file,
-    //   line: line
-    // )
-
+  ) -> ValueDeclSyntax? {
     LexicalAssertionUtilities.findDirectParent(
       from: token,
       ofType: ValueDeclSyntax.self,
@@ -139,9 +85,9 @@ extension DeclNameMatcher.Expectation: LexicalAnnotation {
 // MARK: `LexicalMatcher` Conformance
 
 extension DeclNameMatcher: LexicalMatcher {
-  func describeExpectationSyntax(_ syntax: DeclGroupSyntaxType) -> String {
+  func describeContextualizedExpectation(_ expectation: ContextualizedAnnotation<Expectation>) -> String {
     // Remove member block for readability
-    syntax._memberlessDescription
+    "`\(expectation.syntax._memberlessDescription)` > \(expectation.annotation.nameReference) \(expectation.annotation.kind)"
   }
 
   func assertExpectation(
@@ -150,42 +96,6 @@ extension DeclNameMatcher: LexicalMatcher {
     syntaxToReferences: [ValueDeclSyntax: ContextualizedAnnotation<Reference>],
     verbose: Bool
   ) -> [ExpectationFailure] {
-    // // Extract the declaration group on which we'll perform lookup
-    // let (declGroup, valueDecl) = (expectation.syntax.enclosingdeclGroup, expectation.syntax.node)
-    //
-    // var failures = [ExpectationFailure]()
-    // for (nameReference, otherDeclMarkers) in expectation.annotation.nameReferences {
-    //   let actualResults = declGroup.findDirectMembers(name: nameReference)
-    //
-    //   guard actualResults.contains(valueDecl) else {
-    //     failures.append(ExpectationFailure.resultMissesReferences([ContextualizedAnnotation<Reference>]))
-    //   }
-    //
-    //   let expectedResults: [ValueDeclSyntax]
-    //   do {
-    //     var expectedResultsTmp = [valueDecl]
-    //
-    //     // Add the other markers
-    //     for expectedMarker in otherDeclMarkers {
-    //       guard let expectedDecl = markersToReferences[expectedMarker] else {
-    //         failures.append(ExpectationFailure.referencesUndefinedMarker(expectedMarker))
-    //         continue
-    //       }
-    //       expectedResultsTmp.append(expectedDecl.syntax.node)
-    //     }
-    //     // Sort results by source position; same as the actual results
-    //     expectedResults = expectedResultsTmp.sorted(by: { $0.position < $1.position })
-    //   }
-    //
-    //   LexicalAssertionUtilities.diffLexicalResults(
-    //     expected: [ContextualizedAnnotation<Identifiable & LexicalAnnotation>],
-    //     actual: [ContextualizedAnnotation<Identifiable & LexicalAnnotation>],
-    //     failures: &[LexicalMatcherExpectationFailure<Identifiable & LexicalAnnotation>]
-    //   )
-    // }
-    // return failures
-    //
-
     var failures = [ExpectationFailure]()
 
     // Map the decls to their definitions
@@ -244,14 +154,8 @@ func assertDirectLookup(
 
 // MARK: String-Interpolation Helpers
 
-// extension Array where Element == Identifier? {
-//   static func args(_ args: [StaticString?]) -> [Identifier?] {
-//     args.map({ $0.map(Identifier.init(canonicalName:)) })
-//   }
-// }
-
 extension Identifier: ExpressibleByStringLiteral {
-  // Important: Only use for testing
+  /// Important: Only use for testing
   public init(stringLiteral value: StaticString) {
     self.init(canonicalName: value)
   }
