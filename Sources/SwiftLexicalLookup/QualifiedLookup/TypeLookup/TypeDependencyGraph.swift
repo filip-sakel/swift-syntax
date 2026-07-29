@@ -1095,7 +1095,8 @@ extension GenericExtensionState {
     """
   }
 }
-extension GenericExtensionState: CustomDebugStringConvertible where TypeName == QualifiedTypeName {
+@_spi(_QualifiedLookupTests)
+extension GenericExtensionState: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
   public var debugDescription: String {
     _describe(describeTypeName: \.debugDescription)
   }

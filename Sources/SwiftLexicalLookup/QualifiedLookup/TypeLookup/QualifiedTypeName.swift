@@ -34,13 +34,38 @@ import SwiftSyntax
   /// A component of a qualified type name, external or internal. For instance,
   /// `Swift::Int` (external) and `_(FileA.swift)::MyType` (internal).
   public struct Component: Sendable, Hashable, CustomDebugStringConvertible {
-    // TODO: Just use the module identifier directly
+    // TODO: Consider using the module identifier instead and just always
+    // keep track of the file? But is that actually useful in the compilation model?
+    // I.e. Would we be performing lookup on a different module?
     let qualifier: Qualifier
     let name: Identifier
+    let debugFileMap: DebugFileMap
 
-    @_spi(_QualifiedLookup) public init(qualifier: QualifiedTypeNameGlobalType.Qualifier, name: Identifier) {
-      self.qualifier = qualifier
+    // @_spi(_QualifiedLookup) public init(qualifier: QualifiedTypeNameGlobalType.Qualifier, name: Identifier) {
+    //   self.qualifier = qualifier
+    //   self.name = name
+    // }
+
+    @_spi(_QualifiedLookup) public init?(
+      file: SourceFileSyntax,
+      name: Identifier,
+      symbolTable: borrowing SymbolTable3
+    ) {
+      // TODO: Maybe improve diagnostics for when file isn't in the table
+
+      guard let moduleName = symbolTable.moduleMap[file] else {
+        return nil
+      }
+
+      // Compute the qualifier
+      if moduleName == symbolTable.moduleName {
+        self.qualifier = Qualifier.internal(fileID: file.id)
+      } else {
+        self.qualifier = Qualifier.external(moduleName: moduleName)
+      }
+
       self.name = name
+      self.debugFileMap = DebugFileMap(symbolTable: symbolTable)
     }
 
     @_spi(_QualifiedLookup) public func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
@@ -48,7 +73,8 @@ import SwiftSyntax
     }
 
     public var debugDescription: String {
-      _describe(describeFileID: \.hashValue.description)
+      let qualifierDescription = qualifier.describe(describeFileID: debugFileMap.describeFileID(_:))
+      return "\(qualifierDescription)::\(name.name)"
     }
   }
 

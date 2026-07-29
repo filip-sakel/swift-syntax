@@ -164,6 +164,8 @@ import SwiftSyntax
   >
 
   public typealias Module = Identifier
+  /// Invariant: moduleToSources[moduleName] != nil
+  @_spi(_QualifiedLookupTests) public let moduleName: Module
   @_spi(_QualifiedLookupTests) public let moduleToSources: [Module: [String: SourceFileSyntax]]
   let configuredRegions: ConfiguredRegions?
 
@@ -183,12 +185,31 @@ import SwiftSyntax
     }()
   @_spi(_QualifiedLookupTests) public private(set) var dependencyGraph = TypeDependencyGraph()
 
-  public init(
+  public init?(
+    moduleName: Module,
     moduleToSources: [Module: [String: SourceFileSyntax]],
     configuredRegions: ConfiguredRegions?
   ) {
+    guard moduleToSources[moduleName] != nil else { return nil }
+
+    self.moduleName = moduleName
     self.moduleToSources = moduleToSources
     self.configuredRegions = configuredRegions
+  }
+
+  var internalSources: [String: SourceFileSyntax] {
+    // By `moduleName` invariant
+    moduleToSources[moduleName]!
+  }
+
+  var internalFileMap: [SyntaxIdentifier: (fileName: String, file: SourceFileSyntax)] {
+    // TODO: Check during init that each thing in the module map is a unique source file syntax
+    // and add as invariant.
+    Dictionary(
+      uniqueKeysWithValues: internalSources.map({ (fileName, file) in
+        (key: file.id, value: (fileName, file))
+      })
+    )
   }
 
   private(set) lazy var moduleMap: [SourceFileSyntax: Module] = {
