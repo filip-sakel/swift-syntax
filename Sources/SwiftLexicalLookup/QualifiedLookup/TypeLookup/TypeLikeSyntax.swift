@@ -13,7 +13,7 @@
 import SwiftSyntax
 
 /// A protocol for ``TypeLikeSyntax`` nodes.
-@_spi(_QualifiedLookup) public protocol TypeLikeSyntaxProtocol: SyntaxProtocol {}
+@_spi(_QualifiedLookup) public protocol TypeLikeSyntaxProtocol: SyntaxProtocol, SyntaxHashable {}
 
 @_spi(_QualifiedLookup) extension TypeSyntax: TypeLikeSyntaxProtocol {}
 @_spi(_QualifiedLookup) extension NominalTypeDeclSyntax: TypeLikeSyntaxProtocol {}
@@ -32,7 +32,7 @@ import SwiftSyntax
 ///   }
 /// In this case, we look inside "A.B" to find `C`, so we implicitly generate the
 /// components `A` and `B`.
-@_spi(_QualifiedLookup) public struct TypeLikeSyntax: Sendable, Hashable, TypeLikeSyntaxProtocol {
+@_spi(_QualifiedLookup) public struct TypeLikeSyntax: Sendable, SyntaxHashable, TypeLikeSyntaxProtocol {
   public private(set) var _syntaxNode: Syntax
 
   public init?(_ node: __shared some SyntaxProtocol) {

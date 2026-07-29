@@ -136,6 +136,25 @@ extension DirectLookupMatcher: LexicalMatcher {
 
 // MARK: Assert Function
 
+/// A lookup source is an annotated string parsed as a `SourceFileSyntax`. Using
+/// string interpolation, you can mark `ValueDeclSyntax` nodes, and attach
+/// expectations to a `DeclGroupSyntaxType` (nominal type or extension). We
+/// test the results of `DeclGroupSyntax/findDirectMembers`.
+///
+/// ### Usage
+///
+/// We 'define' `ValueDeclSyntax` nodes by prepending `\("🟥")`. Then, we attach
+/// expectations before a declaration group with:
+/// ```swift
+/// \(members: [
+///   TestLookup(...): ["🟥", ...]
+/// ])
+/// ```
+/// `TestLookup` specifies the name and member kind passed to
+/// ``DeclGroupSyntax/findDirectMembers``. We expect lookup to return the
+/// declarations with the given markers, e.g., the declaration marked '🟥'.
+///
+/// See ``TestDirectLookup`` for examples.
 func assertDirectLookup(
   _ lookupSource: LexicalLookupSource<DirectLookupMatcher>,
   configuredRegions: ConfiguredRegions? = nil,
@@ -163,6 +182,8 @@ extension Identifier: ExpressibleByStringLiteral {
 
 /// Specifies the `DeclNameReferenceBase` and `MemberKind` to use
 /// as filters when performing direct lookup on the given declaration.
+///
+/// See `assertDirectLookup` for more.
 struct TestLookup {
   var name: DeclNameReferenceBase
   var kind: MemberKind
@@ -174,6 +195,7 @@ struct TestLookup {
 }
 
 extension LexicalLookupSource.Interpolation where Matcher == DirectLookupMatcher {
+  /// Defines a `ValueDeclSyntax`.
   mutating func appendInterpolation(
     _ marker: Character,
     file: StaticString = #file,
@@ -181,6 +203,10 @@ extension LexicalLookupSource.Interpolation where Matcher == DirectLookupMatcher
   ) {
     append(definition: DirectLookupMatcher.Definition(valueDeclMarker: marker), file: file, line: line)
   }
+
+  /// Adds an expectation to a `DeclGroupSyntax` that the `findDirectMembers`
+  /// with the parameters in `TestLookup` will return the value declarations
+  /// with the given markers.
   mutating func appendInterpolation(
     members: KeyValuePairs<TestLookup, [Character]>,
     file: StaticString = #file,

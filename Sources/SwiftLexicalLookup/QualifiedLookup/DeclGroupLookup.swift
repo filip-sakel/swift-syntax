@@ -13,7 +13,7 @@
 import SwiftIfConfig
 import SwiftSyntax
 
-@_spi(_QualifiedLookup) public struct DeclGroupSyntaxType: SyntaxHashable, SyntaxProtocol {
+@_spi(_QualifiedLookup) public struct DeclGroupSyntaxType: SyntaxProtocol, SyntaxHashable {
   public internal(set) var _syntaxNode: Syntax
 
   public init?(_ node: __shared some SyntaxProtocol) {
@@ -351,5 +351,15 @@ extension DeclGroupSyntaxType {
     default:
       fatalError("[Internal Error] Invalid syntax kind for DeclGroupSyntaxType: \(_syntaxNode.kind)")
     }
+  }
+}
+
+// MARK: Debugging
+
+extension DeclGroupSyntax {
+  /// Removes member blocks and gets trimmed description for better
+  /// readability in debug output.
+  @_spi(_QualifiedLookupTests) public var _memberlessDescription: String {
+    self.with(\.memberBlock, MemberBlockSyntax(members: [])).trimmedDescription
   }
 }
