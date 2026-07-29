@@ -17,8 +17,7 @@ import SwiftSyntax
   /// Invariant: Must always be a node whose `root` is a `SourceFileSyntax`
   @_spi(_QualifiedLookupTests) public private(set) var node: Node
 
-  // For testing
-  @_spi(_QualifiedLookupTests) public init(_unchecked: __shared Node) { self.node = _unchecked }
+  private init(_unchecked: __shared Node) { self.node = _unchecked }
   private init?(_checked node: __shared some SyntaxProtocol) {
     // Root must be source file
     guard node._syntaxNode.root.is(SourceFileSyntax.self) else { return nil }

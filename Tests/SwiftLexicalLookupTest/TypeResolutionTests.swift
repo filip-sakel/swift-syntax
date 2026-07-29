@@ -30,7 +30,14 @@ where
   Node == TypeSyntax
 {
   public init(stringLiteral value: StringLiteralType) {
-    self.init(_unchecked: TypeSyntax(stringLiteral: value))
+    // Wrap the type syntax in a file
+    var parser = Parser("typealias = \(value)")
+    let sourceFile = SourceFileSyntax.parse(from: &parser)
+    guard let typeSyntax = sourceFile.children(ofType: TypeSyntax.self).first else {
+      fatalError("Couldn't parse `\(value)` as TypeSyntax.")
+    }
+    // We should now be able to cast to SourceFileRoot
+    self = SourceFileRoot(typeSyntax)!
   }
 }
 
@@ -56,11 +63,19 @@ extension GenericExtensionState where TypeName == String {
       dependencyPath: dependencyPath,
       dependencyMember: Identifier(canonicalName: conflictingMember)
     )
+
+    // Create fake extension (won't be checked)
+    //
+    // Wrap the type syntax in a file
+    var parser = Parser("extension")
+    let sourceFile = SourceFileSyntax.parse(from: &parser)
+    let mockExtension = SourceFileRoot(sourceFile.children(ofType: ExtensionDeclSyntax.self)[0])!
+
     return GenericExtensionState(
       // TODO: Test dependencies
       _uncheckedDependencies: [],
       // Won't be checked
-      extensionDecl: SourceFileRoot(_unchecked: DeclSyntax(stringLiteral: "extension").cast(ExtensionDeclSyntax.self)),
+      extensionDecl: mockExtension,
       resolvedType: Result.failure(GenericBindingFailure.cannotFormCycle(cycle))
     )
   }
