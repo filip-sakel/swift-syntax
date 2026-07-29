@@ -415,10 +415,9 @@ extension NominalType {
 
 // MARK: Debug Description
 
+@_spi(_QualifiedLookupTests)
 extension NominalType: CustomDebugStringConvertible {
-  @_spi(_QualifiedLookupTests) public func _describe(
-    describeFileID: (SyntaxIdentifier) -> String
-  ) -> String {
+  public var debugDescription: String {
     let extensionDescriptions =
       extensions
       .flatMap(\.value)  // Get the extensions
@@ -426,10 +425,6 @@ extension NominalType: CustomDebugStringConvertible {
       .joined(separator: ", ")
 
     return
-      "NominalType(name: \(qualifiedName._describe(describeFileID: describeFileID)), kind: '\(mainDecl.kind)', extensions: [\(extensionDescriptions)])"
-  }
-
-  public var debugDescription: String {
-    _describe(describeFileID: \.hashValue.description)
+      "NominalType(name: \(qualifiedName), kind: '\(mainDecl.kind)', extensions: [\(extensionDescriptions)])"
   }
 }

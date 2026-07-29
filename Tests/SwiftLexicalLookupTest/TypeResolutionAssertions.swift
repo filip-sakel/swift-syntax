@@ -245,12 +245,12 @@ extension TypeResolutionMatcher: LexicalMatcher {
     }
 
     // We use strings for the expected qualified name; just print that name
-    let expectedStateDescription = expectedState._describe(describeTypeName: \.self)
-    let actualStateDescription = actualState._describe(describeTypeName: symbolTable._describeQualifiedGlobalName(_:))
+    let expectedStateDescription = expectedState.debugDescription
+    let actualStateDescription = actualState.debugDescription
     guard expectedStateDescription == actualStateDescription else {
       return [
         ExpectationFailure.other(
-          failure: "Extension-state mismatch.\nExpected: \(expectedStateDescription)\nGot: \(actualStateDescription)"
+          failure: "Extension-state mismatch.\nExpected: \(expectedState)\nGot: \(actualState)"
         )
       ]
     }
@@ -338,8 +338,8 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Describe the lookup failure
       let actualFailureDescription = actualFailure._describeDebug(
-        resolveMininalNominal: { symbolTable._describeQualifiedName($0.qualifiedName) },
-        resolveExtendedNominal: { $0._describe(describeTypeName: symbolTable._describeQualifiedName(_:)) }
+        resolveMininalNominal: \.qualifiedName.debugDescription,
+        resolveExtendedNominal: \.debugDescription
       )
 
       // Check equality

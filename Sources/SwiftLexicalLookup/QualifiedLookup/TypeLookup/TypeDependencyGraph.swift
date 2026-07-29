@@ -993,116 +993,83 @@ extension TypeDependencyGraph {
 
 // MARK: Debugging
 
+@_spi(_QualifiedLookupTests)
 extension NominalTypeRef: CustomDebugStringConvertible {
-  @_spi(_QualifiedLookupTests) public func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
+  public var debugDescription: String {
     switch storage {
     case .globalReference(let qualifiedName, let version):
-      let nameDescription = describeTypeName(QualifiedTypeName.topLevel(qualifiedName))
-      return "\(nameDescription) (v\(version))"
+      return "\(qualifiedName.debugDescription) (v\(version))"
     case .local(let nominalDecl):
       return "\(nominalDecl.node._memberlessDescription) (local)"
     }
   }
-
-  public var debugDescription: String {
-    _describe(describeTypeName: \.debugDescription)
-  }
 }
 
-extension QualifiedLookupDependency {
-  @_spi(_QualifiedLookupTests) public func _describe(
-    describeTypeName: (TypeName) -> String
-  ) -> String {
-    """
-    QualifiedLookupDependency(
-      extendedTypeName: \(describeTypeName(extendedTypeName))
-      member: \(member.name),
-      typeDecls: \(typeDecls.map({ (introducingExtensionOrMainDecl, typeDecl) in
-        "\(introducingExtensionOrMainDecl?._memberlessDescription ?? "nil"): \(typeDecl._memberlessDescription)"
-      }).joined(separator: ", ")))
-    """
-  }
-  @_spi(_QualifiedLookupTests) public func _describeSuccinctly(
-    describeTypeName: (TypeName) -> String
-  ) -> String {
+@_spi(_QualifiedLookupTests)
+extension QualifiedLookupDependency: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+  @_spi(_QualifiedLookupTests) public var _succinctDescription: String {
     let declGroupSources = typeDecls.map({ $0.0?._memberlessDescription ?? "nil" })
     return """
-      '\(describeTypeName(extendedTypeName))' > '\(member.name)' [from \(declGroupSources)]
+      '\(extendedTypeName.debugDescription)' > '\(member.name)' [from \(declGroupSources)]
       """
   }
-}
-extension QualifiedLookupDependency: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
-  public var debugDescription: String {
-    _describe(describeTypeName: \.debugDescription)
-  }
-}
 
-extension GenericExtensionDependency {
-  @_spi(_QualifiedLookupTests) public func _describe(
-    describeTypeName: (TypeName) -> String
-  ) -> String {
-    // "ExtensionDependency(dependencyExtension: \((dependencyExtensionOrMainDecl?._memberlessDescription).debugDescription), dependencyTypeName: \(describeTypeName(dependencyTypeName)), member: \(member.name.name))"
-    let membersDescription = members.map({ member in
-      "\(member.name) [in \(member.decls.map(\.introducingExtensionOrMainDecl?._memberlessDescription))]"
-    })
+  public var debugDescription: String {
+    let typeDeclDescriptions = typeDecls.map({ (introducingExtensionOrMainDecl, typeDecl) in
+      "`\(introducingExtensionOrMainDecl?._memberlessDescription ?? "nil")`: `\(typeDecl._memberlessDescription)`"
+    }).joined(separator: ", ")
+
     return
-      "ExtensionDependency(dependencyTypeName: \(describeTypeName(dependencyTypeName)), members: \(membersDescription))"
-  }
-}
-extension GenericExtensionDependency where TypeName: CustomDebugStringConvertible {
-  public var debugDescription: String {
-    _describe(describeTypeName: \.debugDescription)
+      "QualifiedLookupDependency(extendedTypeName: \(extendedTypeName.debugDescription), member: '\(member.name)', typeDecls: [\(typeDeclDescriptions)])"
   }
 }
 
-extension GenericBindingFailure {
-  @_spi(_QualifiedLookupTests) public func _describe(
-    describeTypeName: (TypeName) -> String
-  ) -> String {
+@_spi(_QualifiedLookupTests)
+extension GenericExtensionDependency: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    let membersDescriptions = members.map({ member in
+      let declDescriptions = member.decls.map({
+        "`\($0.introducingExtensionOrMainDecl?._memberlessDescription ?? "nil")`"
+      })
+      let declDescription = declDescriptions.isEmpty ? "<none>" : declDescriptions.joined(separator: ", ")
+      return "'\(member.name.name)' [in \(declDescription)]"
+    }).joined(separator: ", ")
+    return
+      "ExtensionDependency(dependencyTypeName: '\(dependencyTypeName.debugDescription)', members: [\(membersDescriptions)])"
+  }
+}
+
+@_spi(_QualifiedLookupTests)
+extension GenericBindingFailure: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+  public var debugDescription: String {
     switch self {
     case .typeResolutionFailure(let failure):
       return failure.debugDescription
     case .cannotFormCycle(let cycle):
-      return cycle._describe(describeTypeName: describeTypeName)
-    }
-  }
-}
-extension GenericBindingFailure: CustomDebugStringConvertible where TypeName == QualifiedTypeName {
-  public var debugDescription: String {
-    _describe(describeTypeName: \.debugDescription)
-  }
-}
-
-extension Result {
-  @_spi(_QualifiedLookupTests) public func _describe(
-    describeTypeName: (Success) -> String
-  ) -> String
-  where Failure == GenericBindingFailure<Success> {
-    switch self {
-    case .success(let success):
-      return "Result.success(\(describeTypeName(success)))"
-    case .failure(let failure):
-      return "Result.failure(\(failure._describe(describeTypeName: describeTypeName)))"
+      return cycle.debugDescription
     }
   }
 }
 
-extension GenericExtensionState {
-  @_spi(_QualifiedLookupTests) public func _describe(
-    describeTypeName: (TypeName) -> String
-  ) -> String {
-    """
-    GenericExtensionState(
-      dependencies: \(dependencies.map({ $0._describe(describeTypeName: describeTypeName) })),
-      resolvedType: \(resolvedType._describe(describeTypeName: describeTypeName))
-    )
-    """
-  }
-}
+// extension Result {
+//   @_spi(_QualifiedLookupTests) public func _describe(
+//     describeTypeName: (Success) -> String
+//   ) -> String
+//   where Failure == GenericBindingFailure<Success> {
+//     switch self {
+//     case .success(let success):
+//       return "Result.success(\(describeTypeName(success)))"
+//     case .failure(let failure):
+//       return "Result.failure(\(failure.debugDescription))"
+//     }
+//   }
+// }
+
 @_spi(_QualifiedLookupTests)
 extension GenericExtensionState: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
   public var debugDescription: String {
-    _describe(describeTypeName: \.debugDescription)
+    let dependenciesDescriptions = dependencies.map(\.debugDescription).joined(separator: ", ")
+    return "GenericExtensionState(dependencies: [\(dependenciesDescriptions)], resolvedType: \(resolvedType))"
   }
 }
 
@@ -1116,9 +1083,8 @@ private struct _DependencyGraphDiagnostic: DiagnosticMessage {
 }
 
 extension TypeDependencyGraph {
-  @_spi(_QualifiedLookupTests) public func _describeWithDiagnostics(
-    describeTypeName: (QualifiedTypeNameGlobalType) -> String
-  ) -> [Diagnostic] {
+  @_spi(_QualifiedLookupTests)
+  public func _describeWithDiagnostics() -> [Diagnostic] {
     var diagnostics = [Diagnostic]()
     /// Attach a note to the given node.
     func _attachNote<S: SyntaxProtocol>(to syntax: SourceFileRoot<S>, message: String) {
@@ -1154,7 +1120,7 @@ extension TypeDependencyGraph {
       SourceFileRoot<ExtensionDeclSyntax>: (boundTypeName: QualifiedTypeNameGlobalType, typeTable: TypeTable)
     ]()
     for (typeName, type) in namesToTypes {
-      let typeNameDescription = describeTypeName(typeName)
+      let typeNameDescription = typeName.debugDescription
 
       // Check each main decl mapped to exactly one visited type
       let mainDecls = [type.mainDecl] + type.redeclarations
@@ -1213,7 +1179,7 @@ extension TypeDependencyGraph {
       let boundState = extensionsToType[extensionDecl]
       switch (extensionState.resolvedType, boundState) {
       case (.success(let resolvedTypeName), let (boundTypeName, typeTable)?):
-        let boundTypeDescription = describeTypeName(boundTypeName)
+        let boundTypeDescription = boundTypeName.debugDescription
 
         // Ensure the extension's resolved type and nominal type's name agree
         // (skips to next iteration)
@@ -1221,7 +1187,7 @@ extension TypeDependencyGraph {
           _attachError(
             to: extensionDecl,
             message:
-              "Extension bound to '\(boundTypeDescription)', but its state says it resolved to '\(describeTypeName(resolvedTypeName))'"
+              "Extension bound to '\(boundTypeDescription)', but its state says it resolved to '\(resolvedTypeName.debugDescription)'"
           )
           continue
         }
@@ -1235,7 +1201,7 @@ extension TypeDependencyGraph {
       case (.failure(let failure), nil):
         _attachNote(
           to: extensionDecl,
-          message: "Extension binding failed: \(failure._describe(describeTypeName: describeTypeName))"
+          message: "Extension binding failed: \(failure)"
         )
 
       // Diagnose invalid graph state (these switch cases skip to the next iteration)
@@ -1244,15 +1210,14 @@ extension TypeDependencyGraph {
         _attachError(
           to: extensionDecl,
           message:
-            "Extension bound to '\(describeTypeName(boundTypeName))', but its state says it failed to resolve: \(failure._describe(describeTypeName: describeTypeName))"
+            "Extension bound to '\(boundTypeName)', but its state says it failed to resolve: \(failure)"
         )
         continue
       case (.success(let resolvedTypeName), nil):
         // Successfully resolved extensions should be bound to a `NominalType`
-        let resolvedNameDescription = describeTypeName(resolvedTypeName)
         _attachError(
           to: extensionDecl,
-          message: "Extension successfully resolved to but didn't bind to '\(resolvedNameDescription)'."
+          message: "Extension successfully resolved to but didn't bind to '\(resolvedTypeName)'."
         )
         continue
       }
@@ -1275,8 +1240,8 @@ extension TypeDependencyGraph {
             case .success(let dependencyExtendedType)? = extensionsToState[dependencyExtension]?.resolvedType,
             dependency.dependencyTypeName == dependencyExtendedType
           else {
-            let expectedTypeDescription = describeTypeName(dependency.dependencyTypeName)
-            let actualTypeDescription = extensionsToState[dependencyExtension]?.resolvedType.map(describeTypeName)
+            let expectedTypeDescription = dependency.dependencyTypeName.debugDescription
+            let actualTypeDescription = extensionsToState[dependencyExtension]?.resolvedType.map(\.debugDescription)
             _attachError(
               to: extensionDecl.extendedType,
               message:
@@ -1287,10 +1252,9 @@ extension TypeDependencyGraph {
         }
 
         // Add dependency
-        let dependencyTypeDescription = describeTypeName(dependency.dependencyTypeName)
         _attachNote(
           to: extensionDecl.extendedType,
-          message: "Depends on '\(dependencyTypeDescription)' > '\(memberName)'"
+          message: "Depends on '\(dependency.dependencyTypeName)' > '\(memberName)'"
         )
       }
 
@@ -1300,22 +1264,18 @@ extension TypeDependencyGraph {
   }
 }
 
-extension GenericDependencyCycleElement {
-  @_spi(_QualifiedLookupTests) public func _describe(
-    describeTypeName: (TypeName) -> String
-  ) -> String {
-    "DependencyCycleElement(introducingTypeDecl: \(introducingTypeDecl?._memberlessDescription ?? "nil"), extensionDecl: `\(extensionDecl._memberlessDescription)`, boundType: '\(describeTypeName(boundType))'"
+@_spi(_QualifiedLookupTests)
+extension GenericDependencyCycleElement: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    "DependencyCycleElement(introducingTypeDecl: \(introducingTypeDecl?._memberlessDescription ?? "nil"), extensionDecl: `\(extensionDecl._memberlessDescription)`, boundType: '\(boundType.debugDescription)'"
   }
 }
 
-extension GenericExtensionBindingCycle {
-  @_spi(_QualifiedLookupTests) public func _describe(
-    describeTypeName: (TypeName) -> String
-  ) -> String {
-    let dependencyPathDescription = dependencyPath.map({
-      $0._describe(describeTypeName: describeTypeName)
-    })
+@_spi(_QualifiedLookupTests)
+extension GenericExtensionBindingCycle: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    let pathDescriptions = dependencyPath.map(\.debugDescription).joined(separator: ", ")
     return
-      "ExtensionBindingCycle(dependencyChain: \(dependencyPathDescription), dependencyMember: '\(dependencyMember.name)')"
+      "ExtensionBindingCycle(dependencyPath: [\(pathDescriptions)], dependencyMember: '\(dependencyMember.name)')"
   }
 }

@@ -520,29 +520,19 @@ extension SymbolTable3 {
     //
     // Whether we're binding or fixing invalidated
     let actionVerb = isFixingInvalidating ? "rebinding invalidated" : "binding"
-    // Describe resolution result
-    let resolutionResult: String
-    switch result {
-    case .success(let (qualifiedName, _)):
-      resolutionResult = ".success(\(_describeQualifiedGlobalName(qualifiedName)))"
-    case .failure(let failure):
-      resolutionResult = ".failure(\(failure._describe(describeTypeName: _describeQualifiedName(_:))))"
-    }
     // Describe dependencies
-    let dependencyDescription = dependencies.dependencies.map({
-      $0._describe(describeTypeName: _describeQualifiedGlobalName(_:))
-    })
+    let dependencyDescription = "[\(dependencies.dependencies.map(\.debugDescription).joined(separator: ", "))]"
     // Describe result
     let admissionResultDescriptions = admissionResult.map({ results in
       results.map({ result in
-        "\(result.extensionDecl._memberlessDescription) -> \(result.resolvedType._describe(describeTypeName: _describeQualifiedGlobalName(_:)))"
+        "\(result.extensionDecl._memberlessDescription) -> \(result.resolvedType)"
       }).joined(separator: ", ")
     })
     // New graph description
     let dependencyGraphDescription = _describeDependencyGraph()
     print(String(repeating: "-", count: 80))
     print(
-      "After \(actionVerb) extension `\(extensionDecl._memberlessDescription)` to \(resolutionResult) with dependencies: \(dependencyDescription); admission result: \(admissionResultDescriptions), new dependency graph is:"
+      "After \(actionVerb) extension `\(extensionDecl._memberlessDescription)` to \(result.map(\.qualifiedName.debugDescription)) with dependencies: \(dependencyDescription); admission result: \(admissionResultDescriptions), new dependency graph is:"
     )
     print(dependencyGraphDescription)
     print(String(repeating: "-", count: 80) + "\n")
@@ -939,13 +929,12 @@ extension SymbolTable3 {
     )
 
     // TODO: Remove
-    let baseTypeDescription = baseType._describe(describeTypeName: _describeQualifiedName(_:))
     print(
-      "Finding member \(baseTypeDescription) > \(memberTypeName.name)"
+      "Finding member \(baseType) > \(memberTypeName.name)"
     )
     defer {
       print(
-        "New deps for member-type lookup: \(dependencyTracker.dependencies.map({ $0._describe(describeTypeName: _describeQualifiedGlobalName(_:)) }))"
+        "New deps for member-type lookup: \(dependencyTracker.dependencies)"
       )
     }
 
@@ -990,42 +979,22 @@ extension ExtensionBindingResult.Dependency: CustomDebugStringConvertible {
   }
 }
 
-extension ExtensionBindingState {
-  @_spi(_QualifiedLookupTests) public func _describe(
-    describeTypeName: (TypeName) -> String
-  ) -> String {
+@_spi(_QualifiedLookupTests)
+extension ExtensionBindingState: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+  public var debugDescription: String {
     switch self {
     case .resolved(let bindingResult):
       return "ExtensionBindingState.resolved(\(bindingResult))"
     case .invalidated(let invalidatedResult, let invalidatingExtension, let invalidatingType, let formerDependencies):
       return
-        "ExtensionBindingState.invalidated(invalidatedResult: \(invalidatedResult), invalidatingExtension: \(invalidatingExtension._memberlessDescription), invalidatingType: \(describeTypeName(invalidatingType)), formerDependencies: \(formerDependencies))"
+        "ExtensionBindingState.invalidated(invalidatedResult: \(invalidatedResult), invalidatingExtension: \(invalidatingExtension._memberlessDescription), invalidatingType: \(invalidatingType), formerDependencies: \(formerDependencies))"
     case .cannotDependOnIntroducedMembers(let cycle):
-      let cycleDescription = cycle._describe(describeTypeName: describeTypeName)
-      return "ExtensionBindingState.cannotDependOnIntroducedMembers(\(cycleDescription))"
+      return "ExtensionBindingState.cannotDependOnIntroducedMembers(\(cycle.debugDescription))"
     }
   }
 }
 
 // Debug Type State
-
-extension SymbolTable3 {
-  /// Helper for converting a qualified type name to a string description
-  @_spi(_QualifiedLookupTests) public func _describeQualifiedName(_ name: QualifiedTypeName) -> String {
-    name._describe(describeFileID: { fileID in
-      // Get name of first matching id
-      for (fileName, file) in moduleToSources.flatMap(\.value) {
-        guard file.id == fileID else { continue }
-        return fileName
-      }
-      return fileID.hashValue.description
-    })
-  }
-  /// Ditto for global names
-  @_spi(_QualifiedLookupTests) public func _describeQualifiedGlobalName(_ name: QualifiedTypeNameGlobalType) -> String {
-    _describeQualifiedName(QualifiedTypeName.topLevel(name))
-  }
-}
 
 extension SymbolTable3 {
   @_spi(_QualifiedLookupTests) public func _describeDependencyGraph() -> String {
@@ -1049,7 +1018,7 @@ extension SymbolTable3 {
     }
 
     // Add dependency-graph diagnostics
-    let diagnostics = dependencyGraph._describeWithDiagnostics(describeTypeName: _describeQualifiedGlobalName(_:))
+    let diagnostics = dependencyGraph._describeWithDiagnostics()
     for diagnostic in diagnostics {
       group.addDiagnostic(diagnostic)
     }

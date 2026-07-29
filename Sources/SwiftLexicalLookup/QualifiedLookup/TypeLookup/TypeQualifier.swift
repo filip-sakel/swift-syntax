@@ -325,11 +325,11 @@ extension TypeQualifierFailure {
 }
 
 extension TypeQualifierFailure: CustomDebugStringConvertible
-where MinimalNominal == ResolvedNominalTypeReference, ExtendedNominal == NominalTypeRef {
+where MinimalNominal: CustomDebugStringConvertible, ExtendedNominal: CustomDebugStringConvertible {
   func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
     _describeDebug(
-      resolveMininalNominal: { describeTypeName($0.qualifiedName) },
-      resolveExtendedNominal: { $0._describe(describeTypeName: describeTypeName) }
+      resolveMininalNominal: \.debugDescription,
+      resolveExtendedNominal: \.debugDescription
     )
   }
 
@@ -451,7 +451,7 @@ extension TypeQualifierFailure {
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
       request: "Resolve syntax `\(typeSyntax.trimmedDescription)`",
-      describe: { [symbolTable] in $0._describe(describeTypeName: symbolTable._describeQualifiedName(_:)) },
+      describe: \._debugDescription,
       perform: {
         $0._resolveSyntax(
           typeSyntax: typeSyntax,
@@ -678,7 +678,7 @@ extension TypeQualifierFailure {
   ) -> Result<ResolvedNominalTypeReference, Failure> {
     withLogging(
       request: "Extended type syntax `\(extensionDecl.extendedType.trimmedDescription)`",
-      describe: { [symbolTable] in $0._describe(describeTypeName: symbolTable._describeQualifiedName(_:)) },
+      describe: \._debugDescription,
       perform: {
         $0._resolveExtendedTypeSyntax(extensionDecl: extensionDecl, memberDependencies: &memberDependencies)
       }
@@ -747,7 +747,7 @@ extension TypeQualifierFailure {
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     return withLogging(
       request: "Type reference `\(typeComponent.debugDescription)`",
-      describe: { [symbolTable] in $0._describe(describeTypeName: symbolTable._describeQualifiedName(_:)) },
+      describe: \._debugDescription,
       perform: {
         $0._resolveTypeReference(
           typeComponent: typeComponent,
@@ -951,7 +951,7 @@ extension TypeQualifierFailure {
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
     withLogging(
       request: "Decl \(typeDecl.kind) `\(typeDecl.node.name.trimmedDescription)`",
-      describe: { [symbolTable] in $0._describe(describeTypeName: symbolTable._describeQualifiedName(_:)) },
+      describe: \._debugDescription,
       perform: {
         $0._resolveTypeDecl(
           typeDecl: typeDecl,
@@ -1289,8 +1289,8 @@ extension TypeQualifierFailure {
     typeReference: ResolvedNominalTypeReference
   ) -> NominalTypeRef {
     withLogging(
-      request: "Extended nominal`\(symbolTable._describeQualifiedName(typeReference.qualifiedName))`",
-      describe: { [symbolTable] in $0._describe(describeTypeName: symbolTable._describeQualifiedName(_:)) },
+      request: "Extended nominal`\(typeReference.qualifiedName)`",
+      describe: \.debugDescription,
       perform: {
         $0._resolveNominalType(typeReference: typeReference)
       }
@@ -1397,14 +1397,13 @@ extension TypeQualifierFailure {
       var (_, _, invalidatedExtensions): (_, _, TypeDependencyGraph.InvalidatedExtensions) = withLogging(
         request: "Binding `\(extensionDecl._memberlessDescription)`",
         describe: {
-          [symbolTable] (
+          (
             extendedTypeResult: Result<ResolvedNominalTypeReference, Failure>,
             extensionDependencies: DependencyTracker,
             invalidatedExtensions: TypeDependencyGraph.InvalidatedExtensions
           ) in
-          let resultDescription = extendedTypeResult._describe(describeTypeName: symbolTable._describeQualifiedName)
           return
-            "\(resultDescription); Dependencies: \(extensionDependencies.dependencies.map(\.debugDescription))"
+            "\(extendedTypeResult); Dependencies: \(extensionDependencies.dependencies.map(\.debugDescription))"
         },
         perform: {
           // Resolve, tracking dependencies

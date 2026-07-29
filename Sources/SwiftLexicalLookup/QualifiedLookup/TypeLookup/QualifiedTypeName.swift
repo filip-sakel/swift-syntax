@@ -85,10 +85,6 @@ import SwiftSyntax
       )
     }
 
-    @_spi(_QualifiedLookup) public func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
-      return "\(qualifier.describe(describeFileID: describeFileID))::\(name.name)"
-    }
-
     public var debugDescription: String {
       let qualifierDescription = qualifier.describe(describeFileID: debugFileMap.describeFileID(_:))
       return "\(qualifierDescription)::\(name.name)"
@@ -134,12 +130,8 @@ import SwiftSyntax
     return newType
   }
 
-  @_spi(_QualifiedLookup) public func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
-    return components.map({ $0._describe(describeFileID: describeFileID) }).joined(separator: ".")
-  }
-
   public var debugDescription: String {
-    _describe(describeFileID: \.hashValue.description)
+    return components.map(\.debugDescription).joined(separator: ".")
   }
 }
 
@@ -203,15 +195,6 @@ public indirect enum QualifiedTypeNameNestedType: Sendable, Hashable, CustomDebu
   // Specifies an (internal) nested-level scope and a dot-separated sequence of identifiers.
   case nestedScope(scope: SourceFileRoot<CodeBlockItemListSyntax>, type: QualifiedTypeNameNestedType)
 
-  @_spi(_QualifiedLookup) public func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
-    switch self {
-    case .topLevel(let globalType):
-      return globalType._describe(describeFileID: describeFileID)
-    case .nestedScope(let scope, let nestedType):
-      return "\(scope.node.id.hashValue)>\(nestedType.debugDescription)"
-    }
-  }
-
   var baseAndMemberName: (base: QualifiedTypeName, memberName: Identifier)? {
     switch self {
     case .topLevel(let topLevelName):
@@ -224,6 +207,11 @@ public indirect enum QualifiedTypeNameNestedType: Sendable, Hashable, CustomDebu
   }
 
   public var debugDescription: String {
-    _describe(describeFileID: \.hashValue.description)
+    switch self {
+    case .topLevel(let globalType):
+      return globalType.debugDescription
+    case .nestedScope(let scope, let nestedType):
+      return "\(scope.node.id.hashValue)>\(nestedType.debugDescription)"
+    }
   }
 }
