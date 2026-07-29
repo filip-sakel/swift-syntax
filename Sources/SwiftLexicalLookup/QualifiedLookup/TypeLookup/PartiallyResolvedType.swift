@@ -87,15 +87,15 @@ extension PartiallyResolvedType {
   case function(argumentCount: Int)
   case tuple(labels: [Identifier?])
   case member(
-    base: TypeSyntax,
+    base: SourceFileRoot<TypeSyntax>,
     memberComponent: Result<PartiallyResolvedTypeIdentifier.Component, InvalidTypeIdentifierFailure>
   )
-  case composition([TypeSyntax])
+  case composition([SourceFileRoot<TypeSyntax>])
 }
 
 extension PartiallyResolvedTypeIdentifier.Component {
   // E.g., `Int?` or `Int!` -> `Optional<Int>`
-  fileprivate static func _optionalType(type: TypeSyntax) -> PartiallyResolvedTypeIdentifier.Component {
+  fileprivate static func _optionalType(type: SourceFileRoot<TypeSyntax>) -> PartiallyResolvedTypeIdentifier.Component {
     PartiallyResolvedTypeIdentifier.Component(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "Optional"),
@@ -104,7 +104,7 @@ extension PartiallyResolvedTypeIdentifier.Component {
     )
   }
   /// E.g., `[Int]` -> `Array<Int>`
-  fileprivate static func _arrayType(type: TypeSyntax) -> PartiallyResolvedTypeIdentifier.Component {
+  fileprivate static func _arrayType(type: SourceFileRoot<TypeSyntax>) -> PartiallyResolvedTypeIdentifier.Component {
     PartiallyResolvedTypeIdentifier.Component(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "Array"),
@@ -113,7 +113,9 @@ extension PartiallyResolvedTypeIdentifier.Component {
     )
   }
   // E.g., `[5 of Int]` -> `InlineArray<5, Int>`
-  fileprivate static func _inlineArrayType(type: TypeSyntax) -> PartiallyResolvedTypeIdentifier.Component {
+  fileprivate static func _inlineArrayType(
+    type: SourceFileRoot<TypeSyntax>
+  ) -> PartiallyResolvedTypeIdentifier.Component {
     PartiallyResolvedTypeIdentifier.Component(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "InlineArray"),
@@ -122,7 +124,8 @@ extension PartiallyResolvedTypeIdentifier.Component {
     )
   }
   // E.g., `[String: Int]` -> `Dictionary<String, Int>`
-  fileprivate static func _dictionaryType(type: TypeSyntax) -> PartiallyResolvedTypeIdentifier.Component {
+  fileprivate static func _dictionaryType(type: SourceFileRoot<TypeSyntax>) -> PartiallyResolvedTypeIdentifier.Component
+  {
     PartiallyResolvedTypeIdentifier.Component(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "Dictionary"),
@@ -139,11 +142,11 @@ extension PartiallyResolvedTypeIdentifier.Component {
 //   case cannotComposeFunction
 // }
 
-extension TypeSyntaxProtocol {
+extension SourceFileRoot where Node: TypeSyntaxProtocol {
   fileprivate func _parseModuleAndIdentifier(
     moduleNameToken: TokenSyntax?,
     nameToken: TokenSyntax,
-    typeSyntax: TypeSyntax
+    typeSyntax: SourceFileRoot<TypeSyntax>
   ) -> Result<PartiallyResolvedTypeIdentifier.Component, InvalidTypeIdentifierFailure> {
     switch (moduleNameToken.map({ Identifier(validating: $0) }), Identifier(validating: nameToken)) {
     // Valid cases are:
@@ -153,7 +156,6 @@ extension TypeSyntaxProtocol {
         PartiallyResolvedTypeIdentifier.Component(
           module: nil,
           name: name,
-          // introducingSyntax: TypeLikeSyntax.typeSyntax(typeSyntax)
           introducingSyntax: typeSyntax
         )
       )
@@ -163,7 +165,6 @@ extension TypeSyntaxProtocol {
         PartiallyResolvedTypeIdentifier.Component(
           module: moduleName,
           name: name,
-          // introducingSyntax: TypeLikeSyntax.typeSyntax(typeSyntax)
           introducingSyntax: typeSyntax
         )
       )
@@ -180,9 +181,14 @@ extension TypeSyntaxProtocol {
     }
   }
 
+  // We force unwrap because type resolution just visits a type syntax's children.
+  fileprivate func _castChild<S: SyntaxProtocol>(_ syntax: S) -> SourceFileRoot<S> {
+    SourceFileRoot<S>(syntax)!
+  }
+
   @_spi(_QualifiedLoookup)
   public func partiallyResolve() -> Result<PartiallyResolvedType, TypeResolutionFailure> {
-    switch TypeSyntax(self).as(TypeSyntaxEnum.self) {
+    switch TypeSyntax(node).as(TypeSyntaxEnum.self) {
     // Non-nominal base cases
     //
     // Functions
@@ -196,7 +202,7 @@ extension TypeSyntaxProtocol {
       // TODO: Should we diagnose single-element labels here?
       if let soleTupleElement = tupleType.elements.first, tupleType.elements.count == 1 {
         // Forward resolution
-        return soleTupleElement.type.partiallyResolve()
+        return _castChild(soleTupleElement.type).partiallyResolve()
       }
 
       // Get labels and collect identifier errors
@@ -291,7 +297,7 @@ extension TypeSyntaxProtocol {
       let parsedResult = _parseModuleAndIdentifier(
         moduleNameToken: moduleNameToken,
         nameToken: nameToken,
-        typeSyntax: TypeSyntax(identifierType)
+        typeSyntax: _castChild(TypeSyntax(identifierType))
       )
       return Result.success(PartiallyResolvedType.typeIdentifier(parsedResult))
     case .memberType(let memberType):
@@ -335,9 +341,11 @@ extension TypeSyntaxProtocol {
       let parsedResult = _parseModuleAndIdentifier(
         moduleNameToken: moduleNameToken,
         nameToken: nameToken,
-        typeSyntax: TypeSyntax(memberType)
+        typeSyntax: _castChild(TypeSyntax(memberType))
       )
-      return Result.success(PartiallyResolvedType.member(base: memberType.baseType, memberComponent: parsedResult))
+      return Result.success(
+        PartiallyResolvedType.member(base: _castChild(memberType.baseType), memberComponent: parsedResult)
+      )
 
     // Base cases that don't produce types
     case .metatypeType, .namedOpaqueReturnType, .classRestrictionType:
@@ -366,46 +374,50 @@ extension TypeSyntaxProtocol {
     case .optionalType(let optionalType):
       return Result.success(
         PartiallyResolvedType.typeIdentifier(
-          Result.success(._optionalType(type: TypeSyntax(optionalType)))
+          Result.success(._optionalType(type: _castChild(TypeSyntax(optionalType))))
         )
       )
     case .implicitlyUnwrappedOptionalType(let implicitlyUnwrappedOptionalType):
       return Result.success(
         PartiallyResolvedType.typeIdentifier(
-          Result.success(._optionalType(type: TypeSyntax(implicitlyUnwrappedOptionalType)))
+          Result.success(._optionalType(type: _castChild(TypeSyntax(implicitlyUnwrappedOptionalType))))
         )
       )
     case .arrayType(let arrayType):
       return Result.success(
         PartiallyResolvedType.typeIdentifier(
-          Result.success(._arrayType(type: TypeSyntax(arrayType)))
+          Result.success(._arrayType(type: _castChild(TypeSyntax(arrayType))))
         )
       )
     case .inlineArrayType(let inlineArrayType):
       return Result.success(
         PartiallyResolvedType.typeIdentifier(
-          Result.success(._inlineArrayType(type: TypeSyntax(inlineArrayType)))
+          Result.success(._inlineArrayType(type: _castChild(TypeSyntax(inlineArrayType))))
         )
       )
     case .dictionaryType(let dictionaryType):
       return Result.success(
         PartiallyResolvedType.typeIdentifier(
-          Result.success(._dictionaryType(type: TypeSyntax(dictionaryType)))
+          Result.success(._dictionaryType(type: _castChild(TypeSyntax(dictionaryType))))
         )
       )
 
     // Recursive cases
     case .attributedType(let attributedType):
-      return attributedType.baseType.partiallyResolve()
+      return _castChild(attributedType.baseType).partiallyResolve()
     case .someOrAnyType(let someOrAnyTypeType):
-      return someOrAnyTypeType.constraint.partiallyResolve()
+      return _castChild(someOrAnyTypeType.constraint).partiallyResolve()
     // TODO: Explain pack element & expansion types
     case .packElementType(let packElementType):
-      return packElementType.pack.partiallyResolve()
+      return _castChild(packElementType.pack).partiallyResolve()
     case .packExpansionType(let packExpansionType):
-      return packExpansionType.repetitionPattern.partiallyResolve()
+      return _castChild(packExpansionType.repetitionPattern).partiallyResolve()
     case .compositionType(let compositionType):
-      return Result.success(PartiallyResolvedType.composition(compositionType.elements.map(\.type)))
+      return Result.success(
+        PartiallyResolvedType.composition(
+          compositionType.elements.map({ _castChild($0.type) })
+        )
+      )
     // // Add all types and failures from composition types
     // let flattenedResults = compositionType.elements.flatMap({
     //   compositionElement -> [Result<PartiallyResolvedTypeIdentifier, LocalizedTypeResolutionFailure>] in

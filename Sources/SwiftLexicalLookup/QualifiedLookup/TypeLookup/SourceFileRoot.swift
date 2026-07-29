@@ -15,9 +15,10 @@ import SwiftSyntax
 
 @_spi(_QualifiedLookupTests) public struct SourceFileRoot<Node: SyntaxProtocol> {
   /// Invariant: Must always be a node whose `root` is a `SourceFileSyntax`
-  private(set) var node: Node
+  @_spi(_QualifiedLookupTests) public private(set) var node: Node
 
-  private init(_unchecked: __shared Node) { self.node = _unchecked }
+  // For testing
+  @_spi(_QualifiedLookupTests) public init(_unchecked: __shared Node) { self.node = _unchecked }
   private init?(_checked node: __shared some SyntaxProtocol) {
     // Root must be source file
     guard node._syntaxNode.root.is(SourceFileSyntax.self) else { return nil }
@@ -25,38 +26,96 @@ import SwiftSyntax
     guard let node = Node(node) else { return nil }
     self.init(_unchecked: node)
   }
-}
 
-extension SourceFileRoot: SyntaxProtocol {
-  public init?(_ node: __shared some SyntaxProtocol) {
-    self.init(_checked: node)
-  }
-
-  init?(_ node: __shared Node) {
-    self.init(_checked: node)
-  }
-
-  /// Attempts to cast the current syntax node to a given specialized syntax type,
-  /// maintaing the `SourceFileRoot` wrapper.
-  ///
-  /// - Returns: An instance of the specialized type, or `nil` if the cast fails.
-  func `as`<S: SyntaxProtocol>(_ syntaxType: S.Type) -> SourceFileRoot<S>? {
-    guard let castNode = node.as(S.self) else { return nil }
-    return SourceFileRoot<S>(_unchecked: castNode)
-  }
-
-  public var _syntaxNode: Syntax { node._syntaxNode }
-
-  public static var structure: SyntaxNodeStructure {
-    Node.structure
-  }
-
-  var fileRoot: SourceFileSyntax {
+  public var fileRoot: SourceFileSyntax {
     // By `_syntaxNode` invariant
     node.root.cast(SourceFileSyntax.self)
   }
 }
 
+// MARK: Casting
+
+extension SourceFileRoot {
+  @_spi(_QualifiedLookupTests) public init?(_ node: __shared Node) {
+    self.init(_checked: node)
+  }
+
+  @_spi(_QualifiedLookupTests) public var parent: SourceFileRoot<Syntax>? {
+    // Unchecked is fine since our parent must also be a child of the file root.
+    node.parent.map({ SourceFileRoot<Syntax>(_unchecked: $0) })
+  }
+
+  @_spi(_QualifiedLookupTests) public func `as`<S: SyntaxProtocol>(_ syntaxType: S.Type) -> SourceFileRoot<S>? {
+    // We force unwrap in case an implementation of `SyntaxProtocol/init` messed up.
+    // However, casting should just change the type and not the root.
+    node.as(syntaxType).map({ SourceFileRoot<S>($0)! })
+  }
+
+  @_spi(_QualifiedLookupTests) public func `is`<S: SyntaxProtocol>(_ syntaxType: S.Type) -> Bool {
+    node.is(syntaxType)
+  }
+}
+
+// MARK: Convenience
+
+extension SourceFileRoot {
+  internal var kind: SyntaxKind {
+    node.kind
+  }
+
+  internal var trimmedDescription: String {
+    node.trimmedDescription
+  }
+
+  internal var position: AbsolutePosition {
+    node.position
+  }
+}
+
+extension SourceFileRoot where Node == ExtensionDeclSyntax {
+  internal var extendedType: SourceFileRoot<TypeSyntax> {
+    // Extended type should be a child
+    SourceFileRoot<TypeSyntax>(node.extendedType)!
+  }
+}
+extension SourceFileRoot where Node == TypeAliasDeclSyntax {
+  internal var initializerValue: SourceFileRoot<TypeSyntax> {
+    // Initializer value should be a child
+    SourceFileRoot<TypeSyntax>(node.initializer.value)!
+  }
+}
+
+// TODO: Remove
+// extension SourceFileRoot: SyntaxProtocol {
+//   public init?(_ node: __shared some SyntaxProtocol) {
+//     self.init(_checked: node)
+//   }
+//
+//   init?(_ node: __shared Node) {
+//     self.init(_checked: node)
+//   }
+//
+//   /// Attempts to cast the current syntax node to a given specialized syntax type,
+//   /// maintaing the `SourceFileRoot` wrapper.
+//   ///
+//   /// - Returns: An instance of the specialized type, or `nil` if the cast fails.
+//   func `as`<S: SyntaxProtocol>(_ syntaxType: S.Type) -> SourceFileRoot<S>? {
+//     guard let castNode = node.as(S.self) else { return nil }
+//     return SourceFileRoot<S>(_unchecked: castNode)
+//   }
+//
+//   public var _syntaxNode: Syntax { node._syntaxNode }
+//
+//   public static var structure: SyntaxNodeStructure {
+//     Node.structure
+//   }
+//
+//   var fileRoot: SourceFileSyntax {
+//     // By `_syntaxNode` invariant
+//     node.root.cast(SourceFileSyntax.self)
+//   }
+// }
+
+extension SourceFileRoot: Sendable where Node: Sendable {}
 extension SourceFileRoot: Equatable where Node: Equatable {}
 extension SourceFileRoot: Hashable where Node: Hashable {}
-extension SourceFileRoot: SyntaxHashable where Node: SyntaxHashable {}

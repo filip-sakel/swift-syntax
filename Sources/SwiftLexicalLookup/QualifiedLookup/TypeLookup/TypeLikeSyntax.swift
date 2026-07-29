@@ -40,7 +40,7 @@ import SwiftSyntax
     _syntaxNode = Syntax(node)
   }
 
-  public init(_ typeLikeSyntax: TypeLikeSyntaxProtocol) {
+  public init(_ typeLikeSyntax: some TypeLikeSyntaxProtocol) {
     self._syntaxNode = typeLikeSyntax._syntaxNode
   }
 
@@ -49,4 +49,12 @@ import SwiftSyntax
     SyntaxNodeStructure.SyntaxChoice.node(TypeSyntax.self),
     SyntaxNodeStructure.SyntaxChoice.node(NominalTypeDeclSyntax.self),
   ])
+}
+
+extension SourceFileRoot where Node == TypeLikeSyntax {
+  internal init<S: TypeLikeSyntaxProtocol>(_ concrete: SourceFileRoot<S>) {
+    // Cast should succeed because we can initialize `TypeLikeSyntax` with
+    // a `TypeLikeSyntaxProtocol`-conforming type.
+    self = concrete.as(TypeLikeSyntax.self)!
+  }
 }

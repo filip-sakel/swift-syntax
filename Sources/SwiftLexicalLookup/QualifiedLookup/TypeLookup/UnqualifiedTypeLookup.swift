@@ -49,7 +49,7 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
   ///    `.A` to see if `A` has any member types named `Self`.
   /// 2. The second request will be to resolve `struct A` with no selected member
   ///    (i.e. type `A` itself)
-  case lookForType(TypeDeclSyntax, lookForSelectedMember: Bool)
+  case lookForType(SourceFileRoot<TypeDeclSyntax>, lookForSelectedMember: Bool)
 
   /// Resolve the extension's extended type look for the desired member if
   /// ``lookForSelectedMember`` is `true`.
@@ -65,14 +65,14 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
   ///    `.Self` to see if `A` has any member types named `Self`.
   /// 2. The second request will be to resolve `extension A` with no selected member
   ///    (i.e. the extended type `A` itself)
-  case lookForExtension(ExtensionDeclSyntax, lookForSelectedMember: Bool)
+  case lookForExtension(SourceFileRoot<ExtensionDeclSyntax>, lookForSelectedMember: Bool)
   /// E.g.
   /// ```swift
   /// extension Array {
   ///   func f(_: Element) {} // <- Element refers to a generic parameter
   /// }
   /// ```
-  case lookForGenericParameters(extensionDecl: ExtensionDeclSyntax)
+  case lookForGenericParameters(extensionDecl: SourceFileRoot<ExtensionDeclSyntax>)
   case lookInModule
   case lookInImports([Identifier])
 
@@ -114,12 +114,12 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
   }
 }
 
-extension SyntaxProtocol {
+extension SourceFileRoot {
   func findUnqualifiedType(
     _ typeName: Identifier,
     configuredRegions: ConfiguredRegions?
   ) -> [UnqualifiedTypeLookupResult] {
-    let results: [LookupResult] = self.lookup(
+    let results: [LookupResult] = node.lookup(
       typeName,
       with: LookupConfig(
         configuredRegions: configuredRegions,
@@ -127,6 +127,13 @@ extension SyntaxProtocol {
         _dontFindGenericParametersForExtendedType: true
       )
     )
+
+    // We force unwrap because unqualified lookup just visits outer
+    // scopes in the file, so we should still have a file root
+    func castChild<S: SyntaxProtocol>(_ syntax: S) -> SourceFileRoot<S> {
+      SourceFileRoot<S>(syntax)!
+    }
+
     let filteredResults = results.flatMap({ result -> [UnqualifiedTypeLookupResult] in
       switch result {
       case .fromScope(_, let names):
@@ -146,11 +153,14 @@ extension SyntaxProtocol {
             guard let declGroup = decl.as(DeclGroupSyntaxType.self) else { return nil }
             if let nominalDecl = declGroup.as(NominalTypeDeclSyntax.self) {
               return UnqualifiedTypeLookupResult.lookForType(
-                TypeDeclSyntax(nominalDecl),
+                castChild(TypeDeclSyntax(nominalDecl)),
                 lookForSelectedMember: false
               )
             } else if let extensionDecl = declGroup.as(ExtensionDeclSyntax.self) {
-              return UnqualifiedTypeLookupResult.lookForExtension(extensionDecl, lookForSelectedMember: false)
+              return UnqualifiedTypeLookupResult.lookForExtension(
+                castChild(extensionDecl),
+                lookForSelectedMember: false
+              )
             } else {
               assertionFailure(
                 "[SwiftLexicalLookup] Internal error: Expected declaration group to either be a nominal type or extension declaration."
@@ -165,12 +175,15 @@ extension SyntaxProtocol {
             // Note: We handle extensions above
             guard let typeDecl = TypeDeclSyntax(decl) else { return nil }
 
-            return UnqualifiedTypeLookupResult.lookForType(typeDecl, lookForSelectedMember: false)
+            return UnqualifiedTypeLookupResult.lookForType(
+              castChild(typeDecl),
+              lookForSelectedMember: false
+            )
           case .identifier(let identifierSyntax, accessibleAfter: _):
             // The only `TypeDeclSyntax` "identifiers" are generic parameters.
             guard let genericParameter = identifierSyntax.as(GenericParameterSyntax.self) else { return nil }
             return UnqualifiedTypeLookupResult.lookForType(
-              TypeDeclSyntax(genericParameter),
+              castChild((TypeDeclSyntax(genericParameter))),
               lookForSelectedMember: false
             )
           // `self`, `newValue`, `error`, and `oldValue` can't be type decls.
@@ -185,9 +198,14 @@ extension SyntaxProtocol {
         // TODO: Should probably already be a `DeclGroupSyntaxType`
         guard let declGroup = DeclGroupSyntaxType(decl) else { return [] }
         if let nominalDecl = declGroup.as(NominalTypeDeclSyntax.self) {
-          return [UnqualifiedTypeLookupResult.lookForType(TypeDeclSyntax(nominalDecl), lookForSelectedMember: true)]
+          return [
+            UnqualifiedTypeLookupResult.lookForType(
+              castChild(TypeDeclSyntax(nominalDecl)),
+              lookForSelectedMember: true
+            )
+          ]
         } else if let extensionDecl = declGroup.as(ExtensionDeclSyntax.self) {
-          return [UnqualifiedTypeLookupResult.lookForExtension(extensionDecl, lookForSelectedMember: true)]
+          return [UnqualifiedTypeLookupResult.lookForExtension(castChild(extensionDecl), lookForSelectedMember: true)]
         } else {
           assertionFailure(
             "[SwiftLexicalLookup] Internal error: Expected declaration group to either be a nominal type or extension declaration."
@@ -195,7 +213,7 @@ extension SyntaxProtocol {
           return []
         }
       case .lookForGenericParameters(let extensionDecl):
-        return [.lookForGenericParameters(extensionDecl: extensionDecl)]
+        return [.lookForGenericParameters(extensionDecl: castChild(extensionDecl))]
       // Closure parameters can't be type declarations
       case .lookForImplicitClosureParameters(_):
         return []

@@ -17,9 +17,9 @@ import SwiftSyntax
 @_spi(_QualifiedLookupTests) public struct ImplicitTypeReferenceComponent: Sendable, CustomDebugStringConvertible {
   let module: Identifier?
   let name: Identifier
-  let introducingSyntax: TypeLikeSyntax
+  let introducingSyntax: SourceFileRoot<TypeLikeSyntax>
 
-  internal init(module: Identifier? = nil, name: Identifier, introducingSyntax: TypeLikeSyntax) {
+  internal init(module: Identifier? = nil, name: Identifier, introducingSyntax: SourceFileRoot<TypeLikeSyntax>) {
     self.module = module
     self.name = name
     self.introducingSyntax = introducingSyntax
@@ -28,7 +28,7 @@ import SwiftSyntax
   @_spi(_QualifiedLookupTests) public init(from sourceComponent: PartiallyResolvedTypeIdentifier.Component) {
     self.module = sourceComponent.module
     self.name = sourceComponent.name
-    self.introducingSyntax = TypeLikeSyntax(sourceComponent.introducingSyntax)
+    self.introducingSyntax = SourceFileRoot<TypeLikeSyntax>(sourceComponent.introducingSyntax)
   }
 
   public var debugDescription: String {

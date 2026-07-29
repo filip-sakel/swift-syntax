@@ -98,3 +98,9 @@ extension TypeDeclSyntax {
     self.as(DeclGroupSyntaxType.self)?._memberlessDescription ?? trimmedDescription
   }
 }
+
+extension SourceFileRoot where Node == TypeDeclSyntax {
+  internal var _memberlessDescription: String {
+    node._memberlessDescription
+  }
+}

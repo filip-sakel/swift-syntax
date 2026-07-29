@@ -167,7 +167,8 @@ extension TypeResolutionMatcher: LexicalMatcher {
       }
 
       return _assertTypeSyntax(
-        typeSyntax: typeSyntax,
+        // Force unwrap because we parsed this from `lookupSources`
+        typeSyntax: SourceFileRoot(typeSyntax)!,
         expectedResult: expectedResult,
         markersToDefinitions: markersToDefinitions,
         syntaxToDefinitions: syntaxToDefinitions,
@@ -181,7 +182,8 @@ extension TypeResolutionMatcher: LexicalMatcher {
       }
 
       return _assertExtensionBinding(
-        extensionDecl: extensionDecl,
+        // Force unwrap because we parsed this from `lookupSources`
+        extensionDecl: SourceFileRoot(extensionDecl)!,
         expectedState: expectedState,
         verbose: verbose
       )
@@ -190,7 +192,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
   /// `assertExpectation` forwards extensions here.
   private func _assertExtensionBinding(
-    extensionDecl: ExtensionDeclSyntax,
+    extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     expectedState: GenericExtensionState<String>,
     verbose: Bool
   ) -> [ExpectationFailure] {
@@ -201,7 +203,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
       actualState = existingState
     } else {
       if verbose {
-        print("Extension `\(extensionDecl._memberlessDescription)` not already bound; initating binding.")
+        print("Extension `\(extensionDecl.node._memberlessDescription)` not already bound; initating binding.")
       }
 
       // Evaluate the extended type
@@ -230,7 +232,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
       // Trigger binding and ensure we have a state
       _ = typeQualifier.resolveNominalType(typeReference: nominalReference)
       guard let producedState = symbolTable.dependencyGraph.extensionsToState[extensionDecl] else {
-        let availableExtensions = symbolTable.dependencyGraph.extensionsToState.keys.map(\._memberlessDescription)
+        let availableExtensions = symbolTable.dependencyGraph.extensionsToState.keys.map(\.node._memberlessDescription)
         return [
           ExpectationFailure.other(
             failure:
@@ -257,7 +259,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
   /// `assertExpectation` forwards type syntax here.
   private func _assertTypeSyntax(
-    typeSyntax: TypeSyntax,
+    typeSyntax: SourceFileRoot<TypeSyntax>,
     expectedResult: Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>,
     markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
@@ -265,7 +267,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
   ) -> [ExpectationFailure] {
     // Print target syntax (to show the syntax kinds)
     if verbose {
-      print("Target syntax parsed as:\n\(typeSyntax.debugDescription)\n")
+      print("Target syntax parsed as:\n\(typeSyntax.node.debugDescription)\n")
     }
 
     // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
@@ -294,7 +296,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
       })
 
       let results: [ContextualizedAnnotation<Definition>] = nominalTypes.compactMap({ nominalType in
-        guard let targetDefinition = syntaxToDefinitions[nominalType.mainDecl] else {
+        guard let targetDefinition = syntaxToDefinitions[nominalType.mainDecl.node] else {
           failures.append(
             ExpectationFailure.resultReferencesUnmarkedSyntax(
               syntaxDescription: nominalType.qualifiedName.debugDescription
@@ -383,9 +385,10 @@ func assertTypeResolution(
     lookupSources,
     matcher: TypeResolutionMatcher(
       symbolTable: SymbolTable3(
+        moduleName: moduleIdentifier,
         moduleToSources: [moduleIdentifier: uniquedLookupFiles],
         configuredRegions: configuredRegions
-      ),
+      )!,
       moduleName: moduleIdentifier,
       lookupFiles: lookupFiles
     ),

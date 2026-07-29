@@ -14,10 +14,10 @@ import SwiftDiagnostics
 import SwiftIfConfig
 import SwiftSyntax
 
-@_spi(_QualifiedLookupTests) public typealias IntroducingExtensionOrMainDecl = ExtensionDeclSyntax?
+@_spi(_QualifiedLookupTests) public typealias IntroducingExtensionOrMainDecl = SourceFileRoot<ExtensionDeclSyntax>?
 @_spi(_QualifiedLookupTests) public struct TypeMemberDecl: Hashable, Sendable {
-  let introducingExtensionOrMainDecl: ExtensionDeclSyntax?
-  let typeDeclSyntax: TypeDeclSyntax
+  let introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl
+  let typeDeclSyntax: SourceFileRoot<TypeDeclSyntax>
 }
 @_spi(_QualifiedLookupTests) public struct TypeMember: Hashable, Sendable {
   let name: Identifier
@@ -68,12 +68,12 @@ import SwiftSyntax
   // See `ExtensionDependency` docstring for why these properties are *immutable*.
   @_spi(_QualifiedLookupTests) public let dependencies: [GenericExtensionDependency<TypeName>],
     // TODO: Remove this property
-    extensionDecl: ExtensionDeclSyntax,
+    extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     resolvedType: Result<TypeName, GenericBindingFailure<TypeName>>
 
   @_spi(_QualifiedLookupTests) public init(
     _uncheckedDependencies dependencies: [GenericExtensionDependency<TypeName>],
-    extensionDecl: ExtensionDeclSyntax,
+    extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     resolvedType: Result<TypeName, GenericBindingFailure<TypeName>>
   ) {
     self.dependencies = dependencies
@@ -83,12 +83,12 @@ import SwiftSyntax
 
   @_spi(_QualifiedLookupTests) public init(
     dependencies: [QualifiedLookupDependency<QualifiedTypeNameGlobalType>],
-    extensionDecl: ExtensionDeclSyntax,
+    extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     resolvedType: Result<TypeName, GenericBindingFailure<TypeName>>
   ) where TypeName == QualifiedTypeNameGlobalType {
     // Group dependencies by base type and member name
     var groupedDependencies = [
-      QualifiedTypeNameGlobalType: [Identifier: [(IntroducingExtensionOrMainDecl, TypeDeclSyntax)]]
+      QualifiedTypeNameGlobalType: [Identifier: [(IntroducingExtensionOrMainDecl, SourceFileRoot<TypeDeclSyntax>)]]
     ]()
     for dependency in dependencies {
       // TODO: Clarify comment
@@ -103,7 +103,7 @@ import SwiftSyntax
     // Satisfies invariant of one dependency per type
     let orderedGroupedDependencies: [ExtensionDependency] = dependencies.compactMap({ lookupDependency in
       guard
-        let dependencyMembers: [Identifier: [(IntroducingExtensionOrMainDecl, TypeDeclSyntax)]] =
+        let dependencyMembers: [Identifier: [(IntroducingExtensionOrMainDecl, SourceFileRoot<TypeDeclSyntax>)]] =
           groupedDependencies.removeValue(forKey: lookupDependency.extendedTypeName)
       else {
         return nil
@@ -133,7 +133,7 @@ import SwiftSyntax
   fileprivate(set) var typeMembersToDecls: [Identifier: TypeMember]
 
   init(
-    from namesToDecls: [Identifier: [TypeDeclSyntax]],
+    from namesToDecls: [Identifier: [SourceFileRoot<TypeDeclSyntax>]],
     introducedIn introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl
   ) {
     typeMembersToDecls = [:]
@@ -298,7 +298,7 @@ public struct TypeDependencyGraph {
   @_spi(_QualifiedLookupTests) public var namesToTypes: [QualifiedTypeNameGlobalType: NominalType]
   // /// Updates when we register nominal types and bind extensions
   // var parentsToTypeMembers: [QualifiedTypeName: TypeTable]
-  @_spi(_QualifiedLookupTests) public var extensionsToState: [ExtensionDeclSyntax: ExtensionState]
+  @_spi(_QualifiedLookupTests) public var extensionsToState: [SourceFileRoot<ExtensionDeclSyntax>: ExtensionState]
 
   init() {
     namesToTypes = [:]
@@ -372,7 +372,7 @@ extension TypeDependencyGraph {
     moduleMap: [SourceFileSyntax: SymbolTable3.Module],
     dependencyTracker: inout DependencyTracker,
     configuredRegions: ConfiguredRegions?
-  ) -> Result<[TypeDeclSyntax], QualifiedTypeLookupFailure> {
+  ) -> Result<[SourceFileRoot<TypeDeclSyntax>], QualifiedTypeLookupFailure> {
     // Get global nominal reference
     let (baseTypeName, baseTypeVersion): (QualifiedTypeNameGlobalType, Int)
     switch baseType.storage {
@@ -381,7 +381,7 @@ extension TypeDependencyGraph {
     case .local(let nominalTypeDecl):
       // Local decls don't have extensions (=> no dependencies generated); just
       // look into the main declaration.
-      let typeMembers = nominalTypeDecl.node._groupTypeMembers(configuredRegions: configuredRegions).flatMap(\.value)
+      let typeMembers = nominalTypeDecl._groupTypeMembers(configuredRegions: configuredRegions).flatMap(\.value)
       return .success(typeMembers)
     }
 
@@ -428,12 +428,12 @@ extension TypeDependencyGraph {
       let sortedDeclGroups = fileDecls + otherInternalDecls + externalDecls
 
       // Add members from each decl group and register the dependencies
-      var typeDecls = [(IntroducingExtensionOrMainDecl, TypeDeclSyntax)]()
+      var typeDecls = [(IntroducingExtensionOrMainDecl, SourceFileRoot<TypeDeclSyntax>)]()
       for declGroup in sortedDeclGroups {
         // Add the matching decls
         let introducedDecls =
           declGroup.typeMap.typeMembersToDecls[memberTypeName]?.decls.map({
-            (declGroup.node.as(ExtensionDeclSyntax.self), $0.typeDeclSyntax)
+            (declGroup.declGroup.as(ExtensionDeclSyntax.self), $0.typeDeclSyntax)
           }) ?? []
         typeDecls.append(contentsOf: introducedDecls)
 
@@ -513,7 +513,8 @@ extension TypeDependencyGraph {
 @_spi(_QualifiedLookupTests) public struct QualifiedLookupDependency<TypeName: Sendable>: Sendable {
   let extendedTypeName: TypeName
   let member: Identifier
-  let typeDecls: [(introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl, typeDecl: TypeDeclSyntax)]
+  let typeDecls:
+    [(introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl, typeDecl: SourceFileRoot<TypeDeclSyntax>)]
 
   // TODO: Clean up
   @_spi(_QualifiedLookupTests) public init(
@@ -521,7 +522,7 @@ extension TypeDependencyGraph {
     extendedTypeName: TypeName,
     member: Identifier,
     // typeDecls: [TypeDeclSyntax]
-    typeDecls: [(IntroducingExtensionOrMainDecl, TypeDeclSyntax)]
+    typeDecls: [(IntroducingExtensionOrMainDecl, SourceFileRoot<TypeDeclSyntax>)]
   ) {
     // self.introducingExtensionOrMainDecl = introducingExtensionOrMainDecl
     self.extendedTypeName = extendedTypeName
@@ -579,7 +580,7 @@ extension TypeDependencyGraph {
   typealias DependencyPathElement = (
     introducingMemberType: TypeMemberDecl?,
     boundType: QualifiedTypeNameGlobalType,
-    extension: ExtensionDeclSyntax,
+    extension: SourceFileRoot<ExtensionDeclSyntax>,
     state: ExtensionState
   )
   /// Calls visit with the current dependency path until it
@@ -636,7 +637,7 @@ extension TypeDependencyGraph {
   }
 
   fileprivate func _findFirstCycleWhenBinding(
-    extensionDecl: ExtensionDeclSyntax,
+    extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     extensionMembers: TypeTable,
     to boundTypeName: QualifiedTypeNameGlobalType,
     extensionDependencies: [QualifiedLookupDependency<QualifiedTypeNameGlobalType>],
@@ -675,8 +676,8 @@ extension TypeDependencyGraph {
         let mappedPath: [DependencyCycleElement] = path.dropFirst().map({ chainElement in
           DependencyCycleElement(
             // Only the first element has `nil` by `_findFirstDependency` invariant.
-            introducingTypeDecl: chainElement.introducingMemberType!.typeDeclSyntax,
-            extensionDecl: chainElement.extension,
+            introducingTypeDecl: chainElement.introducingMemberType!.typeDeclSyntax.node,
+            extensionDecl: chainElement.extension.node,
             boundType: chainElement.boundType,
           )
         })
@@ -707,7 +708,7 @@ extension TypeDependencyGraph {
     modifiedMembers: TypeTable,
     directDependents: [TypeDependent],
     invalidatedExtensions: inout [ExtensionState],
-    moduleMap: [SourceFileSyntax: SymbolTable3.Module],
+    symbolTable: borrowing SymbolTable3
   ) -> [TypeDependent] {
     // For each dependent extension, either invalidate or keep it in the
     // new-dependents list.
@@ -723,23 +724,25 @@ extension TypeDependencyGraph {
       let invalidatedExtension = dependent.dependentExtension
 
       // Ensure extension has a known module (needed later)
-      guard let invalidatedExtensionModule: SymbolTable3.Module = moduleMap[invalidatedExtension.fileRoot] else {
+      guard let invalidatedExtensionModule: SymbolTable3.Module = symbolTable.moduleMap[invalidatedExtension.fileRoot]
+      else {
+        // TODO: Clarify where we make this assertion
         fatalError(
-          "[SwiftLexicalLookup] Internal error: Found extension \(invalidatedExtension.node._memberlessDescription) from unbound module."
+          "[SwiftLexicalLookup] Internal error: Found extension \(invalidatedExtension._memberlessDescription) from unbound module."
         )
       }
 
       // Get the to-be-invalidated extension's state
-      guard let invalidatedExtensionState = extensionsToState[invalidatedExtension.node] else {
+      guard let invalidatedExtensionState = extensionsToState[invalidatedExtension] else {
         fatalError(
-          "[SwiftLexicalLookup] Internal error: Extension \(invalidatedExtension.node._memberlessDescription) referenced in `\(modifiedTypeName)`'s dependents, but lacks a state entry."
+          "[SwiftLexicalLookup] Internal error: Extension \(invalidatedExtension._memberlessDescription) referenced in `\(modifiedTypeName)`'s dependents, but lacks a state entry."
         )
       }
 
       // Invalidate
       //
       // 1. Remove extension state & record invalidated extension
-      extensionsToState[invalidatedExtension.node] = nil
+      extensionsToState[invalidatedExtension] = nil
       invalidatedExtensions.append(invalidatedExtensionState)
 
       // 2. Update the extended type
@@ -774,7 +777,7 @@ extension TypeDependencyGraph {
         modifiedMembers: invalidatedExtensionTypeTable,
         directDependents: invalidatedExtensionType.dependents,
         invalidatedExtensions: &invalidatedExtensions,
-        moduleMap: moduleMap
+        symbolTable: symbolTable
       )
       let finalInvalidatedExtensionType = newInvalidatedExtensionType._updatingDependents(newTransitiveDependents)
 
@@ -785,16 +788,17 @@ extension TypeDependencyGraph {
       for (typeMember, _) in invalidatedExtensionTypeTable.typeMembersToDecls {
         let potentialNominalType = invalidatedExtensionTypeName.addingComponents([
           QualifiedTypeNameGlobalType.Component(
-            // TODO: Might be internal module!!
-            qualifier: .external(moduleName: invalidatedExtensionModule),
-            name: typeMember
+            name: typeMember,
+            file: invalidatedExtension.fileRoot,
+            module: invalidatedExtensionModule,
+            symbolTable: symbolTable
           )
         ])
         guard let removedTypeState = namesToTypes.removeValue(forKey: potentialNominalType) else { continue }
         // Since the type goes missing, its extensions are invalidated
         for (_, removedTypeExtensions) in removedTypeState.boundExtensions {
           for (removedTypeExtension, _) in removedTypeExtensions {
-            guard let oldState = extensionsToState.removeValue(forKey: removedTypeExtension.node) else {
+            guard let oldState = extensionsToState.removeValue(forKey: removedTypeExtension) else {
               // TODO: Complain about non-upheld invariant
               fatalError("")
             }
@@ -832,15 +836,15 @@ extension TypeDependencyGraph {
     extensionDeclModule: SymbolTable3.Module,
     isUpdatingInvalidating isFixingInvalidating: Bool,
     to result: Result<
-      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: NominalTypeDeclSyntax),
+      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
       TypeQualifier.Failure
     >,
     dependencyTracker: DependencyTracker,
     configuredRegions: ConfiguredRegions?,
-    moduleMap: [SourceFileSyntax: SymbolTable3.Module],
+    symbolTable: borrowing SymbolTable3
   ) -> Result<InvalidatedExtensions, ExtensionAdmissionFailure> {
     // Ensure extension isn't already bound
-    if let existingExtensionState = extensionsToState[extensionDecl.node] {
+    if let existingExtensionState = extensionsToState[extensionDecl] {
       return .failure(.cannotReadmit(existingState: existingExtensionState))
     }
 
@@ -866,7 +870,7 @@ extension TypeDependencyGraph {
       //   currentDependencyChain: &dependencyChain
       // )
       cycleResult = _findFirstCycleWhenBinding(
-        extensionDecl: extensionDecl.node,
+        extensionDecl: extensionDecl,
         extensionMembers: mappedExtensionDecl.typeMap,
         to: extendedTypeName,
         extensionDependencies: dependencyTracker.dependencies
@@ -883,9 +887,9 @@ extension TypeDependencyGraph {
       break
     case .success(let cycle):
       // Failed binding => no type members and no dependents
-      extensionsToState[extensionDecl.node] = ExtensionState(
+      extensionsToState[extensionDecl] = ExtensionState(
         dependencies: dependencyTracker.dependencies,
-        extensionDecl: extensionDecl.node,
+        extensionDecl: extensionDecl,
         resolvedType: Result.failure(BindingFailure.cannotFormCycle(cycle)),
       )
       return .success([])
@@ -902,7 +906,7 @@ extension TypeDependencyGraph {
       // If the invalid dependency occurs at the extension we're trying to
       // admit, this might be the caller's fault since they provide
       // ``DependencyTracker``
-      guard dependentExtension == extensionDecl.node else {
+      guard dependentExtension == extensionDecl else {
         // Graph invariant was broken
         fatalError(
           "[SwiftLexicalLookup] Internal error: Extension \((dependentExtension?._memberlessDescription).debugDescription) unexpectedly depends on non-resolved extension \((dependencyExtension?._memberlessDescription).debugDescription) with state: \(String(reflecting: dependencyExtensionState))."
@@ -954,7 +958,7 @@ extension TypeDependencyGraph {
         modifiedMembers: mappedExtensionDecl.typeMap,
         directDependents: extendedType.dependents,
         invalidatedExtensions: &invalidatedExtensionsTmp,
-        moduleMap: moduleMap
+        symbolTable: symbolTable
       )
       invalidatedExtensions = invalidatedExtensionsTmp
 
@@ -977,9 +981,9 @@ extension TypeDependencyGraph {
     // === Save Extension ===
 
     // Save extension (newly bound extension doesn't add type dependents)
-    extensionsToState[extensionDecl.node] = ExtensionState(
+    extensionsToState[extensionDecl] = ExtensionState(
       dependencies: dependencyTracker.dependencies,
-      extensionDecl: extensionDecl.node,
+      extensionDecl: extensionDecl,
       resolvedType: result.map(\.qualifiedName).mapError(BindingFailure.typeResolutionFailure)
     )
 
@@ -1117,15 +1121,15 @@ extension TypeDependencyGraph {
   ) -> [Diagnostic] {
     var diagnostics = [Diagnostic]()
     /// Attach a note to the given node.
-    func _attachNote(to node: some SyntaxProtocol, message: String) {
+    func _attachNote<S: SyntaxProtocol>(to syntax: SourceFileRoot<S>, message: String) {
       diagnostics.append(
-        Diagnostic(node: node, message: _DependencyGraphDiagnostic(message: message, severity: .note))
+        Diagnostic(node: syntax.node, message: _DependencyGraphDiagnostic(message: message, severity: .note))
       )
     }
     /// Attach an error to the given node.
-    func _attachError(to node: some SyntaxProtocol, message: String) {
+    func _attachError<S: SyntaxProtocol>(to syntax: SourceFileRoot<S>, message: String) {
       diagnostics.append(
-        Diagnostic(node: node, message: _DependencyGraphDiagnostic(message: message, severity: .error))
+        Diagnostic(node: syntax.node, message: _DependencyGraphDiagnostic(message: message, severity: .error))
       )
     }
     /// Annotate each member type declaration in the `typeTable`
@@ -1146,7 +1150,9 @@ extension TypeDependencyGraph {
     // Keep track of visited types to diagnose types that are registered under different names.
     var visitedTypes = [NominalTypeDeclSyntax: QualifiedTypeNameGlobalType]()
     // Keep track of what types/maps we're expecting each bound extension to have.
-    var extensionsToType = [ExtensionDeclSyntax: (boundTypeName: QualifiedTypeNameGlobalType, typeTable: TypeTable)]()
+    var extensionsToType = [
+      SourceFileRoot<ExtensionDeclSyntax>: (boundTypeName: QualifiedTypeNameGlobalType, typeTable: TypeTable)
+    ]()
     for (typeName, type) in namesToTypes {
       let typeNameDescription = describeTypeName(typeName)
 
@@ -1159,13 +1165,16 @@ extension TypeDependencyGraph {
         // Ensure this type decl is mapped to only one name
         guard visitedTypes.updateValue(typeName, forKey: nominalTypeDecl.node) == nil else {
           // This nominal-type declaration was already registered under a different name
-          _attachError(to: nominalTypeDecl.node, message: "\(declLabel) also registered under '\(typeNameDescription)'")
+          _attachError(
+            to: nominalTypeDecl.declGroup,
+            message: "\(declLabel) also registered under '\(typeNameDescription)'"
+          )
           continue
         }
 
         // Show the registered name
         _attachNote(
-          to: nominalTypeDecl.node,
+          to: nominalTypeDecl.declGroup,
           message: "\(declLabel) registered '\(typeNameDescription)' (v\(type.version))"
         )
 
@@ -1176,7 +1185,7 @@ extension TypeDependencyGraph {
       // Add dependent extensions (to main declaration)
       for dependentExtension in type.dependents {
         _attachNote(
-          to: type.mainDecl.node,
+          to: type.mainDecl.declGroup,
           message:
             "Member type '\(typeNameDescription)' > '\(dependentExtension.memberType.name)' depended on by `\(dependentExtension.dependentExtension.node._memberlessDescription)`"
         )
@@ -1185,14 +1194,14 @@ extension TypeDependencyGraph {
       // Check bound-extension state points to us as the resolved type
       for (boundExtension, typeTable) in type.boundExtensions.flatMap(\.value) {
         // Ensure bound extension has a state
-        guard extensionsToState[boundExtension.node] != nil else {
+        guard extensionsToState[boundExtension] != nil else {
           _attachError(
-            to: boundExtension.node,
+            to: boundExtension,
             message: "Extension bound to '\(typeNameDescription)' but has no state."
           )
           continue
         }
-        extensionsToType[boundExtension.node] = (boundTypeName: typeName, typeTable: typeTable)
+        extensionsToType[boundExtension] = (boundTypeName: typeName, typeTable: typeTable)
 
         continue
       }

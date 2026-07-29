@@ -21,12 +21,12 @@ import SwiftSyntax
     /// The `TypeSyntax` or `TokenSyntax` from which we derived this type reference component;
     /// used for targeted diagnostics.
     // public let introducingSyntax: TypeLikeSyntax
-    public let introducingSyntax: TypeSyntax
+    public let introducingSyntax: SourceFileRoot<TypeSyntax>
 
     @_spi(_QualifiedLookupTests) public init(
       module: Identifier? = nil,
       name: Identifier,
-      introducingSyntax: TypeSyntax
+      introducingSyntax: SourceFileRoot<TypeSyntax>
     ) {
       self.module = module
       self.name = name

@@ -35,22 +35,26 @@ extension MappedDeclGroup {
     MappedDeclGroup(
       declGroup: declGroup,
       typeMap: TypeTable(
-        from: declGroup.node._groupTypeMembers(configuredRegions: configuredRegions),
+        from: declGroup._groupTypeMembers(configuredRegions: configuredRegions),
         introducedIn: declGroup.as(ExtensionDeclSyntax.self)
       )
     )
   }
 }
 
-extension DeclGroupSyntax {
-  internal func _groupTypeMembers(configuredRegions: ConfiguredRegions?) -> [Identifier: [TypeDeclSyntax]] {
-    var result = [Identifier: [TypeDeclSyntax]]()
-    visitDirectMembers(
+extension SourceFileRoot where Node: DeclGroupSyntax {
+  internal func _groupTypeMembers(
+    configuredRegions: ConfiguredRegions?
+  ) -> [Identifier: [SourceFileRoot<TypeDeclSyntax>]] {
+    var result = [Identifier: [SourceFileRoot<TypeDeclSyntax>]]()
+    node.visitDirectMembers(
       configuredRegions: configuredRegions,
       visit: { valueDecl in
         guard let typeDecl = valueDecl.as(TypeDeclSyntax.self) else { return }
         guard let typeIdentifier = Identifier(validating: typeDecl.name) else { return }
-        result[typeIdentifier, default: []].append(typeDecl)
+        // Since these are our children, they will also be scope in the file.
+        let wrappedTypeDecl = SourceFileRoot<TypeDeclSyntax>(typeDecl)!
+        result[typeIdentifier, default: []].append(wrappedTypeDecl)
       }
     )
     return result
@@ -61,7 +65,7 @@ extension DeclGroupSyntax {
 
 extension MappedDeclGroup {
   func erased() -> MappedDeclGroup<DeclGroupSyntaxType> {
-    // We're erasing so the source-file root will be retained
-    MappedDeclGroup<_>(declGroup: SourceFileRoot(DeclGroupSyntaxType(declGroup))!, typeMap: typeMap)
+    // Force-unwrap because we're simply erasing declGroup to DeclGroupSyntaxType
+    MappedDeclGroup<_>(declGroup: declGroup.as(DeclGroupSyntaxType.self)!, typeMap: typeMap)
   }
 }

@@ -23,6 +23,17 @@ extension TypeLikeSyntax: ExpressibleByStringLiteral {
   }
 }
 
+extension SourceFileRoot: ExpressibleByStringLiteral
+    & ExpressibleByExtendedGraphemeClusterLiteral
+    & ExpressibleByUnicodeScalarLiteral
+where
+  Node == TypeSyntax
+{
+  public init(stringLiteral value: StringLiteralType) {
+    self.init(_unchecked: TypeSyntax(stringLiteral: value))
+  }
+}
+
 // Convenience initializer
 
 extension GenericExtensionState where TypeName == String {
@@ -30,23 +41,26 @@ extension GenericExtensionState where TypeName == String {
     _ cycleElements: [(introducingDecl: String?, extension: String, base: StaticString)],
     conflictingMember: StaticString
   ) -> GenericExtensionState {
+    let dependencyPath: [GenericDependencyCycleElement<String>] = cycleElements.map({
+      (introducingTypeDecl, extensionDecl, baseTypeName) -> GenericDependencyCycleElement<String> in
+      let introducingTypeDecl = introducingTypeDecl.map(DeclSyntax.init(stringLiteral:))
+      let extensionDecl = DeclSyntax.init(stringLiteral: extensionDecl)
+      return GenericDependencyCycleElement(
+        introducingTypeDecl: introducingTypeDecl.map(Syntax.init(_:))?.cast(TypeDeclSyntax.self),
+        extensionDecl: extensionDecl.cast(ExtensionDeclSyntax.self),
+        boundType: baseTypeName.description,
+      )
+    })
+
     let cycle = GenericExtensionBindingCycle<String>(
-      dependencyPath: cycleElements.map({ (introducingTypeDecl, extensionDecl, baseTypeName) in
-        let introducingTypeDecl = introducingTypeDecl.map(DeclSyntax.init(stringLiteral:))
-        let extensionDecl = DeclSyntax.init(stringLiteral: extensionDecl)
-        return GenericDependencyCycleElement(
-          introducingTypeDecl: introducingTypeDecl.map(Syntax.init(_:))?.cast(TypeDeclSyntax.self),
-          extensionDecl: extensionDecl.cast(ExtensionDeclSyntax.self),
-          boundType: baseTypeName.description,
-        )
-      }),
+      dependencyPath: dependencyPath,
       dependencyMember: Identifier(canonicalName: conflictingMember)
     )
     return GenericExtensionState(
       // TODO: Test dependencies
       _uncheckedDependencies: [],
       // Won't be checked
-      extensionDecl: DeclSyntax(stringLiteral: "extension").cast(ExtensionDeclSyntax.self),
+      extensionDecl: SourceFileRoot(_unchecked: DeclSyntax(stringLiteral: "extension").cast(ExtensionDeclSyntax.self)),
       resolvedType: Result.failure(GenericBindingFailure.cannotFormCycle(cycle))
     )
   }
@@ -60,28 +74,29 @@ extension GenericExtensionState where TypeName == String {
 //   }
 // }
 
-extension ResolvedNominalTypeReference {
-  fileprivate static func _mockMarkerType(_ kind: SyntaxKind, marker: Character) -> ResolvedNominalTypeReference? {
-    // Get the declaration kind
-    let rawTypeDecl: DeclSyntax
-    switch kind {
-    case .structDecl: rawTypeDecl = "struct"
-    case .enumDecl: rawTypeDecl = "enum"
-    case .classDecl: rawTypeDecl = "class"
-    case .actorDecl: rawTypeDecl = "actor"
-    case .protocolDecl: rawTypeDecl = "protocol"
-    default: return nil
-    }
-    let originatingSyntax: TypeSyntax = "\(raw: marker)"
-
-    // We should only get type declarations
-    let typeDecl = NominalTypeDeclSyntax(rawTypeDecl)!
-    return ResolvedNominalTypeReference._mockMarkerType(
-      mainDecl: typeDecl,
-      originatingSyntax: originatingSyntax
-    )
-  }
-}
+// TODO: Remove
+// extension ResolvedNominalTypeReference {
+//   fileprivate static func _mockMarkerType(_ kind: SyntaxKind, marker: Character) -> ResolvedNominalTypeReference? {
+//     // Get the declaration kind
+//     let rawTypeDecl: DeclSyntax
+//     switch kind {
+//     case .structDecl: rawTypeDecl = "struct"
+//     case .enumDecl: rawTypeDecl = "enum"
+//     case .classDecl: rawTypeDecl = "class"
+//     case .actorDecl: rawTypeDecl = "actor"
+//     case .protocolDecl: rawTypeDecl = "protocol"
+//     default: return nil
+//     }
+//     let originatingSyntax: TypeSyntax = "\(raw: marker)"
+//
+//     // We should only get type declarations
+//     let typeDecl = NominalTypeDeclSyntax(rawTypeDecl)!
+//     return ResolvedNominalTypeReference._mockMarkerType(
+//       mainDecl: typeDecl,
+//       originatingSyntax: originatingSyntax
+//     )
+//   }
+// }
 
 final class TestQualifiedTypeName: XCTestCase {
   func testSimpleCase() {

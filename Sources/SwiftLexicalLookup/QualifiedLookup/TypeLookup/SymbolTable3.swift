@@ -173,8 +173,8 @@ import SwiftSyntax
   // @_spi(_QualifiedLookupTests) public private(set) var extensionState: [ExtensionDeclSyntax: ExtensionBindingState] =
   //   [:]
   @_spi(_QualifiedLookupTests) public private(set) lazy var unresolvedExtensions:
-    [SourceFileSyntax: OrderedSet<ExtensionDeclSyntax>] = {
-      var result = [SourceFileSyntax: OrderedSet<ExtensionDeclSyntax>]()
+    [SourceFileSyntax: OrderedSet<SourceFileRoot<ExtensionDeclSyntax>>] = {
+      var result = [SourceFileSyntax: OrderedSet<SourceFileRoot<ExtensionDeclSyntax>>]()
       for (module, files) in moduleToSources {
         for (_, file) in files {
           // TODO: Implement configuredRegions
@@ -355,15 +355,11 @@ extension SymbolTable3 {
   /// Register the given qualified name with the given main declaration.
   func registerNominalTypeReference(
     qualifiedName: QualifiedTypeName,
-    mainDecl: NominalTypeDeclSyntax
+    mainDecl: SourceFileRoot<NominalTypeDeclSyntax>
   ) -> Result<NominalTypeRef, TypeDependencyGraph.NominalRegistrationFailure> {
-    guard let registeredMainDecl = SourceFileRoot(mainDecl) else {
-      // TODO: Handle or eliminate error
-      fatalError("TODO")
-    }
     return dependencyGraph.registerNominalTypeReference(
       rawQualifiedName: qualifiedName,
-      mainDecl: registeredMainDecl,
+      mainDecl: mainDecl,
       configuredRegions: configuredRegions
     )
     // let newNominal: NominalType
@@ -435,9 +431,9 @@ extension SymbolTable3 {
   ///
   /// Returns: Broken extensions or binding failure.
   func bindExtensionAndRegisterExtended(
-    _ extensionDecl: ExtensionDeclSyntax,
+    _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     to result: Result<
-      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: NominalTypeDeclSyntax),
+      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
       TypeQualifier.Failure
     >,
     // dependencies: [ExtensionBindingResult.Dependency]
@@ -446,12 +442,9 @@ extension SymbolTable3 {
     // TODO: Refactor; super ugly (perhaps the caller should have this responsibility;
     // also we get back a NominalTypeRef only to discard it)
     if case .success(let (qualifiedName, mainDecl)) = result {
-      guard let registeredMainDecl = SourceFileRoot(mainDecl) else {
-        return .failure(ExtensionBindingFailure.nonRegisteredSyntaxRoot)
-      }
       let nominalRegistrationResult = dependencyGraph.registerNominalTypeReference(
         rawQualifiedName: QualifiedTypeName.topLevel(qualifiedName),
-        mainDecl: registeredMainDecl,
+        mainDecl: mainDecl,
         configuredRegions: configuredRegions
       )
 
@@ -480,9 +473,9 @@ extension SymbolTable3 {
   /// All invalidated extensions should be fixed before calling `bindExtension`
   /// again.
   func fixInvalidatedExtension(
-    _ extensionDecl: ExtensionDeclSyntax,
+    _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     to result: Result<
-      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: NominalTypeDeclSyntax),
+      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
       TypeQualifier.Failure
     >,
     // dependencies: [ExtensionBindingResult.Dependency]
@@ -498,31 +491,27 @@ extension SymbolTable3 {
 
   /// Helper for `bindExtension` and `fixInvalidatedExtension`.
   fileprivate func _admitExtension(
-    _ extensionDecl: ExtensionDeclSyntax,
+    _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     isUpdatingInvalidating isFixingInvalidating: Bool,
     to result: Result<
-      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: NominalTypeDeclSyntax),
+      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
       TypeQualifier.Failure
     >,
     // dependencies: [ExtensionBindingResult.Dependency]
     dependencies: DependencyTracker
   ) -> Result<TypeDependencyGraph.InvalidatedExtensions, ExtensionBindingFailure> {
     // Get extension and module
-    // TODO: Make caller provide SourceFileRoot
-    guard
-      let registeredExtension = SourceFileRoot(extensionDecl),
-      let module = moduleMap[registeredExtension.fileRoot]
-    else {
+    guard let module = moduleMap[extensionDecl.fileRoot] else {
       return .failure(ExtensionBindingFailure.nonRegisteredSyntaxRoot)
     }
     let admissionResult = dependencyGraph._admitExtension(
-      registeredExtension,
+      extensionDecl,
       extensionDeclModule: module,
       isUpdatingInvalidating: isFixingInvalidating,
       to: result,
       dependencyTracker: dependencies,
       configuredRegions: configuredRegions,
-      moduleMap: moduleMap
+      symbolTable: self
     )
 
     // Log results
@@ -561,7 +550,7 @@ extension SymbolTable3 {
     switch admissionResult {
     case .success(let success):
       // If successfully bound, remove from `unresolvedExtensions`
-      unresolvedExtensions[registeredExtension.fileRoot]?.remove(extensionDecl)
+      unresolvedExtensions[extensionDecl.fileRoot]?.remove(extensionDecl)
 
       return .success(success)
     case .failure(let admissionFailure):
@@ -940,16 +929,14 @@ extension SymbolTable3 {
   func findMemberType(
     baseType: NominalTypeRef,
     memberTypeName: Identifier,
-    introducingTypeSyntax: TypeLikeSyntax,
+    introducingTypeSyntax: SourceFileRoot<TypeLikeSyntax>,
+    introducingModule: Module,
     dependencyTracker: inout DependencyTracker,
-  ) -> Result<[TypeDeclSyntax], QualifiedTypeLookupFailure> {
-    // TODO: Get rid of SourceFileRoot failure (require it be passed by the caller)
-    guard
-      let registeredTypeSyntax = SourceFileRoot(introducingTypeSyntax),
-      let module = moduleMap[registeredTypeSyntax.fileRoot]
-    else {
-      return .failure(QualifiedTypeLookupFailure.unregisteredSourceRoot)
-    }
+  ) -> Result<[SourceFileRoot<TypeDeclSyntax>], QualifiedTypeLookupFailure> {
+    assert(
+      moduleMap[introducingTypeSyntax.fileRoot] == introducingModule,
+      "[SwiftLexicalLookup] Internal error: Caller passed wrong module for `\(introducingTypeSyntax.trimmedDescription)`: got '\(introducingModule.name)' but expected \(moduleMap[introducingTypeSyntax.fileRoot].debugDescription)"
+    )
 
     // TODO: Remove
     let baseTypeDescription = baseType._describe(describeTypeName: _describeQualifiedName(_:))
@@ -965,7 +952,7 @@ extension SymbolTable3 {
     return dependencyGraph.findMemberType(
       baseType: baseType,
       memberTypeName: memberTypeName,
-      origin: (typeSyntax: registeredTypeSyntax, module: module),
+      origin: (typeSyntax: introducingTypeSyntax, module: introducingModule),
       moduleMap: moduleMap,
       dependencyTracker: &dependencyTracker,
       configuredRegions: configuredRegions

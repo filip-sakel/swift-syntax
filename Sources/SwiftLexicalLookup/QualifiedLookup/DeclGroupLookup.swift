@@ -363,3 +363,9 @@ extension DeclGroupSyntax {
     self.with(\.memberBlock, MemberBlockSyntax(members: [])).trimmedDescription
   }
 }
+
+extension SourceFileRoot where Node: DeclGroupSyntax {
+  internal var _memberlessDescription: String {
+    node._memberlessDescription
+  }
+}

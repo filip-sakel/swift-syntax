@@ -18,6 +18,14 @@ import SwiftSyntax
     case `internal`(fileID: SyntaxIdentifier)
     case external(moduleName: Identifier)
 
+    fileprivate init(file: SourceFileSyntax, module: Identifier, internalModule: Identifier) {
+      if module == internalModule {
+        self = QualifiedTypeNameGlobalType.Qualifier.internal(fileID: file.id)
+      } else {
+        self = QualifiedTypeNameGlobalType.Qualifier.external(moduleName: module)
+      }
+    }
+
     public func describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
       switch self {
       case .internal(let fileID):
@@ -41,31 +49,40 @@ import SwiftSyntax
     let name: Identifier
     let debugFileMap: DebugFileMap
 
-    // @_spi(_QualifiedLookup) public init(qualifier: QualifiedTypeNameGlobalType.Qualifier, name: Identifier) {
-    //   self.qualifier = qualifier
-    //   self.name = name
-    // }
-
-    @_spi(_QualifiedLookup) public init?(
-      file: SourceFileSyntax,
+    fileprivate init(
+      _uncheckedQualifier qualifier: QualifiedTypeNameGlobalType.Qualifier,
       name: Identifier,
+      debugFileMap: DebugFileMap
+    ) {
+      self.qualifier = qualifier
+      self.name = name
+      self.debugFileMap = debugFileMap
+    }
+
+    /// Creates a component named `name` in the file `file` in the module `module`
+    /// with respect to the given symbol table.
+    ///
+    /// Important: The file and module must be mapped as such in the symbol table.
+    @_spi(_QualifiedLookup) public init(
+      name: Identifier,
+      file: SourceFileSyntax,
+      module: SymbolTable3.Module,
       symbolTable: borrowing SymbolTable3
     ) {
-      // TODO: Maybe improve diagnostics for when file isn't in the table
+      assert(
+        symbolTable.moduleMap[file] == module,
+        "[SwiftLexicalLookup] Internal error: File registered under '\(symbolTable.moduleMap[file]?.name ?? "nil")', and not the given module '\(module.name)'"
+      )
 
-      guard let moduleName = symbolTable.moduleMap[file] else {
-        return nil
-      }
-
-      // Compute the qualifier
-      if moduleName == symbolTable.moduleName {
-        self.qualifier = Qualifier.internal(fileID: file.id)
-      } else {
-        self.qualifier = Qualifier.external(moduleName: moduleName)
-      }
-
-      self.name = name
-      self.debugFileMap = DebugFileMap(symbolTable: symbolTable)
+      self.init(
+        _uncheckedQualifier: QualifiedTypeNameGlobalType.Qualifier(
+          file: file,
+          module: module,
+          internalModule: symbolTable.moduleName
+        ),
+        name: name,
+        debugFileMap: DebugFileMap(symbolTable: symbolTable)
+      )
     }
 
     @_spi(_QualifiedLookup) public func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
@@ -184,14 +201,14 @@ public indirect enum QualifiedTypeNameNestedType: Sendable, Hashable, CustomDebu
   /// Specifies top-level type: a collection of internal and external components
   case topLevel(QualifiedTypeNameGlobalType)
   // Specifies an (internal) nested-level scope and a dot-separated sequence of identifiers.
-  case nestedScope(scope: CodeBlockItemListSyntax, type: QualifiedTypeNameNestedType)
+  case nestedScope(scope: SourceFileRoot<CodeBlockItemListSyntax>, type: QualifiedTypeNameNestedType)
 
   @_spi(_QualifiedLookup) public func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
     switch self {
     case .topLevel(let globalType):
       return globalType._describe(describeFileID: describeFileID)
     case .nestedScope(let scope, let nestedType):
-      return "\(scope.id.hashValue)>\(nestedType.debugDescription)"
+      return "\(scope.node.id.hashValue)>\(nestedType.debugDescription)"
     }
   }
 
