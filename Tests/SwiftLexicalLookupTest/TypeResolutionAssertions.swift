@@ -16,6 +16,19 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
+/// A QualifiedTypeNameGlobalType represented as a `StaticString`.
+/// Provides a CustomDebugStringConvertible conformance without quotes.
+struct TestTypeName: ExpressibleByStringLiteral, CustomDebugStringConvertible {
+  let value: StaticString
+  init(stringLiteral value: StaticString) {
+    self.value = value
+  }
+
+  var debugDescription: String {
+    value.description
+  }
+}
+
 /// Asserts the given annotated `TypeSyntax` resolves to the right `NominalTypeDeclSyntax`
 /// and qualified name. Also asserts `ExtensionDeclSyntax`-binding produces the expected
 /// `ExtensionBindingState`.
@@ -30,7 +43,7 @@ struct TypeResolutionMatcher {
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
   enum Expectation {
     case syntaxResolution(Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>)
-    case extensionBinding(GenericExtensionState<String>)
+    case extensionBinding(GenericExtensionState<TestTypeName>)
   }
 
   let symbolTable: SymbolTable3
@@ -193,7 +206,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
   /// `assertExpectation` forwards extensions here.
   private func _assertExtensionBinding(
     extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
-    expectedState: GenericExtensionState<String>,
+    expectedState: GenericExtensionState<TestTypeName>,
     verbose: Bool
   ) -> [ExpectationFailure] {
     // Look up extended type if not already resolved
@@ -250,7 +263,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
     guard expectedStateDescription == actualStateDescription else {
       return [
         ExpectationFailure.other(
-          failure: "Extension-state mismatch.\nExpected: \(expectedState)\nGot: \(actualState)"
+          failure: "Extension-state mismatch.\nExpected: \(expectedState)\nBut got:  \(actualState)"
         )
       ]
     }
@@ -318,7 +331,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
         failures.append(
           ExpectationFailure.other(
             failure:
-              "Resolved-type mismatch. Expected: \(expectedLookupResult)\nGot: \(actualLookupResult)"
+              "Resolved-type mismatch. Expected: \(expectedLookupResult)\nBut got:  \(actualLookupResult)"
           )
         )
       }
@@ -410,7 +423,7 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     append(definition: TypeResolutionMatcher.Definition(marker: marker, name: name), file: file, line: line)
   }
   mutating func appendInterpolation(
-    extensionState: GenericExtensionState<String>,
+    extensionState: GenericExtensionState<TestTypeName>,
     file: StaticString = #file,
     line: UInt = #line
   ) {

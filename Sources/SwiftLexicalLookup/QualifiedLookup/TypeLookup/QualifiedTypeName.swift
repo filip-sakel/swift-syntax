@@ -14,7 +14,7 @@ import SwiftSyntax
 
 // A global type name, `Swift::Int._(MyFileA.swift)::MyType`.
 @_spi(_QualifiedLookup) public struct QualifiedTypeNameGlobalType: Sendable, Hashable, CustomDebugStringConvertible {
-  public enum Qualifier: Sendable, Hashable, CustomDebugStringConvertible {
+  public enum Qualifier: Sendable, Hashable {
     case `internal`(fileID: SyntaxIdentifier)
     case external(moduleName: Identifier)
 
@@ -26,17 +26,13 @@ import SwiftSyntax
       }
     }
 
-    public func describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
+    fileprivate func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
       switch self {
       case .internal(let fileID):
         "_(\(describeFileID(fileID)))"
       case .external(let moduleName):
         "\(moduleName.name)"
       }
-    }
-
-    public var debugDescription: String {
-      describe(describeFileID: \.hashValue.description)
     }
   }
   /// A component of a qualified type name, external or internal. For instance,
@@ -86,7 +82,7 @@ import SwiftSyntax
     }
 
     public var debugDescription: String {
-      let qualifierDescription = qualifier.describe(describeFileID: debugFileMap.describeFileID(_:))
+      let qualifierDescription = qualifier._describe(describeFileID: debugFileMap.describeFileID(_:))
       return "\(qualifierDescription)::\(name.name)"
     }
   }

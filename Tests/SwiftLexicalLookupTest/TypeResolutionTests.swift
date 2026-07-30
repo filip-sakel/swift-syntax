@@ -43,23 +43,29 @@ where
 
 // Convenience initializer
 
-extension GenericExtensionState where TypeName == String {
+struct TestDependency {
+  let type: TestTypeName
+  let members: [StaticString]
+}
+
+extension GenericExtensionState where TypeName == TestTypeName {
   static func invalidCycle(
-    _ cycleElements: [(introducingDecl: String?, extension: String, base: StaticString)],
+    dependencies: [TestDependency],
+    cycleElements: [(introducingDecl: String?, extension: String, base: TestTypeName)],
     conflictingMember: StaticString
   ) -> GenericExtensionState {
-    let dependencyPath: [GenericDependencyCycleElement<String>] = cycleElements.map({
-      (introducingTypeDecl, extensionDecl, baseTypeName) -> GenericDependencyCycleElement<String> in
+    let dependencyPath: [GenericDependencyCycleElement<TestTypeName>] = cycleElements.map({
+      (introducingTypeDecl, extensionDecl, baseTypeName) -> GenericDependencyCycleElement<TestTypeName> in
       let introducingTypeDecl = introducingTypeDecl.map(DeclSyntax.init(stringLiteral:))
       let extensionDecl = DeclSyntax.init(stringLiteral: extensionDecl)
       return GenericDependencyCycleElement(
         introducingTypeDecl: introducingTypeDecl.map(Syntax.init(_:))?.cast(TypeDeclSyntax.self),
         extensionDecl: extensionDecl.cast(ExtensionDeclSyntax.self),
-        boundType: baseTypeName.description,
+        boundType: baseTypeName,
       )
     })
 
-    let cycle = GenericExtensionBindingCycle<String>(
+    let cycle = GenericExtensionBindingCycle<TestTypeName>(
       dependencyPath: dependencyPath,
       dependencyMember: Identifier(canonicalName: conflictingMember)
     )
@@ -72,8 +78,12 @@ extension GenericExtensionState where TypeName == String {
     let mockExtension = SourceFileRoot(sourceFile.children(ofType: ExtensionDeclSyntax.self)[0])!
 
     return GenericExtensionState(
-      // TODO: Test dependencies
-      _uncheckedDependencies: [],
+      _uncheckedDependencies: dependencies.map({
+        let mappedMembers: [TypeMember] = $0.members.map({ member in
+          TypeMember(name: Identifier(canonicalName: member), decls: [])
+        })
+        return GenericExtensionDependency<TestTypeName>(dependencyTypeName: $0.type, members: mappedMembers)
+      }),
       // Won't be checked
       extensionDecl: mockExtension,
       resolvedType: Result.failure(GenericBindingFailure.cannotFormCycle(cycle))
@@ -478,9 +488,17 @@ final class TestQualifiedTypeName: XCTestCase {
         \("🟥", name: "_(MyFile.swift)::A")
         struct A {}
 
-        \(extensionState: .invalidCycle([
-          (introducingDecl: "typealias B = A", extension: "extension A { typealias B = A }", base: "_(MyFile.swift)::A")
-        ], conflictingMember: "struct A {}"))
+        \(extensionState: .invalidCycle(
+          dependencies: [
+            // We evidently depend on `A.B`. We also depend on `_(MyFile.swift)::A`
+            // not having a type member `A` to that `typealias B = A` resolves to `A`.
+            TestDependency(type: "_(MyFile.swift)::A", members: ["B", "A"]),
+          ],
+          // This extension violates its own dependency
+          cycleElements: [],
+          // I.e. `struct A`
+          conflictingMember: "A"
+        ))
         extension A.B { struct A {} }
 
         extension A { typealias B = A }
@@ -540,9 +558,13 @@ final class TestQualifiedTypeName: XCTestCase {
       //
       //           `- ℹ️ note: `T_2`'s member `Prev` is declared in `extension T_3.Prev`
 
-      \(extensionState: .invalidCycle([
+      \(extensionState: .invalidCycle(
+        dependencies: [],
+        cycleElements: [
           (introducingDecl: "", extension: "extension A { typealias B = A }", base: "_(MyFile.swift)::A")
-        ], conflictingMember: "struct A {}"))
+        ],
+        conflictingMember: "struct A {}"
+      ))
       extension T_1.Prev { struct T_3 {} }
       //        |- Depends on : T_1>Prev, T_1>T_0
       //        |- Resolves to: T_0

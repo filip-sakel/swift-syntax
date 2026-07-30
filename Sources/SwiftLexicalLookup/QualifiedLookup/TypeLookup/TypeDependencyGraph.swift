@@ -14,6 +14,45 @@ import SwiftDiagnostics
 import SwiftIfConfig
 import SwiftSyntax
 
+extension Array {
+  /// Appends if the array has no duplicates using the given key
+  private mutating func _indexAfterInsertingUnique<Key: Equatable, Value>(
+    key: Key,
+    default defaultValue: Value
+  ) -> Int where Element == (key: Key, value: Value) {
+    if let existingIndex = firstIndex(where: { $0.key == key }) {
+      return existingIndex
+    } else {
+      let newIndex = count
+      append((key, defaultValue))
+      return newIndex
+    }
+  }
+  /// Similar to dictionary's `subscript(_:default:)`.
+  ///
+  /// Only use for small array's and/or when it's important to maintain insertion order.
+  fileprivate subscript<Key: Equatable, Value>(
+    _key key: Key,
+    default defaultValue: Value
+  ) -> Value where Element == (key: Key, value: Value) {
+    get {
+      first(where: { $0.key == key })?.value ?? defaultValue
+    }
+    _modify {
+      let index: Int
+      if let existingIndex = firstIndex(where: { $0.key == key }) {
+        index = existingIndex
+      } else {
+        let newIndex = count
+        append((key, defaultValue))
+        index = newIndex
+      }
+
+      yield &self[index].value
+    }
+  }
+}
+
 @_spi(_QualifiedLookupTests) public typealias IntroducingExtensionOrMainDecl = SourceFileRoot<ExtensionDeclSyntax>?
 @_spi(_QualifiedLookupTests) public struct TypeMemberDecl: Hashable, Sendable {
   let introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl
@@ -23,7 +62,7 @@ import SwiftSyntax
   let name: Identifier
   fileprivate(set) var decls: [TypeMemberDecl]
 
-  internal init(name: Identifier, decls: [TypeMemberDecl]) {
+  @_spi(_QualifiedLookupTests) public init(name: Identifier, decls: [TypeMemberDecl]) {
     self.name = name
     self.decls = decls
   }
@@ -42,7 +81,7 @@ import SwiftSyntax
   let dependencyTypeName: TypeName
   fileprivate(set) var members: [TypeMember]
 
-  init(
+  @_spi(_QualifiedLookupTests) public init(
     dependencyTypeName: TypeName,
     members: [TypeMember]
   ) {
@@ -86,34 +125,32 @@ import SwiftSyntax
     extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     resolvedType: Result<TypeName, GenericBindingFailure<TypeName>>
   ) where TypeName == QualifiedTypeNameGlobalType {
-    // Group dependencies by base type and member name
-    var groupedDependencies = [
-      QualifiedTypeNameGlobalType: [Identifier: [(IntroducingExtensionOrMainDecl, SourceFileRoot<TypeDeclSyntax>)]]
-    ]()
+    // Group dependencies by base type and member name, while maintaing order
+    var groupedDependencies =
+      [
+        (
+          key: QualifiedTypeNameGlobalType,
+          value: [(key: Identifier, value: [(IntroducingExtensionOrMainDecl, SourceFileRoot<TypeDeclSyntax>)])]
+        )
+      ]()
+
     for dependency in dependencies {
       // TODO: Clarify comment
       // Note: We can assign directly because ``DependencyTracker/dependencies`` guarantees
       // that type/member-name pairs have just a single entry.
-      groupedDependencies[dependency.extendedTypeName, default: [:]][dependency.member, default: []].append(
+      groupedDependencies[_key: dependency.extendedTypeName, default: []][_key: dependency.member, default: []].append(
         contentsOf: dependency.typeDecls
       )
     }
 
-    // Collect into an array of the right type (maintains order)
+    // Map to `ExtensionDependency`
     // Satisfies invariant of one dependency per type
-    let orderedGroupedDependencies: [ExtensionDependency] = dependencies.compactMap({ lookupDependency in
-      guard
-        let dependencyMembers: [Identifier: [(IntroducingExtensionOrMainDecl, SourceFileRoot<TypeDeclSyntax>)]] =
-          groupedDependencies.removeValue(forKey: lookupDependency.extendedTypeName)
-      else {
-        return nil
-      }
-
-      return ExtensionDependency(
-        dependencyTypeName: lookupDependency.extendedTypeName,
-        members: dependencyMembers.map({ memberName, typeDecls in
+    let orderedGroupedDependencies: [ExtensionDependency] = groupedDependencies.map({ (typeName, members) in
+      ExtensionDependency(
+        dependencyTypeName: typeName,
+        members: members.map({ (name, typeDecls) in
           TypeMember(
-            name: memberName,
+            name: name,
             decls: typeDecls.map({ TypeMemberDecl(introducingExtensionOrMainDecl: $0.0, typeDeclSyntax: $0.1) })
           )
         })
@@ -1026,16 +1063,25 @@ extension QualifiedLookupDependency: CustomDebugStringConvertible where TypeName
 
 @_spi(_QualifiedLookupTests)
 extension GenericExtensionDependency: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
-  public var debugDescription: String {
+  private func _describe(includeMemberDecls: Bool) -> String {
     let membersDescriptions = members.map({ member in
       let declDescriptions = member.decls.map({
         "`\($0.introducingExtensionOrMainDecl?._memberlessDescription ?? "nil")`"
       })
-      let declDescription = declDescriptions.isEmpty ? "<none>" : declDescriptions.joined(separator: ", ")
-      return "'\(member.name.name)' [in \(declDescription)]"
+      let declDescription = " [in \(declDescriptions.isEmpty ? "<none>" : declDescriptions.joined(separator: ", "))]"
+      return "'\(member.name.name)'\(includeMemberDecls ? declDescription : "")"
     }).joined(separator: ", ")
     return
       "ExtensionDependency(dependencyTypeName: '\(dependencyTypeName.debugDescription)', members: [\(membersDescriptions)])"
+  }
+
+  /// Debug description but removes the `TypeDeclSyntax` from `TypeMember` for easier testing.
+  fileprivate var _declarationlessDescription: String {
+    _describe(includeMemberDecls: false)
+  }
+
+  public var debugDescription: String {
+    _describe(includeMemberDecls: true)
   }
 }
 
@@ -1068,7 +1114,7 @@ extension GenericBindingFailure: CustomDebugStringConvertible where TypeName: Cu
 @_spi(_QualifiedLookupTests)
 extension GenericExtensionState: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
   public var debugDescription: String {
-    let dependenciesDescriptions = dependencies.map(\.debugDescription).joined(separator: ", ")
+    let dependenciesDescriptions = dependencies.map(\._declarationlessDescription).joined(separator: ", ")
     return "GenericExtensionState(dependencies: [\(dependenciesDescriptions)], resolvedType: \(resolvedType))"
   }
 }
