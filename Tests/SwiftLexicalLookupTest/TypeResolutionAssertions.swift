@@ -18,10 +18,18 @@ import XCTest
 
 /// A QualifiedTypeNameGlobalType represented as a `StaticString`.
 /// Provides a CustomDebugStringConvertible conformance without quotes.
-struct TestTypeName: ExpressibleByStringLiteral, CustomDebugStringConvertible {
+struct TestTypeName: Hashable, ExpressibleByStringLiteral, CustomDebugStringConvertible {
   let value: StaticString
   init(stringLiteral value: StaticString) {
     self.value = value
+  }
+
+  static func == (a: Self, b: Self) -> Bool {
+    a.value.description == b.value.description
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(value.description)
   }
 
   var debugDescription: String {
@@ -42,7 +50,9 @@ struct TypeResolutionMatcher {
   /// Annotates `TypeSyntax` with a type-resolution result using markers;
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
   enum Expectation {
-    case syntaxResolution(Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>)
+    case syntaxResolution(
+      Result<MemberLookupResult<Character>, TypeQualifierFailure<TestTypeName, Character, Character>>
+    )
     case extensionBinding(GenericExtensionState<TestTypeName>)
   }
 
@@ -273,7 +283,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
   /// `assertExpectation` forwards type syntax here.
   private func _assertTypeSyntax(
     typeSyntax: SourceFileRoot<TypeSyntax>,
-    expectedResult: Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>,
+    expectedResult: Result<MemberLookupResult<Character>, TypeQualifierFailure<TestTypeName, Character, Character>>,
     markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool,
@@ -434,14 +444,14 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     )
   }
   mutating func appendInterpolation(
-    result: Result<MemberLookupResult<Character>, TypeQualifierFailure<Character, Character>>,
+    result: Result<MemberLookupResult<Character>, TypeQualifierFailure<TestTypeName, Character, Character>>,
     file: StaticString = #file,
     line: UInt = #line
   ) {
     appendInterpolation(expects: [TypeResolutionMatcher.Expectation.syntaxResolution(result)], file: file, line: line)
   }
   mutating func appendInterpolation(
-    failure: TypeQualifierFailure<Character, Character>,
+    failure: TypeQualifierFailure<TestTypeName, Character, Character>,
     file: StaticString = #file,
     line: UInt = #line
   ) {

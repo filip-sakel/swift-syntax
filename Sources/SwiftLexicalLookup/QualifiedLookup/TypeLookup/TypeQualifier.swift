@@ -259,7 +259,7 @@ public indirect enum TypeQualifierFailure<TypeName: Sendable, MinimalNominal: Se
   //   func f(_: Self) {} // <- Look up `Self` here
   // }
   // ```
-  case cyclicalExtensionDependencies(GenericExtensionBindingCycle<TypeName>)
+  case cyclicalExtensionDependency(GenericExtensionBindingCycle<TypeName>)
 }
 
 extension TypeQualifierFailure where TypeName: CustomDebugStringConvertible {
@@ -350,7 +350,7 @@ extension TypeQualifierFailure where TypeName: CustomDebugStringConvertible {
       return ".syntaxInDisabledRegion"
     case .cyclicalTypeReference(let cycle):
       return ".cyclicalTypeReference(\(cycle.map(\.trimmedDescription)))"
-    case .cyclicalExtensionDependencies(let cycle):
+    case .cyclicalExtensionDependency(let cycle):
       return ".cyclicalExtensionDependencies(\(cycle.debugDescription))"
     }
   }
@@ -393,7 +393,7 @@ extension TypeQualifierFailure {
       .cannotExtendNonNominal(nonnominal: _), .other(_), .genericParameterOrAssociatedType,
       .ambiguousTypeDecl(_), .syntaxNotInSymbolTable, .syntaxInDisabledRegion,
       // Extension cycles are distinct
-      .cyclicalExtensionDependencies(_),
+      .cyclicalExtensionDependency(_),
       // If the above case don't directly contain a cycle
       .invalidAliasedType(_), .invalidBaseType(_):
       return nil

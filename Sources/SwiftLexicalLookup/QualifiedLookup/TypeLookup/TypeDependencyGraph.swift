@@ -94,10 +94,11 @@ extension Array {
   QualifiedTypeNameGlobalType
 >
 
-@_spi(_QualifiedLookupTests) public enum GenericBindingFailure<TypeName: Sendable>: Error {
-  case typeResolutionFailure(TypeQualifier.Failure)
-  case cannotFormCycle(GenericExtensionBindingCycle<TypeName>)
-}
+@_spi(_QualifiedLookupTests) public typealias GenericBindingFailure<
+  TypeName: Sendable & Hashable & CustomDebugStringConvertible
+> = TypeQualifierFailure<
+  TypeName, ResolvedNominalTypeReference, NominalTypeRef
+>
 @_spi(_QualifiedLookupTests) public typealias InvalidatedExtensions = [ExtensionState]
 @_spi(_QualifiedLookupTests) public typealias BindingFailure = GenericBindingFailure<QualifiedTypeNameGlobalType>
 
@@ -109,7 +110,8 @@ extension Array {
   invalidatedExtensions: InvalidatedExtensions
 )
 
-@_spi(_QualifiedLookupTests) public struct GenericExtensionState<TypeName: Sendable>: Sendable {
+@_spi(_QualifiedLookupTests)
+public struct GenericExtensionState<TypeName: Sendable & Hashable & CustomDebugStringConvertible>: Sendable {
   // Invariant: The extensions listed must be valid and successfully bound to a type in `extensionsToState`
   // Invariant: There's only one dependency per type.
   //
@@ -936,9 +938,9 @@ extension TypeDependencyGraph {
       extensionsToState[extensionDecl] = ExtensionState(
         dependencies: dependencyTracker.dependencies,
         extensionDecl: extensionDecl,
-        resolvedType: .failure(BindingFailure.cannotFormCycle(cycle)),
+        resolvedType: .failure(BindingFailure.cyclicalExtensionDependency(cycle)),
       )
-      return .success((.failure(BindingFailure.cannotFormCycle(cycle)), invalidatedExtensions: []))
+      return .success((.failure(BindingFailure.cyclicalExtensionDependency(cycle)), invalidatedExtensions: []))
     case .failure(
       .unresolvedDependencyExtension(
         let dependentExtension,
@@ -1031,10 +1033,10 @@ extension TypeDependencyGraph {
       dependencies: dependencyTracker.dependencies,
       extensionDecl: extensionDecl,
       // Only keep the qualified name (we store the main decl in `namesToTypes`)
-      resolvedType: result.map(\.qualifiedName).mapError(BindingFailure.typeResolutionFailure)
+      resolvedType: result.map(\.qualifiedName)
     )
 
-    return .success((result.mapError(BindingFailure.typeResolutionFailure), invalidatedExtensions))
+    return .success((result, invalidatedExtensions))
   }
 }
 
@@ -1094,32 +1096,6 @@ extension GenericExtensionDependency: CustomDebugStringConvertible where TypeNam
     _describe(includeMemberDecls: true)
   }
 }
-
-@_spi(_QualifiedLookupTests)
-extension GenericBindingFailure: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
-  public var debugDescription: String {
-    switch self {
-    case .typeResolutionFailure(let failure):
-      return failure.debugDescription
-    case .cannotFormCycle(let cycle):
-      return cycle.debugDescription
-    }
-  }
-}
-
-// extension Result {
-//   @_spi(_QualifiedLookupTests) public func _describe(
-//     describeTypeName: (Success) -> String
-//   ) -> String
-//   where Failure == GenericBindingFailure<Success> {
-//     switch self {
-//     case .success(let success):
-//       return "Result.success(\(describeTypeName(success)))"
-//     case .failure(let failure):
-//       return "Result.failure(\(failure.debugDescription))"
-//     }
-//   }
-// }
 
 @_spi(_QualifiedLookupTests)
 extension GenericExtensionState: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {

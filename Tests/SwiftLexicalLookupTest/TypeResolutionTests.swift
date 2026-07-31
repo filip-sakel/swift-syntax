@@ -136,7 +136,7 @@ extension GenericExtensionState where TypeName == TestTypeName {
 
     return GenericExtensionState<TestTypeName>(
       dependencies: dependencies,
-      resolvedType: Result.failure(GenericBindingFailure.cannotFormCycle(cycle))
+      resolvedType: Result.failure(GenericBindingFailure.cyclicalExtensionDependency(cycle))
     )
   }
 }
