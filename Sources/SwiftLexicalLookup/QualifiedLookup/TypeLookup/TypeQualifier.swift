@@ -1329,7 +1329,7 @@ extension TypeQualifier {
       request: "Extended type syntax `\(extensionDecl.extendedType.trimmedDescription)`",
       describe: \._debugDescription,
       perform: {
-        $0._resolveExtendedTypeSyntax(extensionDecl: extensionDecl, memberDependencies: &memberDependencies)
+        $0.__resolveExtendedTypeSyntax(extensionDecl: extensionDecl, memberDependencies: &memberDependencies)
       }
     )
   }
@@ -1433,20 +1433,23 @@ extension TypeQualifier {
     // ```
     // Then, `Self` will only try to bind `extension A.B` but to resolve `A.B`, we
     // need to fully resolve `A` so we also have to bind `extension A`.
-    while let extensionDecl = self.requestedExtensions.last {
+    while let extensionDecl = self.requestedExtensions.first {
       // We remove at the end of the iteration because we want nested syntax-resolution
       // requests to see that we're actively trying to bind this extension.
       defer {
         // TODO: Ensure .last and .removeLast are ok (or if we should do a queue-like approach.
-        let poppedExtension = self.requestedExtensions.removeLast()
+        let poppedExtension = self.requestedExtensions.removeFirst()
         assert(
           poppedExtension == extensionDecl,
-          "[SwiftLexicalLookup] Internal error: Unexpectedly found different invalidated extension when popping."
+          "[SwiftLexicalLookup] Internal error: Unexpectedly found different requested extension when popping."
         )
       }
 
       // The result can change after binding more extensions; ignore for now.
       _ = _bindRequestedExtension(extensionDecl)
+
+      // FIXME: Remove debugging `break`
+      break
     }
 
     assert(
@@ -1797,6 +1800,16 @@ extension TypeQualifier {
   fileprivate mutating func _bindExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>
   ) -> Result<GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>, Failure> {
+    if let alreadyBoundResult = symbolTable.dependencyGraph.getExtensionResolvedType(extensionDecl) {
+      return alreadyBoundResult.map({ typeInfo in
+        GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>(
+          mainDecl: typeInfo.mainDecl,
+          name: typeInfo.qualifiedName,
+          originatingSyntax: SourceFileRoot<TypeLikeSyntax>(extensionDecl.extendedType)
+        )
+      })
+    }
+
     admitExtensions([extensionDecl])
 
     // If there's not an existing extension-binding request, the extension

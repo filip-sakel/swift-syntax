@@ -524,11 +524,24 @@ final class TestQualifiedTypeName: XCTestCase {
         struct B {
           func f(_: \(nominal: "🟩")B)
         }
-        func g(_: \(nominal: "🟩")B)
       }
-      func h(_: \(nominal: "🟩")A.B)
       """ as LexicalLookupSource
     ])
+    // assertTypeResolution([
+    //   "MyFile.swift": """
+    //   \("🟥", name: "_(MyFile.swift)::A")
+    //   struct A {}
+    //
+    //   extension A {
+    //     \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
+    //     struct B {
+    //       func f(_: \(nominal: "🟩")B)
+    //     }
+    //     func g(_: \(nominal: "🟩")B)
+    //   }
+    //   func h(_: \(nominal: "🟩")A.B)
+    //   """ as LexicalLookupSource
+    // ])
   }
 
   func testSimpleRecursiveExtension() {
