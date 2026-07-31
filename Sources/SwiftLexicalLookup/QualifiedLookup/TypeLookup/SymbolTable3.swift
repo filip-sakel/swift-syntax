@@ -141,27 +141,27 @@ import SwiftSyntax
   // var dependentExtensionsStack: [PartiallyResolvedTypeIdentifier.Component: [ExtensionDeclSyntax]]
 }
 
-@_spi(_QualifiedLookup) public enum ExtensionBindingState<TypeName: Sendable>: Sendable {
-  /// Resolved to the given result
-  case resolved(ExtensionBindingResult)
-  /// Invalidated after we evaluated another extension that
-  /// introduced conflicting type members.
-  case invalidated(
-    invalidatedResult: ExtensionBindingResult,
-    invalidatingExtension: ExtensionDeclSyntax,
-    invalidatingType: TypeName,
-    formerDependencies: [ExtensionBindingResult.Dependency]
-      // firstConflictingDependency: ExtensionBindingResult.Dependency,
-      // firstConflictingTypeDecls: [TypeDeclSyntax]
-  )
-  case cannotDependOnIntroducedMembers(cycle: GenericExtensionBindingCycle<TypeName>)
-}
+// @_spi(_QualifiedLookup) public enum ExtensionBindingState<TypeName: Sendable>: Sendable {
+//   /// Resolved to the given result
+//   case resolved(ExtensionBindingResult)
+//   /// Invalidated after we evaluated another extension that
+//   /// introduced conflicting type members.
+//   case invalidated(
+//     invalidatedResult: ExtensionBindingResult,
+//     invalidatingExtension: ExtensionDeclSyntax,
+//     invalidatingType: TypeName,
+//     formerDependencies: [ExtensionBindingResult.Dependency]
+//       // firstConflictingDependency: ExtensionBindingResult.Dependency,
+//       // firstConflictingTypeDecls: [TypeDeclSyntax]
+//   )
+//   case cannotDependOnIntroducedMembers(cycle: GenericExtensionBindingCycle<TypeName>)
+// }
 
 @_spi(_QualifiedLookup) public final class SymbolTable3 {
-  @_spi(_QualifiedLookupTests)
-  public typealias ExtensionBindingState = SwiftLexicalLookup.ExtensionBindingState<
-    QualifiedTypeName
-  >
+  // @_spi(_QualifiedLookupTests)
+  // public typealias ExtensionBindingState = SwiftLexicalLookup.ExtensionBindingState<
+  //   QualifiedTypeName
+  // >
 
   public typealias Module = Identifier
   /// Invariant: moduleToSources[moduleName] != nil
@@ -448,6 +448,7 @@ extension SymbolTable3 {
         configuredRegions: configuredRegions
       )
 
+      // TODO: Rewrite so we don't even have a failure
       // Ensure we succeed (guards against future cases)
       switch nominalRegistrationResult {
       case .success(_): break
@@ -979,20 +980,20 @@ extension ExtensionBindingResult.Dependency: CustomDebugStringConvertible {
   }
 }
 
-@_spi(_QualifiedLookupTests)
-extension ExtensionBindingState: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
-  public var debugDescription: String {
-    switch self {
-    case .resolved(let bindingResult):
-      return "ExtensionBindingState.resolved(\(bindingResult))"
-    case .invalidated(let invalidatedResult, let invalidatingExtension, let invalidatingType, let formerDependencies):
-      return
-        "ExtensionBindingState.invalidated(invalidatedResult: \(invalidatedResult), invalidatingExtension: \(invalidatingExtension._memberlessDescription), invalidatingType: \(invalidatingType), formerDependencies: \(formerDependencies))"
-    case .cannotDependOnIntroducedMembers(let cycle):
-      return "ExtensionBindingState.cannotDependOnIntroducedMembers(\(cycle.debugDescription))"
-    }
-  }
-}
+// @_spi(_QualifiedLookupTests)
+// extension ExtensionBindingState: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+//   public var debugDescription: String {
+//     switch self {
+//     case .resolved(let bindingResult):
+//       return "ExtensionBindingState.resolved(\(bindingResult))"
+//     case .invalidated(let invalidatedResult, let invalidatingExtension, let invalidatingType, let formerDependencies):
+//       return
+//         "ExtensionBindingState.invalidated(invalidatedResult: \(invalidatedResult), invalidatingExtension: \(invalidatingExtension._memberlessDescription), invalidatingType: \(invalidatingType), formerDependencies: \(formerDependencies))"
+//     case .cannotDependOnIntroducedMembers(let cycle):
+//       return "ExtensionBindingState.cannotDependOnIntroducedMembers(\(cycle.debugDescription))"
+//     }
+//   }
+// }
 
 // Debug Type State
 

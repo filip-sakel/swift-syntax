@@ -67,7 +67,7 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
   /// Returns: The resolved type reference or `nil` if the `originatingSyntax`
   /// isn't registered in the symbol table.
   func resolve(
-    resolvedBase: ResolvedNominalTypeReference,
+    resolvedBase: GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>,
     originatingSyntax: SourceFileRoot<TypeLikeSyntax>,
     originatingModule: SymbolTable3.Module,
     symbolTable: borrowing SymbolTable3
@@ -80,34 +80,22 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
     let resolvedMainDecl = mainDecl ?? resolvedBase.mainDecl
 
     // Resolve the name
-    switch resolvedBase.qualifiedName {
-    case .topLevel(let globalType):
-      let memberComponents = memberNames.map({ name in
-        QualifiedTypeNameGlobalType.Component(
-          name: name,
-          file: originatingSyntax.fileRoot,
-          module: originatingModule,
-          symbolTable: symbolTable
-        )
-      })
+    let memberComponents = memberNames.map({ name in
+      QualifiedTypeNameGlobalType.Component(
+        name: name,
+        file: originatingSyntax.fileRoot,
+        module: originatingModule,
+        symbolTable: symbolTable
+      )
+    })
 
-      return ResolvedNominalTypeReference(
-        mainDecl: resolvedMainDecl,
-        name: QualifiedTypeName.topLevel(
-          globalType.addingComponents(memberComponents)
-        ),
-        originatingSyntax: originatingSyntax
-      )
-    case .nestedScope(let scope, let type):
-      return ResolvedNominalTypeReference(
-        mainDecl: resolvedMainDecl,
-        name: QualifiedTypeName.nestedScope(
-          scope: scope,
-          type: type.addingComponents(memberNames)
-        ),
-        originatingSyntax: originatingSyntax
-      )
-    }
+    return ResolvedNominalTypeReference(
+      mainDecl: resolvedMainDecl,
+      name: QualifiedTypeName.topLevel(
+        resolvedBase.qualifiedName.addingComponents(memberComponents)
+      ),
+      originatingSyntax: originatingSyntax
+    )
   }
 }
 
@@ -154,8 +142,11 @@ enum ChainResolutionFailure: Error {
 }
 
 extension SourceFileRoot where Node == NominalTypeDeclSyntax {
-  /// referencing this type from the given lookup loationFind the type chain of this source location.
-  /// External module or `nil` for this module (internal).
+  /// Walks to outer scopes to determine the type chain that uniquely identifies this type.
+  ///
+  /// Local types (e.g. `func f() { struct A { struct B {} } }`) always resolve.
+  /// Global types can also fully resolve, but they only partially resolve if
+  /// they're nested within an extension (e.g. `extension A { struct B {} }`).
   func findTypeChain(symbolTable: SymbolTable3) -> Result<ChainResolution, ChainResolutionFailure> {
     /// Parse the token into a valid identifier or throw
     func parseName(_ token: TokenSyntax) -> Result<Identifier, ChainResolutionFailure> {

@@ -231,18 +231,14 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Evaluate the extended type
       var typeQualifier = TypeQualifier(symbolTable: symbolTable, _verbose: verbose)
-      var memberDependencies = DependencyTracker()
-      let lookupResult: Result<ResolvedNominalTypeReference, TypeQualifier.Failure> =
-        typeQualifier.resolveExtendedTypeSyntax(
-          extensionDecl: extensionDecl,
-          memberDependencies: &memberDependencies
-        )
+      let lookupResult:
+        Result<GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>, TypeQualifier.Failure> =
+          typeQualifier.bindExtension(extensionDecl)
 
-      // Diagnose type-resolution failures
-      let nominalReference: ResolvedNominalTypeReference
+      // Ensure binding succeeded
       switch lookupResult {
-      case .success(let success):
-        nominalReference = success
+      case .success:
+        break
       case .failure(let failure):
         return [
           ExpectationFailure.other(
@@ -252,8 +248,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
         ]
       }
 
-      // Trigger binding and ensure we have a state
-      _ = typeQualifier.resolveNominalType(typeReference: nominalReference)
+      // After binding, we should we have a state
       guard let producedState = symbolTable.dependencyGraph.extensionsToState[extensionDecl] else {
         let availableExtensions = symbolTable.dependencyGraph.extensionsToState.keys.map(\.node._memberlessDescription)
         return [
