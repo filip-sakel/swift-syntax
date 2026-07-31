@@ -589,9 +589,9 @@ final class TestQualifiedTypeName: XCTestCase {
 
 
         \(extensionState: .bound(
-        to: "_(File.swift)::T_3",
-        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_0", members: ["Last", "T_3"])]
-      ))
+          to: "_(File.swift)::T_3",
+          dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_0", members: ["Last", "T_3"])]
+        ))
         extension T_0.Last { typealias Prev = T_2 }
 
 

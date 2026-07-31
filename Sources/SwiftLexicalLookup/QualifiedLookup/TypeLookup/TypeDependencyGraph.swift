@@ -1278,22 +1278,30 @@ extension TypeDependencyGraph {
       // Mark dependencies
       // TODO: Check if dependency<->dependent links are valid and acyclic (put check in loop below
       // and just keep track of (&diagnose) unmatched dependents)
-      let flattenedDependencies: [(ExtensionDependency, TypeMember, IntroducingExtensionOrMainDecl)] = extensionState
+      let flattenedDependencies: [(QualifiedTypeNameGlobalType, TypeMember, IntroducingExtensionOrMainDecl)] =
+        extensionState
         .dependencies.flatMap({ dependency in
           dependency.members.flatMap({ member in
-            member.decls.map({ typeDecl in (dependency, member, typeDecl.introducingExtensionOrMainDecl) })
+            // Empty decls are implicitly in `IntroducingExtensionOrMainDecl.none`
+            // (main decl)
+            guard !member.decls.isEmpty else {
+              return [(dependency.dependencyTypeName, member, IntroducingExtensionOrMainDecl.none)]
+            }
+            return member.decls.map({ typeDecl in
+              (dependency.dependencyTypeName, member, typeDecl.introducingExtensionOrMainDecl)
+            })
           })
         })
-      for (dependency, member, introducingExtensionOrMainDecl) in flattenedDependencies {
+      for (dependencyTypeName, member, introducingExtensionOrMainDecl) in flattenedDependencies {
         let memberName = member.name.name
 
         // Ensure extension dependency matches extension state
         if let dependencyExtension = introducingExtensionOrMainDecl {
           guard
             case .success(let dependencyExtendedType)? = extensionsToState[dependencyExtension]?.resolvedType,
-            dependency.dependencyTypeName == dependencyExtendedType
+            dependencyTypeName == dependencyExtendedType
           else {
-            let expectedTypeDescription = dependency.dependencyTypeName.debugDescription
+            let expectedTypeDescription = dependencyTypeName.debugDescription
             let actualTypeDescription = extensionsToState[dependencyExtension]?.resolvedType.map(\.debugDescription)
             _attachError(
               to: extensionDecl.extendedType,
@@ -1307,7 +1315,7 @@ extension TypeDependencyGraph {
         // Add dependency
         _attachNote(
           to: extensionDecl.extendedType,
-          message: "Depends on '\(dependency.dependencyTypeName)' > '\(memberName)'"
+          message: "Depends on '\(dependencyTypeName)' > '\(memberName)'"
         )
       }
 
