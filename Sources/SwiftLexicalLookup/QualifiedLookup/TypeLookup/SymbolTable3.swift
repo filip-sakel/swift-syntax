@@ -438,7 +438,7 @@ extension SymbolTable3 {
     >,
     // dependencies: [ExtensionBindingResult.Dependency]
     dependencies: DependencyTracker
-  ) -> Result<TypeDependencyGraph.InvalidatedExtensions, ExtensionBindingFailure> {
+  ) -> Result<BindingResult, ExtensionBindingFailure> {
     // TODO: Refactor; super ugly (perhaps the caller should have this responsibility;
     // also we get back a NominalTypeRef only to discard it)
     if case .success(let (qualifiedName, mainDecl)) = result {
@@ -469,6 +469,14 @@ extension SymbolTable3 {
     dependencyGraph.namesToTypes[name].map({ NominalTypeRef(qualifiedName: name, nominal: $0) })
   }
 
+  /// If the extension was admitted, gets the name of the type to which it was bound,
+  /// or the binding the failure; returns `nil` for non-admitted extensions.
+  func getExtensionResolvedType(
+    _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>
+  ) -> Result<QualifiedTypeNameGlobalType, BindingFailure>? {
+    dependencyGraph.extensionsToState[extensionDecl]?.resolvedType
+  }
+
   /// Similar to `bindExtension` but for the extensions that were invalidated.
   /// All invalidated extensions should be fixed before calling `bindExtension`
   /// again.
@@ -480,7 +488,7 @@ extension SymbolTable3 {
     >,
     // dependencies: [ExtensionBindingResult.Dependency]
     dependencies: DependencyTracker
-  ) -> Result<TypeDependencyGraph.InvalidatedExtensions, ExtensionBindingFailure> {
+  ) -> Result<BindingResult, ExtensionBindingFailure> {
     _admitExtension(
       extensionDecl,
       isUpdatingInvalidating: true,
@@ -499,7 +507,7 @@ extension SymbolTable3 {
     >,
     // dependencies: [ExtensionBindingResult.Dependency]
     dependencies: DependencyTracker
-  ) -> Result<TypeDependencyGraph.InvalidatedExtensions, ExtensionBindingFailure> {
+  ) -> Result<BindingResult, ExtensionBindingFailure> {
     // Get extension and module
     guard let module = moduleMap[extensionDecl.fileRoot] else {
       return .failure(ExtensionBindingFailure.nonRegisteredSyntaxRoot)
@@ -524,7 +532,7 @@ extension SymbolTable3 {
     let dependencyDescription = "[\(dependencies.dependencies.map(\.debugDescription).joined(separator: ", "))]"
     // Describe result
     let admissionResultDescriptions = admissionResult.map({ results in
-      results.map({ result in
+      results.invalidatedExtensions.map({ result in
         "\(result.extensionDecl._memberlessDescription) -> \(result.resolvedType)"
       }).joined(separator: ", ")
     })

@@ -98,7 +98,13 @@ extension Array {
   case typeResolutionFailure(TypeQualifier.Failure)
   case cannotFormCycle(GenericExtensionBindingCycle<TypeName>)
 }
+@_spi(_QualifiedLookupTests) public typealias InvalidatedExtensions = [ExtensionState]
 @_spi(_QualifiedLookupTests) public typealias BindingFailure = GenericBindingFailure<QualifiedTypeNameGlobalType>
+
+@_spi(_QualifiedLookupTests) public typealias BindingResult = (
+  resolvedType: Result<QualifiedTypeNameGlobalType, BindingFailure>,
+  invalidatedExtensions: InvalidatedExtensions
+)
 
 @_spi(_QualifiedLookupTests) public struct GenericExtensionState<TypeName: Sendable>: Sendable {
   // Invariant: The extensions listed must be valid and successfully bound to a type in `extensionsToState`
@@ -861,7 +867,6 @@ extension Array {
 }
 
 extension TypeDependencyGraph {
-  typealias InvalidatedExtensions = [ExtensionState]
   @_spi(_QualifiedLookupTests) public enum ExtensionAdmissionFailure: Error {
     case cannotReadmit(existingState: ExtensionState)
     case invalidDependencyExtension(extensionState: ExtensionState?)
@@ -879,7 +884,7 @@ extension TypeDependencyGraph {
     dependencyTracker: DependencyTracker,
     configuredRegions: ConfiguredRegions?,
     symbolTable: borrowing SymbolTable3
-  ) -> Result<InvalidatedExtensions, ExtensionAdmissionFailure> {
+  ) -> Result<BindingResult, ExtensionAdmissionFailure> {
     // Ensure extension isn't already bound
     if let existingExtensionState = extensionsToState[extensionDecl] {
       return .failure(.cannotReadmit(existingState: existingExtensionState))
@@ -924,12 +929,13 @@ extension TypeDependencyGraph {
       break
     case .success(let cycle):
       // Failed binding => no type members and no dependents
+      let resolvedType = Result<QualifiedTypeNameGlobalType, _>.failure(BindingFailure.cannotFormCycle(cycle))
       extensionsToState[extensionDecl] = ExtensionState(
         dependencies: dependencyTracker.dependencies,
         extensionDecl: extensionDecl,
-        resolvedType: Result.failure(BindingFailure.cannotFormCycle(cycle)),
+        resolvedType: resolvedType,
       )
-      return .success([])
+      return .success((resolvedType, invalidatedExtensions: []))
     case .failure(
       .unresolvedDependencyExtension(
         let dependentExtension,
@@ -1018,13 +1024,14 @@ extension TypeDependencyGraph {
     // === Save Extension ===
 
     // Save extension (newly bound extension doesn't add type dependents)
+    let resolvedType = result.map(\.qualifiedName).mapError(BindingFailure.typeResolutionFailure)
     extensionsToState[extensionDecl] = ExtensionState(
       dependencies: dependencyTracker.dependencies,
       extensionDecl: extensionDecl,
-      resolvedType: result.map(\.qualifiedName).mapError(BindingFailure.typeResolutionFailure)
+      resolvedType: resolvedType
     )
 
-    return .success(invalidatedExtensions)
+    return .success((resolvedType, invalidatedExtensions))
   }
 }
 
