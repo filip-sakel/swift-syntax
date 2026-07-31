@@ -469,14 +469,6 @@ extension SymbolTable3 {
     dependencyGraph.namesToTypes[name].map({ NominalTypeRef(qualifiedName: name, nominal: $0) })
   }
 
-  /// If the extension was admitted, gets the name of the type to which it was bound,
-  /// or the binding the failure; returns `nil` for non-admitted extensions.
-  func getExtensionResolvedType(
-    _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>
-  ) -> Result<QualifiedTypeNameGlobalType, BindingFailure>? {
-    dependencyGraph.extensionsToState[extensionDecl]?.resolvedType
-  }
-
   /// Similar to `bindExtension` but for the extensions that were invalidated.
   /// All invalidated extensions should be fixed before calling `bindExtension`
   /// again.

@@ -102,7 +102,10 @@ extension Array {
 @_spi(_QualifiedLookupTests) public typealias BindingFailure = GenericBindingFailure<QualifiedTypeNameGlobalType>
 
 @_spi(_QualifiedLookupTests) public typealias BindingResult = (
-  resolvedType: Result<QualifiedTypeNameGlobalType, BindingFailure>,
+  resolvedTypeName: Result<
+    (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
+    BindingFailure
+  >,
   invalidatedExtensions: InvalidatedExtensions
 )
 
@@ -114,6 +117,7 @@ extension Array {
   @_spi(_QualifiedLookupTests) public let dependencies: [GenericExtensionDependency<TypeName>],
     // TODO: Remove this property
     extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
+    /// The resolved type must be valid in `namesToTypes`
     resolvedType: Result<TypeName, GenericBindingFailure<TypeName>>
 
   @_spi(_QualifiedLookupTests) public init(
@@ -929,13 +933,12 @@ extension TypeDependencyGraph {
       break
     case .success(let cycle):
       // Failed binding => no type members and no dependents
-      let resolvedType = Result<QualifiedTypeNameGlobalType, _>.failure(BindingFailure.cannotFormCycle(cycle))
       extensionsToState[extensionDecl] = ExtensionState(
         dependencies: dependencyTracker.dependencies,
         extensionDecl: extensionDecl,
-        resolvedType: resolvedType,
+        resolvedType: .failure(BindingFailure.cannotFormCycle(cycle)),
       )
-      return .success((resolvedType, invalidatedExtensions: []))
+      return .success((.failure(BindingFailure.cannotFormCycle(cycle)), invalidatedExtensions: []))
     case .failure(
       .unresolvedDependencyExtension(
         let dependentExtension,
@@ -1024,14 +1027,14 @@ extension TypeDependencyGraph {
     // === Save Extension ===
 
     // Save extension (newly bound extension doesn't add type dependents)
-    let resolvedType = result.map(\.qualifiedName).mapError(BindingFailure.typeResolutionFailure)
     extensionsToState[extensionDecl] = ExtensionState(
       dependencies: dependencyTracker.dependencies,
       extensionDecl: extensionDecl,
-      resolvedType: resolvedType
+      // Only keep the qualified name (we store the main decl in `namesToTypes`)
+      resolvedType: result.map(\.qualifiedName).mapError(BindingFailure.typeResolutionFailure)
     )
 
-    return .success((resolvedType, invalidatedExtensions))
+    return .success((result.mapError(BindingFailure.typeResolutionFailure), invalidatedExtensions))
   }
 }
 
@@ -1329,6 +1332,39 @@ extension TypeDependencyGraph {
     }
 
     return diagnostics
+  }
+}
+
+extension TypeDependencyGraph {
+  /// Gets the name and main decl of the type to which the extension is bound,
+  /// or the binding the failure; returns `nil` for non-admitted extensions.
+  func getExtensionResolvedType(
+    _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>
+  ) -> Result<
+    (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
+    BindingFailure
+  >? {
+    // Get the extension's state (or `nil` if unadmitted)
+    guard let extensionState = extensionsToState[extensionDecl] else { return nil }
+
+    // Extract the bound type (or return the failure)
+    let boundTypeName: QualifiedTypeNameGlobalType
+    switch extensionState.resolvedType {
+    case .success(let success):
+      boundTypeName = success
+    case .failure(let failure):
+      return .failure(failure)
+    }
+
+    // Get the type's main declaration (to form a `ResolvedNominalTypeReference`)
+    guard let boundType = namesToTypes[boundTypeName] else {
+      // By `extensionsToState` invariant.
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Extension `\(extensionDecl._memberlessDescription)` resolved to unregistered type `\(boundTypeName)`."
+      )
+    }
+
+    return Result.success((qualifiedName: boundTypeName, mainDecl: boundType.mainDecl.declGroup))
   }
 }
 

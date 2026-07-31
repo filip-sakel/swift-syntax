@@ -53,32 +53,35 @@ extension Result where Success == [TypeDeclSyntax], Failure: CustomDebugStringCo
 //     }
 //   }
 // }
-extension Result
-where Success == MemberLookupResult<ResolvedNominalTypeReference>, Failure: CustomDebugStringConvertible {
-  fileprivate func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
-    switch self {
-    case .success(let success):
-      return
-        ".success(\(success._describe(describeMembers: { $0.map({ $0._describe(describeTypeName: describeTypeName) }).joined(separator: ", ") }))"
-    case .failure(let error):
-      return ".error(\(error.debugDescription))"
-    }
-  }
-}
+// extension Result
+// where Success == MemberLookupResult<ResolvedNominalTypeReference>, Failure: CustomDebugStringConvertible {
+//   fileprivate func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
+//     switch self {
+//     case .success(let success):
+//       return
+//         ".success(\(success._describe(describeMembers: { $0.map({ $0._describe(describeTypeName: describeTypeName) }).joined(separator: ", ") }))"
+//     case .failure(let error):
+//       return ".error(\(error.debugDescription))"
+//     }
+//   }
+// }
 
 /// The minimal defining components of a nominal type: the main declaration and the qualified name.
 /// Unlike ``NominalType``, doesn't include extensions.
 ///
 /// TODO: Make into `NominalTypeRef` + `TypeLikeSyntax`
-@_spi(_QualifiedLookup) public struct ResolvedNominalTypeReference: Sendable, Hashable, CustomDebugStringConvertible {
+@_spi(_QualifiedLookup)
+public struct GenericResolvedNominalTypeReference<TypeName: Sendable & Hashable & CustomDebugStringConvertible>:
+  Sendable, Hashable, CustomDebugStringConvertible
+{
   public let mainDecl: SourceFileRoot<NominalTypeDeclSyntax>
-  public let qualifiedName: QualifiedTypeName
+  public let qualifiedName: TypeName
   // public let nominalTypeRef: NominalTypeRef
   public let originatingSyntax: SourceFileRoot<TypeLikeSyntax>
 
   @_spi(_QualifiedLookup) public init(
     mainDecl: SourceFileRoot<NominalTypeDeclSyntax>,
-    name: QualifiedTypeName,
+    name: TypeName,
     // nominalTypeRef: NominalTypeRef,
     originatingSyntax: SourceFileRoot<TypeLikeSyntax>,
   ) {
@@ -88,15 +91,25 @@ where Success == MemberLookupResult<ResolvedNominalTypeReference>, Failure: Cust
     self.originatingSyntax = originatingSyntax
   }
 
-  @_spi(_QualifiedLookupTests) public func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
-    "\(describeTypeName(qualifiedName)) (\(mainDecl.kind))"
-    // "\(nominalTypeRef._describe(describeTypeName: describeTypeName)) \(mainDecl.kind)"
-  }
-
   public var debugDescription: String {
-    _describe(describeTypeName: \.debugDescription)
+    "\(qualifiedName.debugDescription) (\(mainDecl.kind))"
   }
 }
+
+@_spi(_QualifiedLookup) public typealias ResolvedNominalTypeReference = GenericResolvedNominalTypeReference<
+  QualifiedTypeName
+>
+
+extension ResolvedNominalTypeReference {
+  init(_ globalTypeReference: GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>) {
+    self.init(
+      mainDecl: globalTypeReference.mainDecl,
+      name: QualifiedTypeName.topLevel(globalTypeReference.qualifiedName),
+      originatingSyntax: globalTypeReference.originatingSyntax
+    )
+  }
+}
+
 // TODO: Remove
 // extension ResolvedNominalTypeReference {
 //   @_spi(_QualifiedLookupTests) public static func _mockMarkerType(
@@ -121,7 +134,9 @@ where Success == MemberLookupResult<ResolvedNominalTypeReference>, Failure: Cust
 // }
 
 @_spi(_QualifiedLookup)
-public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNominal: Sendable>: Error {
+public indirect enum TypeQualifierFailure<TypeName: Sendable, MinimalNominal: Sendable, ExtendedNominal: Sendable>:
+  Error
+{
   /// Cannot find the given type identifier in scope (using unqualified lookup).
   ///
   /// E.g.,
@@ -230,9 +245,24 @@ public indirect enum TypeQualifierFailure<MinimalNominal: Sendable, ExtendedNomi
   /// The cycle consists of all the type syntax reference we resolved
   /// to get to the cycle (minus the starting syntax).
   case cyclicalTypeReference(cycle: [TypeSyntax])
+
+  // The type resolution depends on a cyclical extension: an extension that
+  // introduces type members on which its own resolution depends.
+  //
+  // E.g.
+  // ```swift
+  // struct A {}
+  // extension A { typealias B = A }
+  // extension A.B {
+  //   struct A {}
+  //
+  //   func f(_: Self) {} // <- Look up `Self` here
+  // }
+  // ```
+  case cyclicalExtensionDependencies(GenericExtensionBindingCycle<TypeName>)
 }
 
-extension TypeQualifierFailure {
+extension TypeQualifierFailure where TypeName: CustomDebugStringConvertible {
   /// Produce a simplified description for debugging.
   ///
   /// Namely, for syntax nodes we use `.trimmedDescription` and for `ResolvedNominalTypeReference`
@@ -320,12 +350,19 @@ extension TypeQualifierFailure {
       return ".syntaxInDisabledRegion"
     case .cyclicalTypeReference(let cycle):
       return ".cyclicalTypeReference(\(cycle.map(\.trimmedDescription)))"
+    case .cyclicalExtensionDependencies(let cycle):
+      return ".cyclicalExtensionDependencies(\(cycle.debugDescription))"
     }
   }
 }
 
-extension TypeQualifierFailure: CustomDebugStringConvertible
-where MinimalNominal: CustomDebugStringConvertible, ExtendedNominal: CustomDebugStringConvertible {
+extension TypeQualifierFailure:
+  CustomDebugStringConvertible
+where
+  TypeName: CustomDebugStringConvertible,
+  MinimalNominal: CustomDebugStringConvertible,
+  ExtendedNominal: CustomDebugStringConvertible
+{
   func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
     _describeDebug(
       resolveMininalNominal: \.debugDescription,
@@ -355,6 +392,8 @@ extension TypeQualifierFailure {
     case .noTypeInScope, .cannotComposeNonClassOrProtocol(_), .noTypeMember(member: _, in: _),
       .cannotExtendNonNominal(nonnominal: _), .other(_), .genericParameterOrAssociatedType,
       .ambiguousTypeDecl(_), .syntaxNotInSymbolTable, .syntaxInDisabledRegion,
+      // Extension cycles are distinct
+      .cyclicalExtensionDependencies(_),
       // If the above case don't directly contain a cycle
       .invalidAliasedType(_), .invalidBaseType(_):
       return nil
@@ -414,7 +453,9 @@ extension TypeQualifierFailure {
     return result
   }
 
-  public typealias Failure = TypeQualifierFailure<ResolvedNominalTypeReference, NominalTypeRef>
+  public typealias Failure = TypeQualifierFailure<
+    QualifiedTypeNameGlobalType, ResolvedNominalTypeReference, NominalTypeRef
+  >
 
   let symbolTable: SymbolTable3
   var requestedExtensions: OrderedSet<SourceFileRoot<ExtensionDeclSyntax>> = []
@@ -837,11 +878,10 @@ extension TypeQualifierFailure {
         // One of the lookup results will be to look for `A` in `extension Int`.
         // The enclosing type is `Swift::Int.(MyFile.swift)::A`. Then, to find `A.B` we'll
         // just append `.A` to the member chain. Hence, we look for `.A.B` in `Swift::Int`
-        let extendedNominal = resolveExtendedTypeSyntax(
-          extensionDecl: extensionDecl,
-          memberDependencies: &memberDependencies
-        )
-        enclosingTypeResult = extendedNominal.map({ MemberLookupResult.memberResults([$0]) })
+        let extendedNominal = bindExtension(extensionDecl)
+        enclosingTypeResult = extendedNominal.map({
+          MemberLookupResult.memberResults([ResolvedNominalTypeReference($0)])
+        })
         lookForSelectedMember = findSelectedMember
       case .lookForGenericParameters(let extensionDecl):
         // TODO: Implement logging for all unqualified lookup results
@@ -1406,7 +1446,7 @@ extension TypeQualifierFailure {
   /// invalidated extensions.
   fileprivate mutating func bindExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>
-  ) -> Result<QualifiedTypeNameGlobalType, BindingFailure> {
+  ) -> Result<GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>, BindingFailure> {
     withLogging(
       request: "Binding `\(extensionDecl._memberlessDescription)`",
       describe: \._debugDescription
@@ -1421,10 +1461,20 @@ extension TypeQualifierFailure {
   /// invalidated extensions.
   fileprivate mutating func _bindExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>
-  ) -> Result<QualifiedTypeNameGlobalType, BindingFailure> {
+  ) -> Result<GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>, BindingFailure> {
+    func mapToNominalTypeReference(
+      _ typeInfo: (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>)
+    ) -> GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType> {
+      GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>(
+        mainDecl: typeInfo.mainDecl,
+        name: typeInfo.qualifiedName,
+        originatingSyntax: SourceFileRoot<TypeLikeSyntax>(extensionDecl.extendedType)
+      )
+    }
+
     // Return saved result if the extension was already admitted to the graph
-    if let existingResolution = symbolTable.getExtensionResolvedType(extensionDecl) {
-      return existingResolution
+    if let existingResolution = symbolTable.dependencyGraph.getExtensionResolvedType(extensionDecl) {
+      return existingResolution.map(mapToNominalTypeReference(_:))
     }
 
     // TODO: Extension binding uses its own visitedTypeSyntax; also pass `visitedTypeSyntax` to every function.
@@ -1566,6 +1616,6 @@ extension TypeQualifierFailure {
       invalidatedExtensionsStack.append(contentsOf: nestedInvalidatedExtensions)
     }
 
-    return resolvedType
+    return resolvedType.map(mapToNominalTypeReference(_:))
   }
 }
