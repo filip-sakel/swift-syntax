@@ -1114,8 +1114,15 @@ extension GenericBindingFailure: CustomDebugStringConvertible where TypeName: Cu
 @_spi(_QualifiedLookupTests)
 extension GenericExtensionState: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
   public var debugDescription: String {
-    let dependenciesDescriptions = dependencies.map(\._declarationlessDescription).joined(separator: ", ")
-    return "GenericExtensionState(dependencies: [\(dependenciesDescriptions)], resolvedType: \(resolvedType))"
+    let dependenciesDescriptions = dependencies.map(\._declarationlessDescription).joined(separator: ",\n    ")
+    return """
+      GenericExtensionState(
+        dependencies: [
+          \(dependenciesDescriptions)
+        ],
+        resolvedType: \(resolvedType._debugDescription.replacing("\n", with: "\n  "))
+      )
+      """
   }
 }
 
@@ -1313,15 +1320,21 @@ extension TypeDependencyGraph {
 @_spi(_QualifiedLookupTests)
 extension GenericDependencyCycleElement: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
   public var debugDescription: String {
-    "DependencyCycleElement(introducingTypeDecl: \(introducingTypeDecl?._memberlessDescription ?? "nil"), extensionDecl: `\(extensionDecl._memberlessDescription)`, boundType: '\(boundType.debugDescription)'"
+    "DependencyCycleElement(introducingTypeDecl: `\(introducingTypeDecl?._memberlessDescription ?? "nil")`, extensionDecl: `\(extensionDecl._memberlessDescription)`, boundType: '\(boundType.debugDescription)'"
   }
 }
 
 @_spi(_QualifiedLookupTests)
 extension GenericExtensionBindingCycle: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
   public var debugDescription: String {
-    let pathDescriptions = dependencyPath.map(\.debugDescription).joined(separator: ", ")
-    return
-      "ExtensionBindingCycle(dependencyPath: [\(pathDescriptions)], dependencyMember: '\(dependencyMember.name)')"
+    let pathDescriptions = dependencyPath.map(\.debugDescription).joined(separator: ",\n    ")
+    return """
+      ExtensionBindingCycle(
+        dependencyPath: [
+          \(pathDescriptions)
+        ],
+        dependencyMember: '\(dependencyMember.name)'
+      )"
+      """
   }
 }

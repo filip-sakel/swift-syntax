@@ -43,24 +43,88 @@ where
 
 // Convenience initializer
 
-struct TestDependency {
-  let type: TestTypeName
+struct ExtensionDependency {
+  let baseType: TestTypeName
   let members: [StaticString]
 }
 
 extension GenericExtensionState where TypeName == TestTypeName {
-  static func invalidCycle(
-    dependencies: [TestDependency],
+  /// Creates a mock extension state to check an extension's dependencies,
+  /// bound type, or failure to bind due to cycles.
+  ///
+  /// Note: Because `GenericBindingFailure` contains `TypeQualifier.Failure`
+  /// (which uses actual `ResolvedNominalTypeReference` and not mock types),
+  /// it's hard to test type-resolution failures. You may instead use regular
+  /// type-resolution tests and only use this initializer to test extension
+  /// binding.
+  fileprivate init(
+    dependencies: [ExtensionDependency],
+    resolvedType: Result<TestTypeName, GenericBindingFailure<TestTypeName>>,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) {
+    // Create fake extension (won't be checked)
+    //
+    // Wrap the type syntax in a file
+    var parser = Parser("extension")
+    let sourceFile = SourceFileSyntax.parse(from: &parser)
+    let mockExtension = SourceFileRoot(sourceFile.children(ofType: ExtensionDeclSyntax.self)[0])!
+
+    self.init(
+      _uncheckedDependencies: dependencies.map({
+        let mappedMembers: [TypeMember] = $0.members.map({ member in
+          TypeMember(name: Identifier(canonicalName: member), decls: [])
+        })
+        return GenericExtensionDependency<TestTypeName>(dependencyTypeName: $0.baseType, members: mappedMembers)
+      }),
+      // Extension decl won't be checked
+      extensionDecl: mockExtension,
+      resolvedType: resolvedType
+    )
+  }
+
+  fileprivate static func bound(
+    to typeName: TestTypeName,
+    dependencies: [ExtensionDependency]
+  ) -> GenericExtensionState {
+    GenericExtensionState<TestTypeName>(dependencies: dependencies, resolvedType: .success(typeName))
+  }
+
+  fileprivate static func invalidCycle(
+    dependencies: [ExtensionDependency],
     cycleElements: [(introducingDecl: String?, extension: String, base: TestTypeName)],
-    conflictingMember: StaticString
+    conflictingMember: StaticString,
+    file: StaticString = #file,
+    line: UInt = #line
   ) -> GenericExtensionState {
     let dependencyPath: [GenericDependencyCycleElement<TestTypeName>] = cycleElements.map({
-      (introducingTypeDecl, extensionDecl, baseTypeName) -> GenericDependencyCycleElement<TestTypeName> in
-      let introducingTypeDecl = introducingTypeDecl.map(DeclSyntax.init(stringLiteral:))
-      let extensionDecl = DeclSyntax.init(stringLiteral: extensionDecl)
+      (introducingTypeDeclText, extensionDeclText, baseTypeName) -> GenericDependencyCycleElement<TestTypeName> in
+      let introducingTypeDecl: TypeDeclSyntax?
+      if let introducingTypeDeclText {
+        let typeDeclRaw = DeclSyntax(stringLiteral: introducingTypeDeclText)
+        guard let typeDecl = Syntax(typeDeclRaw).as(TypeDeclSyntax.self) else {
+          fatalError(
+            "Couldn't cast the cycle element's 'introducingMember' `\(introducingTypeDeclText)` of kind '\(typeDeclRaw.kind)' to TypeDeclSyntax",
+            file: file,
+            line: line
+          )
+        }
+        introducingTypeDecl = typeDecl
+      } else {
+        introducingTypeDecl = nil
+      }
+
+      let extensionDeclRaw = DeclSyntax(stringLiteral: extensionDeclText)
+      guard let extensionDecl = extensionDeclRaw.as(ExtensionDeclSyntax.self) else {
+        fatalError(
+          "Couldn't cast the cycle element's 'extension' `\(extensionDeclText)` of kind '\(extensionDeclRaw.kind)' to ExtensionDeclSyntax",
+          file: file,
+          line: line
+        )
+      }
       return GenericDependencyCycleElement(
-        introducingTypeDecl: introducingTypeDecl.map(Syntax.init(_:))?.cast(TypeDeclSyntax.self),
-        extensionDecl: extensionDecl.cast(ExtensionDeclSyntax.self),
+        introducingTypeDecl: introducingTypeDecl,
+        extensionDecl: extensionDecl,
         boundType: baseTypeName,
       )
     })
@@ -70,22 +134,8 @@ extension GenericExtensionState where TypeName == TestTypeName {
       dependencyMember: Identifier(canonicalName: conflictingMember)
     )
 
-    // Create fake extension (won't be checked)
-    //
-    // Wrap the type syntax in a file
-    var parser = Parser("extension")
-    let sourceFile = SourceFileSyntax.parse(from: &parser)
-    let mockExtension = SourceFileRoot(sourceFile.children(ofType: ExtensionDeclSyntax.self)[0])!
-
-    return GenericExtensionState(
-      _uncheckedDependencies: dependencies.map({
-        let mappedMembers: [TypeMember] = $0.members.map({ member in
-          TypeMember(name: Identifier(canonicalName: member), decls: [])
-        })
-        return GenericExtensionDependency<TestTypeName>(dependencyTypeName: $0.type, members: mappedMembers)
-      }),
-      // Won't be checked
-      extensionDecl: mockExtension,
+    return GenericExtensionState<TestTypeName>(
+      dependencies: dependencies,
       resolvedType: Result.failure(GenericBindingFailure.cannotFormCycle(cycle))
     )
   }
@@ -492,7 +542,7 @@ final class TestQualifiedTypeName: XCTestCase {
           dependencies: [
             // We evidently depend on `A.B`. We also depend on `_(MyFile.swift)::A`
             // not having a type member `A` to that `typealias B = A` resolves to `A`.
-            TestDependency(type: "_(MyFile.swift)::A", members: ["B", "A"]),
+            ExtensionDependency(baseType: "_(MyFile.swift)::A", members: ["B", "A"]),
           ],
           // This extension violates its own dependency
           cycleElements: [],
@@ -519,64 +569,121 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   // TODO: Reenable
-  func PathologicalV3() {
+  func testPathologicalV3() {
     assertTypeResolution([
-      "MyFile.swift": """
-      struct T_0 {}
-      struct T_1 {}
-      struct T_2 {}
-      struct T_3 {}
+      "File.swift": """
+        struct T_0 {}
+        struct T_1 {}
+        struct T_2 {}
+        struct T_3 {}
 
-      extension T_0 { typealias Last = T_3 }
-      //        |- Depends on : ()
-      //        `- Introduces : T_0>Last
-      //
-      //              `- ℹ️ note:  For `T_0`'s member `Last` to resolve to `output.T_3`,
-      //                          `T_0` must not contain any type member named `T_3`.
-
-      extension T_0.Last { typealias Prev = T_2 }
-      //        |- Depends on : T_0>Last, T_0>T_3
-      //        |- Resolves to: T_3
-      //        `- Introduces : T_3>Prev
-      //
-      //           `- ℹ️ note: `T_0`'s member `Last` is declared in `extension T_0.Last`
-
-      // j=3
-      extension T_3.Prev { typealias Prev = T_1 }
-      //        |- Depends on : T_3>Prev, T_3>T_2
-      //        |- Resolves to: T_2
-      //        `- Introduces : T_2>Prev
-      //
-      //           `- ℹ️ note: `T_3`'s member `Prev` is declared in `extension T_0.Last`
+        extension T_0 { typealias Last = T_3 }
 
 
-      // j=2
-      extension T_2.Prev { typealias Prev = T_0 }
-      //        |- Depends on : T_2>Prev, T_2>T_1
-      //        |- Resolves to: T_1
-      //        `- Introduces : T_1>Prev
-      //
-      //           `- ℹ️ note: `T_2`'s member `Prev` is declared in `extension T_3.Prev`
+        //        |- Depends on : ()
+        //        `- Introduces : T_0>Last
+        //
+        //              `- ℹ️ note:  For `T_0`'s member `Last` to resolve to `output.T_3`,
+        //                          `T_0` must not contain any type member named `T_3`.
 
-      \(extensionState: .invalidCycle(
-        dependencies: [],
-        cycleElements: [
-          (introducingDecl: "", extension: "extension A { typealias B = A }", base: "_(MyFile.swift)::A")
-        ],
-        conflictingMember: "struct A {}"
+
+
+        \(extensionState: .bound(
+        to: "_(File.swift)::T_3",
+        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_0", members: ["Last", "T_3"])]
       ))
-      extension T_1.Prev { struct T_3 {} }
-      //        |- Depends on : T_1>Prev, T_1>T_0
-      //        |- Resolves to: T_0
-      //        `- Introduces : T_0>T_3     <- collides with the first extension's empty dependency
-      //
-      //           `- ℹ️ note: `T_1`'s member `Prev` is declared in `extension T_2.Prev`
-      // `- ❌ error: Resolving `extension T_1.Prev` to the extended type `T_0` requires that `T_0`
-      //           have no type member `T_3`, but the extension introduces `T_3`.
+        extension T_0.Last { typealias Prev = T_2 }
 
-      extension T_1 { struct T_0 {} }
+
+        //        |- Depends on : T_0>Last, T_0>T_3
+        //        |- Resolves to: T_3
+        //        `- Introduces : T_3>Prev
+        //
+        //           `- ℹ️ note: `T_0`'s member `Last` is declared in `extension T_0.Last`
       """
     ])
+
+    // assertTypeResolution([
+    //   "File.swift": """
+    //   struct T_0 {}
+    //   struct T_1 {}
+    //   struct T_2 {}
+    //   struct T_3 {}
+    //
+    //   extension T_0 { typealias Last = T_3 }
+    //
+    //
+    //   //        |- Depends on : ()
+    //   //        `- Introduces : T_0>Last
+    //   //
+    //   //              `- ℹ️ note:  For `T_0`'s member `Last` to resolve to `output.T_3`,
+    //   //                          `T_0` must not contain any type member named `T_3`.
+    //
+    //
+    //
+    //   \(extensionState: .bound(
+    //     to: "_(File.swift)::T_3",
+    //     dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_0", members: ["Last", "T_3"])]
+    //   ))
+    //   extension T_0.Last { typealias Prev = T_2 }
+    //
+    //
+    //   //        |- Depends on : T_0>Last, T_0>T_3
+    //   //        |- Resolves to: T_3
+    //   //        `- Introduces : T_3>Prev
+    //   //
+    //   //           `- ℹ️ note: `T_0`'s member `Last` is declared in `extension T_0.Last`
+    //
+    //
+    //
+    //
+    //   // j=3
+    //   extension T_3.Prev { typealias Prev = T_1 }
+    //
+    //
+    //   //        |- Depends on : T_3>Prev, T_3>T_2
+    //   //        |- Resolves to: T_2
+    //   //        `- Introduces : T_2>Prev
+    //   //
+    //   //           `- ℹ️ note: `T_3`'s member `Prev` is declared in `extension T_0.Last`
+    //
+    //
+    //
+    //
+    //
+    //   // j=2
+    //   extension T_2.Prev { typealias Prev = T_0 }
+    //
+    //
+    //   //        |- Depends on : T_2>Prev, T_2>T_1
+    //   //        |- Resolves to: T_1
+    //   //        `- Introduces : T_1>Prev
+    //   //
+    //   //           `- ℹ️ note: `T_2`'s member `Prev` is declared in `extension T_3.Prev`
+    //
+    //   \(extensionState: .invalidCycle(
+    //     dependencies: [
+    //       ExtensionDependency(baseType: "T_1", members: ["Prev", "T_0"])
+    //     ],
+    //     cycleElements: [
+    //       (introducingDecl: "typealias Prev = T_0", extension: "extension T_2.Prev {}", base: "_(File.swift)::T_1"),
+    //       (introducingDecl: "typealias Prev = T_1", extension: "extension T_3.Prev {}", base: "_(File.swift)::T_2"),
+    //       (introducingDecl: "typealias Prev = T_2", extension: "extension T_0.Last {}", base: "_(File.swift)::T_3"),
+    //     ],
+    //     conflictingMember: "T_3"
+    //   ))
+    //   extension T_1.Prev { struct T_3 {} }
+    //   //        |- Depends on : T_1>Prev, T_1>T_0
+    //   //        |- Resolves to: T_0
+    //   //        `- Introduces : T_0>T_3     <- collides with the first extension's empty dependency
+    //   //
+    //   //           `- ℹ️ note: `T_1`'s member `Prev` is declared in `extension T_2.Prev`
+    //   // `- ❌ error: Resolving `extension T_1.Prev` to the extended type `T_0` requires that `T_0`
+    //   //           have no type member `T_3`, but the extension introduces `T_3`.
+    //
+    //   extension T_1 { struct T_0 {} }
+    //   """
+    // ])
   }
 
   // TODO: Add test where extension state resolves to a cycle, but

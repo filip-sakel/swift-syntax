@@ -14,7 +14,7 @@ import SwiftIfConfig
 import SwiftSyntax
 
 extension Result where Success: CustomDebugStringConvertible, Failure: CustomDebugStringConvertible {
-  fileprivate var _debugDescription: String {
+  var _debugDescription: String {
     switch self {
     case .success(let success):
       return ".success(\(success.debugDescription))"
@@ -43,16 +43,16 @@ extension Result where Success == [TypeDeclSyntax], Failure: CustomDebugStringCo
     }
   }
 }
-extension Result where Success == ResolvedNominalTypeReference, Failure: CustomDebugStringConvertible {
-  fileprivate func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
-    switch self {
-    case .success(let success):
-      return ".success(\(success._describe(describeTypeName: describeTypeName))"
-    case .failure(let error):
-      return ".error(\(error.debugDescription))"
-    }
-  }
-}
+// extension Result where Success == ResolvedNominalTypeReference, Failure: CustomDebugStringConvertible {
+//   fileprivate func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
+//     switch self {
+//     case .success(let success):
+//       return ".success(\(success._describe(describeTypeName: describeTypeName))"
+//     case .failure(let error):
+//       return ".error(\(error.debugDescription))"
+//     }
+//   }
+// }
 extension Result
 where Success == MemberLookupResult<ResolvedNominalTypeReference>, Failure: CustomDebugStringConvertible {
   fileprivate func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
