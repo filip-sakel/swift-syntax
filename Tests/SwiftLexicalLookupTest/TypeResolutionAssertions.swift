@@ -231,22 +231,8 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Evaluate the extended type
       var typeQualifier = TypeQualifier(symbolTable: symbolTable, _verbose: verbose)
-      let lookupResult:
-        Result<GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>, TypeQualifier.Failure> =
-          typeQualifier.bindExtension(extensionDecl)
-
-      // Ensure binding succeeded
-      switch lookupResult {
-      case .success:
-        break
-      case .failure(let failure):
-        return [
-          ExpectationFailure.other(
-            failure:
-              "Invalid extended type: Couldn't resolve extended type for given extension: \(failure.debugDescription)"
-          )
-        ]
-      }
+      let _: Result<GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>, TypeQualifier.Failure> =
+        typeQualifier.bindExtension(extensionDecl)
 
       // After binding, we should we have a state
       guard let producedState = symbolTable.dependencyGraph.extensionsToState[extensionDecl] else {

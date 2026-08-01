@@ -533,7 +533,7 @@ extension SymbolTable3 {
     let dependencyGraphDescription = _describeDependencyGraph()
     print(String(repeating: "-", count: 80))
     print(
-      "After \(actionVerb) extension `\(extensionDecl._memberlessDescription)` to \(result.map(\.qualifiedName.debugDescription)) with dependencies: \(dependencyDescription); admission result: \(admissionResultDescriptions), new dependency graph is:"
+      "After \(actionVerb) extension `\(extensionDecl._memberlessDescription)` to \(result.map(\.qualifiedName.debugDescription)) with dependencies: \(dependencyDescription); admission result (i.e. invalidated exts): \(admissionResultDescriptions), new dependency graph is:"
     )
     print(dependencyGraphDescription)
     print(String(repeating: "-", count: 80) + "\n")

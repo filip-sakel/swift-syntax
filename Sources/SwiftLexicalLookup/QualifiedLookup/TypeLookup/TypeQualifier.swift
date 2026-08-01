@@ -1473,6 +1473,16 @@ extension TypeQualifier {
     }
   }
 
+  /// Prepends given elements. New elements get added as expected and existing elements
+  /// get moved to the front of the list. Despite the current elements of the ordered set,
+  /// the new set will always start out with a deduplicated set of `elements`.
+  func prepend<E: Hashable>(to orderedSet: inout OrderedSet<E>, contentsOf elements: [E]) {
+    let oldElements = orderedSet
+    orderedSet.removeAll(keepingCapacity: true)
+    orderedSet.append(contentsOf: elements)
+    orderedSet.append(contentsOf: oldElements)
+  }
+
   /// Implements `bindRequestedExtension`
   ///
   /// - Precondition: `extensionDecl` must be in `self.requestedExtensions`
@@ -1576,6 +1586,7 @@ extension TypeQualifier {
     )
 
     // TODO: Does this even work?
+    // prepend(to: &self.requestedExtensions, contentsOf: invalidatedExtensions.map(\.extensionDecl))
     self.requestedExtensions.append(contentsOf: invalidatedExtensions.map(\.extensionDecl))
     return resolvedType.map(mapToNominalTypeReference(_:))
 

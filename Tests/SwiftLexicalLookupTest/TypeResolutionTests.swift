@@ -569,7 +569,7 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   // TODO: Reenable
-  func testPathologicalV3() {
+  func testPathologicalN3() {
     assertTypeResolution([
       "File.swift": """
       struct T_0 {}
@@ -639,12 +639,17 @@ final class TestQualifiedTypeName: XCTestCase {
         ],
         conflictingMember: "T_3"
       ))
+      // FIXME: How do we not detect a cycle here gng?
       extension T_1.Prev { struct T_3 {} }
+
+
+      // *First pass*:
       //        |- Depends on : T_1>Prev, T_1>T_0
       //        |- Resolves to: T_0
       //        `- Introduces : T_0>T_3     <- collides with the first extension's empty dependency
       //
       //           `- ℹ️ note: `T_1`'s member `Prev` is declared in `extension T_2.Prev`
+      // *Second pass*:
       // `- ❌ error: Resolving `extension T_1.Prev` to the extended type `T_0` requires that `T_0`
       //           have no type member `T_3`, but the extension introduces `T_3`.
 
