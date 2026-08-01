@@ -1447,9 +1447,6 @@ extension TypeQualifier {
 
       // The result can change after binding more extensions; ignore for now.
       _ = _bindRequestedExtension(extensionDecl)
-
-      // FIXME: Remove debugging `break`
-      break
     }
 
     assert(
@@ -1763,7 +1760,7 @@ extension TypeQualifier {
     // Queue up the extensions that need binding
     let unadmittedExtensions: [SourceFileRoot<ExtensionDeclSyntax>] = accessibleExtensions.filter({
       accessibleExtension in
-      !symbolTable.unresolvedExtensions[accessibleExtension.fileRoot, default: []].contains(accessibleExtension)
+      symbolTable.unresolvedExtensions[accessibleExtension.fileRoot, default: []].contains(accessibleExtension)
     })
 
     // Return if no extensions are available
