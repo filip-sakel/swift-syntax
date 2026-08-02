@@ -626,12 +626,16 @@ extension TypeDependencyGraph {
     )
   }
 
-  typealias DependencyPathElement = (
-    introducingMemberType: TypeMemberDecl?,
-    boundType: QualifiedTypeNameGlobalType,
-    extension: SourceFileRoot<ExtensionDeclSyntax>,
-    state: ExtensionState
-  )
+  struct DependencyPathElement: CustomDebugStringConvertible {
+    let introducingMemberType: TypeMemberDecl?
+    let boundType: QualifiedTypeNameGlobalType
+    let extensionDecl: SourceFileRoot<ExtensionDeclSyntax>
+    let state: ExtensionState
+
+    var debugDescription: String {
+      "\(introducingMemberType?.typeDeclSyntax._memberlessDescription ?? "nil") introduced \(extensionDecl._memberlessDescription) (bound to \(boundType.debugDescription))"
+    }
+  }
   /// Calls visit with the current dependency path until it
   /// returns a (non-nil) `T` result, which we forward to the caller.
   ///
@@ -673,7 +677,7 @@ extension TypeDependencyGraph {
               DependencyPathElement(
                 introducingMemberType: typeMemberDecl,
                 boundType: dependencyExtendedType,
-                extension: dependencyExtension,
+                extensionDecl: dependencyExtension,
                 state: dependencyExtensionState
               )
             ]
@@ -695,7 +699,7 @@ extension TypeDependencyGraph {
       DependencyPathElement(
         introducingMemberType: nil,
         boundType: boundTypeName,
-        extension: extensionDecl,
+        extensionDecl: extensionDecl,
         state: ExtensionState(
           dependencies: extensionDependencies,
           extensionDecl: extensionDecl,
@@ -706,6 +710,10 @@ extension TypeDependencyGraph {
 
     // TODO: Check that `extensionDependencies` have states and resolved to a type or throw an error
 
+    print(
+      "Checking cycles if introducing `\(extensionDecl._memberlessDescription)` with members '\(boundTypeName.debugDescription)' > \(extensionMembers.typeMembersToDecls.map(\.key.name))"
+    )
+
     // Check recursive dependencies
     let cycleResult: ExtensionBindingCycle? = _findFirstDependency(
       path: boundExtensionInfo,
@@ -713,6 +721,7 @@ extension TypeDependencyGraph {
         // TODO: Factor out to or remove `collidesWithDependency` helper above.
         // Check if dependency collides with introduces `boundTypeName` > `extensionMembers`.
         // Collisions require that the base type match and that members share a name.
+        print("Visiting `\(dependency._declarationlessDescription)` [path \(path)]")
         guard
           boundTypeName == dependency.dependencyTypeName,
           let firstConflictingMember = dependency.members.first(where: { member in
@@ -726,7 +735,7 @@ extension TypeDependencyGraph {
           DependencyCycleElement(
             // Only the first element has `nil` by `_findFirstDependency` invariant.
             introducingTypeDecl: chainElement.introducingMemberType!.typeDeclSyntax.node,
-            extensionDecl: chainElement.extension.node,
+            extensionDecl: chainElement.extensionDecl.node,
             boundType: chainElement.boundType,
           )
         })
@@ -746,7 +755,9 @@ extension TypeDependencyGraph {
   /// Parameters:
   /// - modifiedTypeName: The type that changed and requires invalidating dependent
   ///   extensions.
-  /// - modifiedMembers: The direct dependents (extensions) of the `modifiedType` type.
+  /// - modifiedMembers: The type members modified (getting added/remove) from the type.
+  ///   `nil` if the entire type is getting removed.
+  /// - directDependents: The direct dependents (extensions) of the `modifiedType` type.
   /// - invalidatedExtensions: A list of unspecified order containg the invalidated
   ///   extensions.
   ///
@@ -754,7 +765,7 @@ extension TypeDependencyGraph {
   /// TODO: Make recursive
   fileprivate mutating func _invalidateDependents(
     modifiedTypeName: QualifiedTypeNameGlobalType,
-    modifiedMembers: TypeTable,
+    modifiedMembers: TypeTable?,
     directDependents: [TypeDependent],
     invalidatedExtensions: inout [ExtensionState],
     symbolTable: borrowing SymbolTable3
@@ -765,8 +776,11 @@ extension TypeDependencyGraph {
 
     // TODO: Verify that this order of invalidating is fine
     for dependent in directDependents {
-      // Get the invalidated extension (or retain dependent)
-      guard modifiedMembers.typeMembersToDecls[dependent.memberType] != nil else {
+      // Get the invalidated extension (or retain dependent if the extension
+      // doesn't depend on `modifiedMembers`)
+      if let modifiedMembers,
+        modifiedMembers.typeMembersToDecls[dependent.memberType] == nil
+      {
         newDependents.append(dependent)
         continue
       }
@@ -801,7 +815,6 @@ extension TypeDependencyGraph {
       guard case .success(let invalidatedExtensionTypeName) = invalidatedExtensionState.resolvedType else {
         continue
       }
-      // FIXME: Remove the dependents from the invalidated type
 
       // Remove the members from the extended type
       guard let invalidatedExtensionType = namesToTypes[invalidatedExtensionTypeName] else {
@@ -854,7 +867,28 @@ extension TypeDependencyGraph {
             invalidatedExtensions.append(oldState)
           }
         }
-        // FIXME: Need to also remove the type's dependents!!
+        // TODO: Should destroy nested type's nested types, e.g.
+        // ```swift
+        // struct A { typealias B = A }
+        // extension A.B {
+        //  struct C { struct D {} }
+        // }
+        // extension A.B.C.D { struct E {} }
+        // extension A { struct A {} }
+        // ```
+        // TODO: Check for correctrness
+        // Remove all the dependents of the nested types (to be removed)
+        let newDependents = _invalidateDependents(
+          modifiedTypeName: modifiedTypeName,
+          modifiedMembers: nil,
+          directDependents: removedTypeState.dependents,
+          invalidatedExtensions: &invalidatedExtensions,
+          symbolTable: symbolTable
+        )
+        assert(
+          newDependents == [],
+          "[SwiftLexicalLookup] Internal error: `modifiedMembers == nil` should have removed all dependencies from type to be removed."
+        )
       }
 
     }

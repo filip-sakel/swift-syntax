@@ -570,6 +570,103 @@ final class TestQualifiedTypeName: XCTestCase {
 
   // TODO: Reenable
   func testPathologicalN3() {
+    // When debugging this by logging the graph's state, remember
+    // that we start binding extensions at `\(extensionState: ...)` expectations.
+    // So in the following example, we admit `extension T_0.Last` first (not
+    // `extension T_0`), and continue from there.
+    assertTypeResolution([
+      "File.swift": """
+      struct T_0 {}
+      struct T_1 {}
+      struct T_2 {}
+      struct T_3 {}
+
+      extension T_0 { typealias Last = T_3 }
+
+
+      //        |- Depends on : ()
+      //        `- Introduces : T_0>Last
+      //
+      //              `- ℹ️ note:  For `T_0`'s member `Last` to resolve to `output.T_3`,
+      //                          `T_0` must not contain any type member named `T_3`.
+
+
+
+      \(extensionState: .bound(
+        to: "_(File.swift)::T_3",
+        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_0", members: ["Last", "T_3"])]
+      ))
+      extension T_0.Last { typealias Prev = T_2 }
+
+
+      //        |- Depends on : T_0>Last, T_0>T_3
+      //        |- Resolves to: T_3
+      //        `- Introduces : T_3>Prev
+      //
+      //           `- ℹ️ note: `T_0`'s member `Last` is declared in `extension T_0.Last`
+
+
+
+
+      // j=3
+      \(extensionState: .bound(
+        to: "_(File.swift)::T_2",
+        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_3", members: ["Prev", "T_2"])]
+      ))
+      extension T_3.Prev { typealias Prev = T_1 }
+
+
+      //        |- Depends on : T_3>Prev, T_3>T_2
+      //        |- Resolves to: T_2
+      //        `- Introduces : T_2>Prev
+      //
+      //           `- ℹ️ note: `T_3`'s member `Prev` is declared in `extension T_0.Last`
+
+
+
+
+
+      // j=2
+      \(extensionState: .bound(
+        to: "_(File.swift)::T_1",
+        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_2", members: ["Prev", "T_1"])]
+      ))
+      extension T_2.Prev { typealias Prev = T_0 }
+
+
+      //        |- Depends on : T_2>Prev, T_2>T_1
+      //        |- Resolves to: T_1
+      //        `- Introduces : T_1>Prev
+      //
+      //           `- ℹ️ note: `T_2`'s member `Prev` is declared in `extension T_3.Prev`
+
+      \(extensionState: .invalidCycle(
+        dependencies: [
+          ExtensionDependency(baseType: "_(File.swift)::T_1", members: ["Prev", "T_0"])
+        ],
+        cycleElements: [
+          (introducingDecl: "typealias Prev = T_0", extension: "extension T_2.Prev {}", base: "_(File.swift)::T_1"),
+          (introducingDecl: "typealias Prev = T_1", extension: "extension T_3.Prev {}", base: "_(File.swift)::T_2"),
+          (introducingDecl: "typealias Prev = T_2", extension: "extension T_0.Last {}", base: "_(File.swift)::T_3"),
+        ],
+        conflictingMember: "T_3"
+      ))
+      extension T_1.Prev { struct T_3 {} }
+
+
+      //        |- Depends on : T_1>Prev, T_1>T_0
+      //        |- Resolves to: T_0
+      //        `- Introduces : T_0>T_3     <- collides with the first extension's empty dependency
+      //
+      //           `- ℹ️ note: `T_1`'s member `Prev` is declared in `extension T_2.Prev`
+      // `- ❌ error: Resolving `extension T_1.Prev` to the extended type `T_0` requires that `T_0`
+      //           have no type member `T_3`, but the extension introduces `T_3`.
+      """
+    ])
+  }
+  /// Same as `testPathologicalN3` but the last extension actually removes all
+  /// cycles.
+  func testFixedPathologicalN3() {
     assertTypeResolution([
       "File.swift": """
       struct T_0 {}
