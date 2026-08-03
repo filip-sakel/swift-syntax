@@ -310,6 +310,32 @@ public struct TypeDependencyGraph {
       return copy
     }
 
+    /// Unbinds the given nominal-type declaration. If the nominal-type
+    /// declaration is a redeclaration, we remove it. If the nominal-type
+    /// declaration is the main declaration, replace by the first redeclaration
+    /// (if available). If this is the main declaration and there are no
+    /// redeclarations, returns `nil`.
+    fileprivate consuming func _unbindingNominalDecl(
+      _ nominalTypeDecl: SourceFileRoot<NominalTypeDeclSyntax>
+    ) -> NominalType? {
+      var copy = self
+
+      // Remove the declaration (keeping count)
+      let originalDecls = copy._mainDecls
+      copy._mainDecls.removeAll(where: { $0.declGroup == nominalTypeDecl })
+
+      // Ensure the declaration was actually bound and we removed it
+      precondition(
+        copy._mainDecls.count == originalDecls.count - 1,
+        "[SwiftLexicalLookup] Internal error: Tried to unbind nominal-type declaration `\(nominalTypeDecl._memberlessDescription)` a type it's not bound to (original: \(originalDecls.map(\.declGroup._memberlessDescription)))."
+      )
+
+      // Return `nil` if no nominal-type declaration is left (maintains invariant)
+      guard !copy._mainDecls.isEmpty else { return nil }
+
+      return copy
+    }
+
     /// Adds the given type as a redeclaration if not already added.
     func addingRedeclaration(_ mainDecl: MappedDeclGroup<NominalTypeDeclSyntax>) -> NominalType {
       // This check takes linear time w.r.t. `_mainDecls`; however, we don't
@@ -524,6 +550,19 @@ extension TypeDependencyGraph {
     case .nestedScope:
       return .success(NominalTypeRef(localNominalType: mainDecl))
     }
+
+    // FIXME: SOS: Ensure we're not admitted child of redeclaration.
+    // E.g.
+    // struct A {
+    //   struct B {}
+    //   struct B {
+    //     struct C {}
+    //   }
+    // }
+    //
+    // Here, we shouldn't be able to register `C`!!
+    // I.e. admitted type's parent should be file scope or *the* main decl
+    // of a registered type.
 
     // TODO: Remove if we remove this invariant.
     //
@@ -749,6 +788,273 @@ extension TypeDependencyGraph {
 }
 
 extension TypeDependencyGraph {
+  mutating func _unbindMemberType(
+    baseTypeName: QualifiedTypeNameGlobalType,
+    baseTypeDecl: SourceFileRoot<DeclGroupSyntaxType>,
+    baseTypeModule: Identifier,
+    baseType: NominalType,
+    memberName: Identifier,
+    memberTypeDecl: SourceFileRoot<TypeDeclSyntax>,
+    invalidatedExtensions: inout [ExtensionState],
+    symbolTable: SymbolTable3
+  ) {
+    // If a registered nominal, check its own member types and finally remove this declaration
+    let potentialNominalName = baseTypeName.addingComponents([
+      QualifiedTypeNameGlobalType.Component(
+        name: memberName,
+        file: baseTypeDecl.fileRoot,
+        module: baseTypeModule,
+        symbolTable: symbolTable
+      )
+    ])
+    if let memberNominalDecl = memberTypeDecl.as(NominalTypeDeclSyntax.self),
+      let memberNominal: NominalType = namesToTypes[potentialNominalName]
+    {
+      let memberNominalTypeName = potentialNominalName
+
+      // If it's the main decl, unbind its own type members
+      if memberNominal.mainDecl.declGroup == memberNominalDecl {
+        let flattenedRecursiveMembers = memberNominal.mainDecl.typeMap.typeMembersToDecls.flatMap({
+          (name, member) in member.decls.map({ (name, $0.typeDeclSyntax) })
+        })
+        for (recursiveMember, recursiveMemberTypeDecl) in flattenedRecursiveMembers {
+          _unbindMemberType(
+            baseTypeName: memberNominalTypeName,
+            baseTypeDecl: SourceFileRoot<DeclGroupSyntaxType>(memberNominalDecl),
+            baseTypeModule: baseTypeModule,
+            baseType: memberNominal,
+            memberName: recursiveMember,
+            memberTypeDecl: recursiveMemberTypeDecl,
+            invalidatedExtensions: &invalidatedExtensions,
+            symbolTable: symbolTable
+          )
+        }
+      }
+
+      // `nil` means there was no other main declaration
+      namesToTypes[potentialNominalName] = memberNominal._unbindingNominalDecl(memberNominalDecl)
+    }
+
+    // Invalidate dependent extensions
+    let newBaseDependents = _invalidateDependents(
+      modifiedTypeName: baseTypeName,
+      modifiedMembers: TypeTable(
+        from: [memberName: [memberTypeDecl]],
+        introducedIn: baseTypeDecl.as(ExtensionDeclSyntax.self)
+      ),
+      modifiedExtensionModule: baseTypeModule,
+      directDependents: baseType.dependents,
+      invalidatedExtensions: &invalidatedExtensions,
+      symbolTable: symbolTable
+    )
+
+    namesToTypes[baseTypeName] = baseType._updatingDependents(newBaseDependents)
+    // for dependent in baseType.dependents {
+    //   // Invalidate only when the extension is dependent on this specific member
+    //   guard dependent.memberType == memberName else { continue }
+    //
+    //   _unbindExtension(dependent.dependentExtension, ifDependentOn: nil, symbolTable: symbolTable)
+    // }
+  }
+
+  mutating func _unbindExtension(
+    _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
+    extensionDeclModule: SymbolTable3.Module,
+    ifDependentOn _: (typeName: QualifiedTypeNameGlobalType, memberName: Identifier)?,
+    invalidatedExtensions: inout [ExtensionState],
+    symbolTable: borrowing SymbolTable3
+  ) -> ExtensionState {
+    guard let extensionState = extensionsToState[extensionDecl] else {
+      // TODO: Remove
+      // print(
+      //   "[SwiftLexicalLookup] Internal error: Unexpectedly asked to unbind unregistered extension `\(extensionDecl._memberlessDescription)`."
+      // )
+      // return ExtensionState(
+      //   _uncheckedDependencies: [],
+      //   extensionDecl: extensionDecl,
+      //   resolvedType: .failure(.extensionNotBoundYet)
+      // )
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Unexpectedly asked to unbind unregistered extension `\(extensionDecl._memberlessDescription)`."
+      )
+    }
+    // Get the extended-type name (or just erase the extension state if unbound)
+    guard case .success(let extendedTypeName) = extensionState.resolvedType else {
+      extensionsToState[extensionDecl] = nil
+      return extensionState
+    }
+    guard let extendedTypeState: NominalType = namesToTypes[extendedTypeName] else {
+      // TODO: Remove
+      // print(
+      //   "[SwiftLexicalLookup] Internal error: Extension `\(extensionDecl._memberlessDescription)` bound to unregistered type '\(extendedTypeName)'."
+      // )
+      // return ExtensionState(
+      //   _uncheckedDependencies: [],
+      //   extensionDecl: extensionDecl,
+      //   resolvedType: .failure(.extensionNotBoundYet)
+      // )
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Extension `\(extensionDecl._memberlessDescription)` bound to unregistered type '\(extendedTypeName)'."
+      )
+    }
+
+    // Don't apply invalidatedExtensionTypeTable YET
+    guard
+      let (newExtendedType, invalidatedExtensionTypeTable) = extendedTypeState._unbindingExtension(
+        extensionDecl,
+        module: extensionDeclModule
+      )
+    else {
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Tried to unbind extension `\(extensionDecl._memberlessDescription)` from type '\(extendedTypeName)', which says it's not bound."
+      )
+    }
+    let flattenedMembers = invalidatedExtensionTypeTable.typeMembersToDecls.flatMap({
+      (name, member) in member.decls.map({ (name, $0.typeDeclSyntax) })
+    })
+    for (member, typeMember) in flattenedMembers {
+      _unbindMemberType(
+        baseTypeName: extendedTypeName,
+        baseTypeDecl: SourceFileRoot<DeclGroupSyntaxType>(extensionDecl),
+        baseTypeModule: extensionDeclModule,
+        baseType: extendedTypeState,
+        memberName: member,
+        memberTypeDecl: typeMember,
+        invalidatedExtensions: &invalidatedExtensions,
+        symbolTable: symbolTable
+      )
+    }
+
+    // Unbind from type and remove extension state
+    extensionsToState[extensionDecl] = nil
+    namesToTypes[extendedTypeName] = newExtendedType
+
+    return extensionState
+  }
+
+  fileprivate mutating func _invalidateDependents(
+    modifiedTypeName: QualifiedTypeNameGlobalType,
+    modifiedMembers: TypeTable,
+    modifiedExtensionModule: SymbolTable3.Module,
+    directDependents: [TypeDependent],
+    invalidatedExtensions: inout [ExtensionState],
+    symbolTable: borrowing SymbolTable3
+  ) -> [TypeDependent] {
+    var newDependents = [TypeDependent]()
+    for dependent in directDependents {
+      // Only unbind conflicting (otherwise add to new dependents)
+      guard modifiedMembers.typeMembersToDecls[dependent.memberType] != nil else {
+        newDependents.append(dependent)
+        continue
+      }
+
+      let invalidatedExtensionState = _unbindExtension(
+        dependent.dependentExtension,
+        extensionDeclModule: modifiedExtensionModule,
+        ifDependentOn: nil,
+        invalidatedExtensions: &invalidatedExtensions,
+        symbolTable: symbolTable
+      )
+      invalidatedExtensions.append(invalidatedExtensionState)
+    }
+    print("-> Invalidated dependents of '\(modifiedTypeName)': \(directDependents); new dependents: \(newDependents)")
+    return newDependents
+  }
+
+  // /// Find a declaration group's recursively nested types
+  // ///
+  // /// Parameters
+  // /// - declGroupTypeName: The type that this `declGroup` is a part of. The extended type
+  // ///   for extensions or the main declaration for nominal types.
+  // mutating func _visitRecursivelyNestedTypes(
+  //   declGroup: SourceFileRoot<DeclGroupSyntaxType>,
+  //   declGroupModule: Identifier,
+  //   declGroupTypeName: QualifiedTypeNameGlobalType,
+  //   typeTable: TypeTable,
+  //   symbolTable: SymbolTable3,
+  //   invalidatedExtensions: inout [ExtensionState]
+  // ) -> [TypeDependent] {
+  //   /// Given a valid base name, appends the given member name to get the name of
+  //   /// a potentially registered nominal type.
+  //   ///
+  //   /// Important: The member must be nested within `declGroup` (to guarantee
+  //   /// it's in same file and module).
+  //   func makePotentialName(validBase: QualifiedTypeNameGlobalType, member: Identifier) -> QualifiedTypeNameGlobalType {
+  //     let newComponent = QualifiedTypeNameGlobalType.Component(
+  //       name: member,
+  //       file: declGroup.fileRoot,
+  //       module: declGroupModule,
+  //       symbolTable: symbolTable
+  //     )
+  //     return validBase.addingComponents([newComponent])
+  //   }
+  //
+  //   for (nestedTypeName, _) in typeTable.typeMembersToDecls {
+  //     let potentialTypeName = makePotentialName(validBase: declGroupTypeName, member: Identifier)
+  //     // Get the state if valid
+  //     guard let removedTypeState = namesToTypes.removeValue(forKey: potentialTypeName) else { continue }
+  //     // We know this is a valid name
+  //     let typeName = potentialTypeName
+  //   }
+  //
+  //   // A stack keeping track of potential nominal-type names we need to visit
+  //   // and remove. All names should point to types nested under `declGroup`
+  //   // and `declGroupType`
+  //   var potentialTypeNames = typeTable.typeMembersToDecls.map({ (nestedTypeName, _) in
+  //     makePotentialName(validBase: declGroupType, member: nestedTypeName)
+  //   })
+  //
+  //   while let potentialTypeName = potentialTypeNames.popLast() {
+  //     // Get the state if valid
+  //     guard let removedTypeState = namesToTypes.removeValue(forKey: potentialTypeName) else { continue }
+  //     // We know this is a valid name
+  //     let typeName = potentialTypeName
+  //
+  //     // Check recursively nested member types in main decl
+  //     potentialTypeNames.append(
+  //       contentsOf: removedTypeState.mainDecl.typeMap.typeMembersToDecls.map({ (recursivelyNestedTypeName, _) in
+  //         makePotentialName(validBase: typeName, member: recursivelyNestedTypeName)
+  //       })
+  //     )
+  //
+  //     // Invalidate all extensions (should handle nested types in dependent extensions)
+  //     for (_, removedTypeExtensions) in removedTypeState.boundExtensions {
+  //       for (removedTypeExtension, _) in removedTypeExtensions {
+  //         guard let oldState = extensionsToState.removeValue(forKey: removedTypeExtension) else {
+  //           // TODO: Complain about non-upheld invariant
+  //           fatalError("")
+  //         }
+  //         invalidatedExtensions.append(oldState)
+  //       }
+  //     }
+  //
+  //     // TODO: Should destroy nested type's nested types, e.g.
+  //     // ```swift
+  //     // struct A { typealias B = A }
+  //     // extension A.B {
+  //     //  struct C {
+  //     //    struct D {}
+  //     //  }
+  //     // }
+  //     // extension A.B.C.D { struct E {} }
+  //     // extension A { struct A {} }
+  //     // ```
+  //     // TODO: Check for correctrness
+  //     // Remove all the dependents of the nested types (to be removed)
+  //     let newDependents = _invalidateDependents(
+  //       modifiedTypeName: modifiedTypeName,
+  //       modifiedMembers: nil,
+  //       directDependents: removedTypeState.dependents,
+  //       invalidatedExtensions: &invalidatedExtensions,
+  //       symbolTable: symbolTable
+  //     )
+  //     assert(
+  //       newDependents == [],
+  //       "[SwiftLexicalLookup] Internal error: `modifiedMembers == nil` should have removed all dependencies from type to be removed."
+  //     )
+  //   }
+  // }
+
   /// Recursively invalidate all of a type's dependents that rely on any
   /// types introduced in `dependencyMembers`.
   ///
@@ -762,8 +1068,8 @@ extension TypeDependencyGraph {
   ///   extensions.
   ///
   /// Returns: The new dependent extensions after removing the invalidated ones.
-  /// TODO: Make recursive
-  fileprivate mutating func _invalidateDependents(
+  /// TODO: Make
+  fileprivate mutating func _invalidateDependents__OLD(
     modifiedTypeName: QualifiedTypeNameGlobalType,
     modifiedMembers: TypeTable?,
     directDependents: [TypeDependent],
@@ -834,7 +1140,7 @@ extension TypeDependencyGraph {
       }
 
       // Recursively invalidate the invalidate extension's dependents
-      let newTransitiveDependents = _invalidateDependents(
+      let newTransitiveDependents = _invalidateDependents__OLD(
         modifiedTypeName: invalidatedExtensionTypeName,
         modifiedMembers: invalidatedExtensionTypeTable,
         directDependents: invalidatedExtensionType.dependents,
@@ -847,6 +1153,7 @@ extension TypeDependencyGraph {
       namesToTypes[invalidatedExtensionTypeName] = finalInvalidatedExtensionType
 
       // 3. Remove extension's introduced types
+      // var potentialNominalTypes = []
       for (typeMember, _) in invalidatedExtensionTypeTable.typeMembersToDecls {
         let potentialNominalType = invalidatedExtensionTypeName.addingComponents([
           QualifiedTypeNameGlobalType.Component(
@@ -871,14 +1178,16 @@ extension TypeDependencyGraph {
         // ```swift
         // struct A { typealias B = A }
         // extension A.B {
-        //  struct C { struct D {} }
+        //  struct C {
+        //    struct D {}
+        //  }
         // }
         // extension A.B.C.D { struct E {} }
         // extension A { struct A {} }
         // ```
         // TODO: Check for correctrness
         // Remove all the dependents of the nested types (to be removed)
-        let newDependents = _invalidateDependents(
+        let newDependents = _invalidateDependents__OLD(
           modifiedTypeName: modifiedTypeName,
           modifiedMembers: nil,
           directDependents: removedTypeState.dependents,
@@ -917,7 +1226,7 @@ extension TypeDependencyGraph {
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     extensionDeclModule: SymbolTable3.Module,
     isUpdatingInvalidating isFixingInvalidating: Bool,
-    to result: Result<
+    to rawResult: Result<
       (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
       TypeQualifier.Failure
     >,
@@ -935,66 +1244,60 @@ extension TypeDependencyGraph {
 
     // === Diagnose Dependency Cycles ===
 
-    // To check admissability, ensure we don't get a cycle
-    //
-    // First, compute a cycle (or `nil` for no cycles)
-    // FIXME: Even cyclical extensions should be registered b/c they might be fixed
-    //        with additional extensions
-    let cycleResult: Result<GenericExtensionBindingCycle<QualifiedTypeNameGlobalType>, CycleDetectionFailure>?
-    switch result {
-    case .success(let (extendedTypeName, _)):
-      // cycleResult = _findCyclicalDependency(
-      //   boundTypeName: extendedTypeName,
-      //   boundTypeMembers: mappedExtensionDecl.typeMap,
-      //   currentExtensionDecl: extensionDecl.node,
-      //   currentExtendedType: extendedTypeName,
-      //   extensionDependencies: dependencyTracker.dependencies,
-      //   currentDependencyChain: &dependencyChain
-      // )
-      cycleResult = _findFirstCycleWhenBinding(
-        extensionDecl: extensionDecl,
-        extensionMembers: mappedExtensionDecl.typeMap,
-        to: extendedTypeName,
-        extensionDependencies: dependencyTracker.dependencies
-      )
-    case .failure:
-      // Failed extensions are unbound, so they don't admit member types
-      // that can cause cycles.
-      cycleResult = nil
-    }
-    // Handle cycle
-    switch cycleResult {
-    case nil:
-      // No cycles
-      break
-    case .success(let cycle):
-      // Failed binding => no type members and no dependents
-      extensionsToState[extensionDecl] = ExtensionState(
-        dependencies: dependencyTracker.dependencies,
-        extensionDecl: extensionDecl,
-        resolvedType: .failure(BindingFailure.cyclicalExtensionDependency(cycle)),
-      )
-      return .success((.failure(BindingFailure.cyclicalExtensionDependency(cycle)), invalidatedExtensions: []))
-    case .failure(
-      .unresolvedDependencyExtension(
-        let dependentExtension,
-        let dependencyExtension,
-        let dependencyExtensionState
-      )
-    ):
-      // TODO: Rewrite so that we only throw here, _findCyclicalDependencyImplementation traps,
-      // and we just get an optional cycle.
-      //
-      // If the invalid dependency occurs at the extension we're trying to
-      // admit, this might be the caller's fault since they provide
-      // ``DependencyTracker``
-      guard dependentExtension == extensionDecl else {
-        // Graph invariant was broken
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Extension \((dependentExtension?._memberlessDescription).debugDescription) unexpectedly depends on non-resolved extension \((dependencyExtension?._memberlessDescription).debugDescription) with state: \(String(reflecting: dependencyExtensionState))."
+    // We create a new type-resolution result that converts successful type
+    // resolutions into failures if they cause a cycle.
+    let result:
+      Result<
+        (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
+        TypeQualifier.Failure
+      >
+    switch rawResult {
+    case .success(let (extendedTypeName, mainDecl)):
+      let cycleResult =
+        _findFirstCycleWhenBinding(
+          extensionDecl: extensionDecl,
+          extensionMembers: mappedExtensionDecl.typeMap,
+          to: extendedTypeName,
+          extensionDependencies: dependencyTracker.dependencies
+        ) as Result<GenericExtensionBindingCycle<QualifiedTypeNameGlobalType>, CycleDetectionFailure>?
+
+      // Map result
+      switch cycleResult {
+      case nil:
+        // No cycle, keep success
+        result = .success((extendedTypeName, mainDecl))
+      case .success(let cycle):
+        // Found cycle, turn success into failure
+        result = .failure(TypeQualifier.Failure.cyclicalExtensionDependency(cycle))
+      case .failure(
+        .unresolvedDependencyExtension(
+          let dependentExtension,
+          let dependencyExtension,
+          let dependencyExtensionState
+        )
+      ):
+        // Failure computing cycle
+
+        // TODO: Rewrite so that we only throw here, _findCyclicalDependencyImplementation traps,
+        // and we just get an optional cycle.
+        //
+        // If the invalid dependency occurs at the extension we're trying to
+        // admit, this might be the caller's fault since they provide
+        // ``DependencyTracker``
+        guard dependentExtension == extensionDecl else {
+          // Graph invariant was broken
+          fatalError(
+            "[SwiftLexicalLookup] Internal error: Extension \((dependentExtension?._memberlessDescription).debugDescription) unexpectedly depends on non-resolved extension \((dependencyExtension?._memberlessDescription).debugDescription) with state: \(String(reflecting: dependencyExtensionState))."
+          )
+        }
+        return .failure(
+          ExtensionAdmissionFailure.invalidDependencyExtension(extensionState: dependencyExtensionState)
         )
       }
-      return .failure(ExtensionAdmissionFailure.invalidDependencyExtension(extensionState: dependencyExtensionState))
+    case .failure(let failure):
+      // Failed extensions stay failures (they are unbound => no member
+      // types that can cause cycles).
+      result = .failure(failure)
     }
 
     // === Register as Dependent ===
@@ -1017,7 +1320,7 @@ extension TypeDependencyGraph {
       else {
         // Ensure we don't register a dependent twice (debug-only)
         fatalError(
-          "[SwiftLexicalLookup] Internal error: Unexpectedly found not-yet-admitted extension `\(extensionDecl.node._memberlessDescription)` in dependents list of '\(dependency.extendedTypeName)': \(nominalType.dependents)."
+          "[SwiftLexicalLookup] Internal error: Unexpectedly found not-yet-admitted extension `\(extensionDecl._memberlessDescription)` in dependents list of '\(dependency.extendedTypeName)': \(nominalType.dependents)."
         )
       }
       namesToTypes[dependency.extendedTypeName] = nominalWithDependents
@@ -1025,6 +1328,7 @@ extension TypeDependencyGraph {
 
     // === Invalidate Dependents & Bind ===
     let invalidatedExtensions: [ExtensionState]
+    // If there's no cycle, we may type members so we need to invalidate
     switch result {
     case .success(let (extendedTypeName, _)):
       // Get the bound type
@@ -1038,6 +1342,7 @@ extension TypeDependencyGraph {
       let newTypeDependents = _invalidateDependents(
         modifiedTypeName: extendedTypeName,
         modifiedMembers: mappedExtensionDecl.typeMap,
+        modifiedExtensionModule: extensionDeclModule,
         directDependents: extendedType.dependents,
         invalidatedExtensions: &invalidatedExtensionsTmp,
         symbolTable: symbolTable
@@ -1222,11 +1527,37 @@ extension TypeDependencyGraph {
       }
 
       // Add dependent extensions (to main declaration)
-      for dependentExtension in type.dependents {
+      for dependent in type.dependents {
+        // Ensure there's a respective dependency
+        //
+        // First, get extension state
+        guard let dependentExtensionState = extensionsToState[dependent.dependentExtension] else {
+          _attachError(
+            to: type.mainDecl.declGroup,
+            message:
+              "Member type '\(typeNameDescription)' > '\(dependent.memberType.name)' depended on by unregistered extension `\(dependent.dependentExtension.node._memberlessDescription)`."
+          )
+          continue
+        }
+        // The extension state must have a dependency to this type with the right type member.
+        guard
+          dependentExtensionState.dependencies.contains(where: { dependency in
+            dependency.dependencyTypeName == typeName
+              && dependency.members.contains(where: { member in member.name == dependent.memberType })
+          })
+        else {
+          _attachError(
+            to: type.mainDecl.declGroup,
+            message:
+              "Member type '\(typeNameDescription)' > '\(dependent.memberType.name)' supposedly depended on by `\(dependent.dependentExtension.node._memberlessDescription)`, but isn't in extension's dependencies: \(dependentExtensionState.dependencies.map(\.debugDescription))"
+          )
+          continue
+        }
+
         _attachNote(
           to: type.mainDecl.declGroup,
           message:
-            "Member type '\(typeNameDescription)' > '\(dependentExtension.memberType.name)' depended on by `\(dependentExtension.dependentExtension.node._memberlessDescription)`"
+            "Member type '\(typeNameDescription)' > '\(dependent.memberType.name)' depended on by `\(dependent.dependentExtension.node._memberlessDescription)`"
         )
       }
 
@@ -1308,7 +1639,7 @@ extension TypeDependencyGraph {
               return [(dependency.dependencyTypeName, member, IntroducingExtensionOrMainDecl.none)]
             }
             return member.decls.map({ typeDecl in
-              (dependency.dependencyTypeName, member, typeDecl.introducingExtensionOrMainDecl)
+              return (dependency.dependencyTypeName, member, typeDecl.introducingExtensionOrMainDecl)
             })
           })
         })
@@ -1321,15 +1652,36 @@ extension TypeDependencyGraph {
             case .success(let dependencyExtendedType)? = extensionsToState[dependencyExtension]?.resolvedType,
             dependencyTypeName == dependencyExtendedType
           else {
-            let expectedTypeDescription = dependencyTypeName.debugDescription
+            let dependencyTypeNameDescription = dependencyTypeName.debugDescription
             let actualTypeDescription = extensionsToState[dependencyExtension]?.resolvedType.map(\.debugDescription)
             _attachError(
               to: extensionDecl.extendedType,
               message:
-                "Extension depends on '\(expectedTypeDescription)' > '\(memberName)' declared in `\(dependencyExtension._memberlessDescription)`, but the extension state resolved to '\(actualTypeDescription.debugDescription)'."
+                "Extension depends on '\(dependencyTypeNameDescription)' > '\(memberName)' declared in `\(dependencyExtension._memberlessDescription)`, but the extension state resolved to '\(actualTypeDescription.debugDescription)'."
             )
             continue
           }
+        }
+        // Check extension dependency has a respective type dependent
+        guard let dependencyType = namesToTypes[dependencyTypeName] else {
+          _attachError(
+            to: extensionDecl.extendedType,
+            message:
+              "Extension depends on '\(memberName)' unregistered type '\(dependencyTypeName.debugDescription)'."
+          )
+          continue
+        }
+        guard
+          dependencyType.dependents.contains(
+            TypeDependent(memberType: member.name, dependentExtension: extensionDecl)
+          )
+        else {
+          _attachError(
+            to: extensionDecl.extendedType,
+            message:
+              "Extension depends on '\(dependencyTypeName.debugDescription)' > '\(memberName)', a type which doesn't track this extension as a dependent."
+          )
+          continue
         }
 
         // Add dependency

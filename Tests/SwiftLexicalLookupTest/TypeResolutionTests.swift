@@ -700,6 +700,53 @@ final class TestQualifiedTypeName: XCTestCase {
     ])
   }
 
+  func testExtensionDoubleNestedTypes() {
+    assertTypeResolution([
+      "File.swift": """
+      struct A { typealias B = A }
+
+      // Last extension makes `A.B` resolves to `A.A`
+      \(extensionState: .bound(
+        to: "_(File.swift)::A._(File.swift)::A",
+        dependencies: [ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"])]
+      ))
+      extension A.B {
+        struct C {
+          struct D {}
+        }
+      }
+
+      \(extensionState: .bound(
+        to: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D",
+        dependencies: [ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"])]
+      ))
+      extension A.B.C.D { struct E {} }
+
+      \(extensionState: .bound(to: "_(File.swift)::A", dependencies: []))
+      extension A { struct A {} }
+      """
+    ])
+
+    // TODO: Consider following case for redecl handling
+    // struct A {
+    //   typealias B = A
+    //   struct C {}
+    // }
+    //
+    // extension A.B {
+    //   struct C { // Initially treated as redecl
+    //     struct D {}
+    //   }
+    // }
+    //
+    // // Initially ambiguous ref to `C`
+    // extension A.B.C.D { struct E {} }
+    //
+    // // After `A` gains a member type `A`, `struct C` above
+    // // resolves to `_::A._::A._::C`
+    // extension A { struct A {} }
+  }
+
   // TODO: Add test where extension state resolves to a cycle, but
   // a later extension actually makes everything resolve fine (look at last bug report)
 

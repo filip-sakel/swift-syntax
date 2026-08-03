@@ -369,3 +369,9 @@ extension SourceFileRoot where Node: DeclGroupSyntax {
     node._memberlessDescription
   }
 }
+
+extension SourceFileRoot where Node == DeclGroupSyntaxType {
+  internal init<DeclGroup: DeclGroupSyntax>(_ syntax: SourceFileRoot<DeclGroup>) {
+    self = syntax.as(DeclGroupSyntaxType.self)!
+  }
+}
