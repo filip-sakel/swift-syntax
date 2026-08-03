@@ -45,7 +45,18 @@ where
 
 struct ExtensionDependency {
   let baseType: TestTypeName
-  let members: [StaticString]
+  let members: [String]
+}
+
+// TODO: Find actual solution
+extension Identifier {
+  nonisolated(unsafe) private static var tokens = [TokenSyntax]()
+
+  init(_immortalizingString string: String) {
+    let token: TokenSyntax = "\(raw: string)"
+    Identifier.tokens.append(token)
+    self = Identifier(token)!
+  }
 }
 
 extension GenericExtensionState where TypeName == TestTypeName {
@@ -73,7 +84,7 @@ extension GenericExtensionState where TypeName == TestTypeName {
     self.init(
       _uncheckedDependencies: dependencies.map({
         let mappedMembers: [TypeMember] = $0.members.map({ member in
-          TypeMember(name: Identifier(canonicalName: member), decls: [])
+          return TypeMember(name: Identifier(_immortalizingString: member), decls: [])
         })
         return GenericExtensionDependency<TestTypeName>(dependencyTypeName: $0.baseType, members: mappedMembers)
       }),
@@ -93,7 +104,7 @@ extension GenericExtensionState where TypeName == TestTypeName {
   fileprivate static func invalidCycle(
     dependencies: [ExtensionDependency],
     cycleElements: [(introducingDecl: String?, extension: String, base: TestTypeName)],
-    conflictingMember: StaticString,
+    conflictingMember: String,
     file: StaticString = #file,
     line: UInt = #line
   ) -> GenericExtensionState {
@@ -131,7 +142,7 @@ extension GenericExtensionState where TypeName == TestTypeName {
 
     let cycle = GenericExtensionBindingCycle<TestTypeName>(
       dependencyPath: dependencyPath,
-      dependencyMember: Identifier(canonicalName: conflictingMember)
+      dependencyMember: Identifier(_immortalizingString: conflictingMember)
     )
 
     return GenericExtensionState<TestTypeName>(
@@ -692,11 +703,98 @@ final class TestQualifiedTypeName: XCTestCase {
         to: "_(File.swift)::T_1._(File.swift)::T_0",
         dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_1", members: ["Prev", "T_0"])]
       ))
-      // FIXME: How do we not detect a cycle here gng?
       extension T_1.Prev { struct T_3 {} }
 
       extension T_1 { struct T_0 {} }
       """
+    ])
+  }
+
+  /// Similar to pathological n=3 above but for any `n`
+  func testPathologicalArbitrary() {
+    let n = 50
+    precondition(n >= 2, "Pathological case requires `n` of at least 2.")
+
+    var lookupSource = LexicalLookupSource<TypeResolutionMatcher>.Interpolation()
+
+    // Add the type definitions: struct T_0, ..., struct T_N
+    for i in 0...n {
+      lookupSource.appendLiteral(
+        """
+        struct T_\(i) {}
+        """
+      )
+    }
+    lookupSource.appendLiteral("\n")
+
+    // Link to the last type
+    lookupSource.appendInterpolation(
+      extensionState: .bound(
+        to: TestTypeName(stringLiteral: "_(File.swift)::T_0"),
+        dependencies: []
+      )
+    )
+    lookupSource.appendLiteral(
+      """
+      extension T_0 { typealias Last = T_\(n) }
+      extension T_0.Last { typealias Prev = T_\(n-1) }
+
+      """
+    )
+
+    // Link all the way back to T_N.Prev > T_{N-2} ..to.. T_2.Prev > T_0
+    for i in stride(from: n, to: 1, by: -1) {
+      lookupSource.appendInterpolation(
+        extensionState: .bound(
+          to: TestTypeName(stringLiteral: "_(File.swift)::T_\(i-1)"),
+          dependencies: [
+            ExtensionDependency(
+              baseType: TestTypeName(stringLiteral: "_(File.swift)::T_\(i)"),
+              members: [
+                "Prev", "T_\(i-1)",
+              ]
+            )
+          ]
+        )
+      )
+      lookupSource.appendLiteral(
+        """
+        extension T_\(i).Prev { typealias Prev = T_\(i-2) }
+
+        """
+      )
+    }
+
+    // Introduce (and check for) the cycle
+    var cycleElements: [(introducingDecl: String?, extension: String, base: TestTypeName)] = (0..<n - 1).map({ i in
+      (
+        introducingDecl: "typealias Prev = T_\(i)", extension: "extension T_\(i+2).Prev {}",
+        base: TestTypeName(stringLiteral: "_(File.swift)::T_\(i+1)")
+      )
+    })
+    cycleElements.append(
+      (
+        introducingDecl: "typealias Prev = T_\(n-1)" as String?, extension: "extension T_0.Last {}",
+        base: TestTypeName(stringLiteral: "_(File.swift)::T_\(n)")
+      )
+    )
+    lookupSource.appendInterpolation(
+      extensionState: GenericExtensionState.invalidCycle(
+        dependencies: [
+          ExtensionDependency(baseType: "_(File.swift)::T_1", members: ["Prev", "T_0"])
+        ],
+        cycleElements: cycleElements,
+        conflictingMember: "T_\(n)"
+      )
+    )
+    lookupSource.appendLiteral(
+      """
+      extension T_1.Prev { struct T_\(n) {} }
+      """
+    )
+
+    assertTypeResolution([
+      "File.swift": LexicalLookupSource<TypeResolutionMatcher>(stringInterpolation: lookupSource)
     ])
   }
 

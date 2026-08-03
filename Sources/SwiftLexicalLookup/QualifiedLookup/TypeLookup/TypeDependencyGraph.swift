@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+// TODO: Remove Glibc import
+@preconcurrency import Glibc
 import SwiftDiagnostics
 import SwiftIfConfig
 import SwiftSyntax
@@ -885,14 +887,17 @@ extension TypeDependencyGraph {
     }
     guard let extendedTypeState: NominalType = namesToTypes[extendedTypeName] else {
       // TODO: Remove
-      // print(
-      //   "[SwiftLexicalLookup] Internal error: Extension `\(extensionDecl._memberlessDescription)` bound to unregistered type '\(extendedTypeName)'."
-      // )
-      // return ExtensionState(
-      //   _uncheckedDependencies: [],
-      //   extensionDecl: extensionDecl,
-      //   resolvedType: .failure(.extensionNotBoundYet)
-      // )
+      print(
+        "[SwiftLexicalLookup] Internal error: Extension `\(extensionDecl._memberlessDescription)` bound to unregistered type '\(extendedTypeName)'."
+      )
+
+      fflush(stdout)
+
+      return ExtensionState(
+        _uncheckedDependencies: [],
+        extensionDecl: extensionDecl,
+        resolvedType: .failure(.extensionNotBoundYet)
+      )
       fatalError(
         "[SwiftLexicalLookup] Internal error: Extension `\(extensionDecl._memberlessDescription)` bound to unregistered type '\(extendedTypeName)'."
       )

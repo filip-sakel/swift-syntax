@@ -79,7 +79,7 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
   struct Interpolation: StringInterpolationProtocol {
     fileprivate var components: [Component]
 
-    init(literalCapacity: Int, interpolationCount: Int) {
+    init(literalCapacity: Int = 0, interpolationCount: Int = 0) {
       components = []
     }
     mutating func appendLiteral(_ literal: String) {

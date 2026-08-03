@@ -19,8 +19,8 @@ import XCTest
 /// A QualifiedTypeNameGlobalType represented as a `StaticString`.
 /// Provides a CustomDebugStringConvertible conformance without quotes.
 struct TestTypeName: Hashable, ExpressibleByStringLiteral, CustomDebugStringConvertible {
-  let value: StaticString
-  init(stringLiteral value: StaticString) {
+  let value: String
+  init(stringLiteral value: String) {
     self.value = value
   }
 
