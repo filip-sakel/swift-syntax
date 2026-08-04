@@ -836,7 +836,11 @@ final class TestQualifiedTypeName: XCTestCase {
 
       \(extensionState: .bound(
         to: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D",
-        dependencies: [ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"])]
+        dependencies: [
+          ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"]),
+          ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A", members: ["C"]),
+          ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A._(File.swift)::C", members: ["D"]),
+        ]
       ))
       extension A.B.C.D { struct E {} }
 
