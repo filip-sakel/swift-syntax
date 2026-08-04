@@ -477,14 +477,14 @@ extension TypeQualifierFailure {
 /// Finds the main declaration and qualified name of the nominal types
 /// to which the the given type syntax refers.
 @_spi(_QualifiedLookup) public struct TypeQualifier {
-  var logText = ""
+  // var logText = ""
   var logPrefix = [String]()
 
   mutating func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
     guard _verbose else { return }
     // Keep log text separately
     let newLine = "\(logPrefix.map({ "[\($0)]" }).joined()) \(component)\n"
-    logText += newLine + "\n"
+    // logText += newLine + "\n"
     // Print new line
     print(newLine)
   }
@@ -1549,7 +1549,8 @@ extension TypeQualifier {
         }
         return (extendedGlobalName, extendedTypeReference.mainDecl)
       }),
-      dependencies: extensionDependencies
+      dependencies: extensionDependencies,
+      verbose: _verbose
     )
 
     // Extract the invalidated extensions or handle failures

@@ -436,8 +436,8 @@ extension SymbolTable3 {
       (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
       TypeQualifier.Failure
     >,
-    // dependencies: [ExtensionBindingResult.Dependency]
-    dependencies: DependencyTracker
+    dependencies: DependencyTracker,
+    verbose: Bool
   ) -> Result<BindingResult, ExtensionBindingFailure> {
     // TODO: Refactor; super ugly (perhaps the caller should have this responsibility;
     // also we get back a NominalTypeRef only to discard it)
@@ -458,7 +458,8 @@ extension SymbolTable3 {
       extensionDecl,
       isUpdatingInvalidating: false,
       to: result,
-      dependencies: dependencies
+      dependencies: dependencies,
+      verbose: verbose
     )
   }
 
@@ -479,14 +480,15 @@ extension SymbolTable3 {
       (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
       TypeQualifier.Failure
     >,
-    // dependencies: [ExtensionBindingResult.Dependency]
-    dependencies: DependencyTracker
+    dependencies: DependencyTracker,
+    verbose: Bool
   ) -> Result<BindingResult, ExtensionBindingFailure> {
     _admitExtension(
       extensionDecl,
       isUpdatingInvalidating: true,
       to: result,
-      dependencies: dependencies
+      dependencies: dependencies,
+      verbose: verbose
     )
   }
 
@@ -498,8 +500,8 @@ extension SymbolTable3 {
       (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
       TypeQualifier.Failure
     >,
-    // dependencies: [ExtensionBindingResult.Dependency]
-    dependencies: DependencyTracker
+    dependencies: DependencyTracker,
+    verbose: Bool
   ) -> Result<BindingResult, ExtensionBindingFailure> {
     // Get extension and module
     guard let module = moduleMap[extensionDecl.fileRoot] else {
@@ -530,13 +532,17 @@ extension SymbolTable3 {
       }).joined(separator: ", ")
     })
     // New graph description
-    let dependencyGraphDescription = _describeDependencyGraph()
-    print(String(repeating: "-", count: 80))
-    print(
-      "After \(actionVerb) extension `\(extensionDecl._memberlessDescription)` to \(result.map(\.qualifiedName.debugDescription)) with dependencies: \(dependencyDescription); admission result (i.e. invalidated exts): \(admissionResultDescriptions), new dependency graph is:"
-    )
-    print(dependencyGraphDescription)
-    print(String(repeating: "-", count: 80) + "\n")
+    // TODO: Remove once done debugging
+    if true || verbose {
+      let (dependencyGraphDescription, hasErrors) = _describeDependencyGraph(dependencyGraph: dependencyGraph)
+      print(String(repeating: "-", count: 80))
+      print(
+        "After \(actionVerb) extension `\(extensionDecl._memberlessDescription)` to \(result.map(\.qualifiedName.debugDescription)) with dependencies: \(dependencyDescription); admission result (i.e. invalidated exts): \(admissionResultDescriptions), new dependency graph is:"
+      )
+      print(dependencyGraphDescription)
+      print(String(repeating: "-", count: 80) + "\n")
+      precondition(!hasErrors, "[SwiftLexicalLookup] Internal error: Detected dependency-graph corruption.")
+    }
 
     switch admissionResult {
     case .success(let success):
@@ -998,8 +1004,10 @@ extension ExtensionBindingResult.Dependency: CustomDebugStringConvertible {
 // Debug Type State
 
 extension SymbolTable3 {
-  @_spi(_QualifiedLookupTests) public func _describeDependencyGraph() -> String {
-    var result = ""
+  @_spi(_QualifiedLookupTests) public func _describeDependencyGraph(
+    dependencyGraph: TypeDependencyGraph
+  ) -> (description: String, hasErrors: Bool) {
+    var description = ""
     var group = GroupedDiagnostics()
 
     // Add all registered files
@@ -1010,7 +1018,7 @@ extension SymbolTable3 {
         // Don't readmit duplicate file names
         // TODO: Should handle modules
         guard addedNames.insert(fileIdentifier).inserted else {
-          result += "Duplicate file identifier \(fileIdentifier)\n"
+          description += "Duplicate file identifier \(fileIdentifier)\n"
           continue
         }
 
@@ -1019,14 +1027,14 @@ extension SymbolTable3 {
     }
 
     // Add dependency-graph diagnostics
-    let diagnostics = dependencyGraph._describeWithDiagnostics()
+    let (diagnostics, hasErrors) = dependencyGraph._describeWithDiagnostics()
     for diagnostic in diagnostics {
       group.addDiagnostic(diagnostic)
     }
 
     // Print to result
-    result += DiagnosticsFormatter(colorize: true).annotateSources(in: group)
+    description += DiagnosticsFormatter(colorize: true).annotateSources(in: group)
 
-    return result
+    return (description, hasErrors)
   }
 }

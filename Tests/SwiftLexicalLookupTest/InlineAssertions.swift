@@ -78,9 +78,12 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
 
   struct Interpolation: StringInterpolationProtocol {
     fileprivate var components: [Component]
+    /// A strong reference to identifier tokens used by `allocateIdentifier`
+    fileprivate var identifierTokens: [TokenSyntax]
 
     init(literalCapacity: Int = 0, interpolationCount: Int = 0) {
       components = []
+      identifierTokens = []
     }
     mutating func appendLiteral(_ literal: String) {
       components.append(.stringFragment(literal))
@@ -98,6 +101,15 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
       line: UInt = #line
     ) {
       components.append(.annotation(annotation: .expectations(expectations: expectations), file: file, line: line))
+    }
+    /// A correct way to create identifiers from strings. These identifier's lifetime
+    /// is tired to `LexicalLookupSource.Interpolation`, passed onto `LexicalLookupSource`
+    /// and should stay alive for `_assertLexicalLookup`.
+    mutating func allocateIdentifier(string: String) -> Identifier {
+      let token = TokenSyntax.identifier(string)
+      identifierTokens.append(token)
+      // Force unwrap because we're passing an identifier token.
+      return Identifier(token)!
     }
   }
 

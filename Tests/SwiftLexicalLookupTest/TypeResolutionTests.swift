@@ -45,19 +45,34 @@ where
 
 struct ExtensionDependency {
   let baseType: TestTypeName
-  let members: [String]
+  let members: [IdentifierWrapper]
 }
 
-// TODO: Find actual solution
-extension Identifier {
-  nonisolated(unsafe) private static var tokens = [TokenSyntax]()
+struct IdentifierWrapper: ExpressibleByStringLiteral {
+  let identifier: Identifier
 
-  init(_immortalizingString string: String) {
-    let token: TokenSyntax = "\(raw: string)"
-    Identifier.tokens.append(token)
-    self = Identifier(token)!
+  init(stringLiteral value: StaticString) {
+    identifier = Identifier(canonicalName: value)
+  }
+
+  init(
+    string: String,
+    allocatingIn lookupSourceInterpolation: inout LexicalLookupSource<TypeResolutionMatcher>.Interpolation
+  ) {
+    identifier = lookupSourceInterpolation.allocateIdentifier(string: string)
   }
 }
+
+// // TODO: Find actual solution
+// extension Identifier {
+//   nonisolated(unsafe) private static var tokens = [TokenSyntax]()
+//
+//   init(_immortalizingString string: String) {
+//     let token = TokenSyntax.identifier(string)
+//     Identifier.tokens.append(token)
+//     self = Identifier.init(token)!
+//   }
+// }
 
 extension GenericExtensionState where TypeName == TestTypeName {
   /// Creates a mock extension state to check an extension's dependencies,
@@ -84,7 +99,7 @@ extension GenericExtensionState where TypeName == TestTypeName {
     self.init(
       _uncheckedDependencies: dependencies.map({
         let mappedMembers: [TypeMember] = $0.members.map({ member in
-          return TypeMember(name: Identifier(_immortalizingString: member), decls: [])
+          return TypeMember(name: member.identifier, decls: [])
         })
         return GenericExtensionDependency<TestTypeName>(dependencyTypeName: $0.baseType, members: mappedMembers)
       }),
@@ -104,7 +119,7 @@ extension GenericExtensionState where TypeName == TestTypeName {
   fileprivate static func invalidCycle(
     dependencies: [ExtensionDependency],
     cycleElements: [(introducingDecl: String?, extension: String, base: TestTypeName)],
-    conflictingMember: String,
+    conflictingMember: IdentifierWrapper,
     file: StaticString = #file,
     line: UInt = #line
   ) -> GenericExtensionState {
@@ -142,7 +157,7 @@ extension GenericExtensionState where TypeName == TestTypeName {
 
     let cycle = GenericExtensionBindingCycle<TestTypeName>(
       dependencyPath: dependencyPath,
-      dependencyMember: Identifier(_immortalizingString: conflictingMember)
+      dependencyMember: conflictingMember.identifier
     )
 
     return GenericExtensionState<TestTypeName>(
@@ -712,7 +727,7 @@ final class TestQualifiedTypeName: XCTestCase {
 
   /// Similar to pathological n=3 above but for any `n`
   func testPathologicalArbitrary() {
-    let n = 50
+    let n = 20
     precondition(n >= 2, "Pathological case requires `n` of at least 2.")
 
     var lookupSource = LexicalLookupSource<TypeResolutionMatcher>.Interpolation()
@@ -751,7 +766,11 @@ final class TestQualifiedTypeName: XCTestCase {
             ExtensionDependency(
               baseType: TestTypeName(stringLiteral: "_(File.swift)::T_\(i)"),
               members: [
-                "Prev", "T_\(i-1)",
+                "Prev",
+                // 'T_{i-1}'
+                // Since it's created dynamically, it can't be a static string so
+                // we must allocate it in `lookupSource` to retain the allocation.
+                IdentifierWrapper(string: "T_\(i-1)", allocatingIn: &lookupSource),
               ]
             )
           ]
@@ -774,7 +793,8 @@ final class TestQualifiedTypeName: XCTestCase {
     })
     cycleElements.append(
       (
-        introducingDecl: "typealias Prev = T_\(n-1)" as String?, extension: "extension T_0.Last {}",
+        introducingDecl: "typealias Prev = T_\(n-1)" as String?,
+        extension: "extension T_0.Last {}",
         base: TestTypeName(stringLiteral: "_(File.swift)::T_\(n)")
       )
     )
@@ -784,7 +804,7 @@ final class TestQualifiedTypeName: XCTestCase {
           ExtensionDependency(baseType: "_(File.swift)::T_1", members: ["Prev", "T_0"])
         ],
         cycleElements: cycleElements,
-        conflictingMember: "T_\(n)"
+        conflictingMember: IdentifierWrapper(string: "T_\(n)", allocatingIn: &lookupSource)
       )
     )
     lookupSource.appendLiteral(

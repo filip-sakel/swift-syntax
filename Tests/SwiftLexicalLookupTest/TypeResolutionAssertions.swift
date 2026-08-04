@@ -16,7 +16,7 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
-/// A QualifiedTypeNameGlobalType represented as a `StaticString`.
+/// A QualifiedTypeNameGlobalType represented as a `String`.
 /// Provides a CustomDebugStringConvertible conformance without quotes.
 struct TestTypeName: Hashable, ExpressibleByStringLiteral, CustomDebugStringConvertible {
   let value: String
