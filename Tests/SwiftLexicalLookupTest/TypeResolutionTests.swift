@@ -848,44 +848,81 @@ final class TestQualifiedTypeName: XCTestCase {
       extension A { struct A {} }
       """
     ])
-
-    // TODO: Consider following case for redecl handling
-    // struct A {
-    //   typealias B = A
-    //   struct C {}
-    // }
-    //
-    // extension A.B {
-    //   struct C { // Initially treated as redecl
-    //     struct D {}
-    //   }
-    // }
-    //
-    // // Initially ambiguous ref to `C`
-    // extension A.B.C.D { struct E {} }
-    //
-    // // After `A` gains a member type `A`, `struct C` above
-    // // resolves to `_::A._::A._::C`
-    // extension A { struct A {} }
   }
 
-  // TODO: Add test where extension state resolves to a cycle, but
-  // a later extension actually makes everything resolve fine (look at last bug report)
+  func testExtensionNestedTypeRedeclaration1() {
+    assertTypeResolution([
+      "File.swift": """
+      struct A {
+        typealias B = A
+        struct C {}
+      }
 
-  /// TODO: Check main decls actually don't have dependencies (with example in `TypeDependencyGraph` of main decl nested in dependency)
-  /// We need to save dependencies to the main nominal-type declaration,
-  /// which we represent as `nil`.
-  ///
-  /// For instance, suppose we have `struct A {}` and we bind:
-  /// ```swift
-  /// extension A.B {}
-  /// ```
-  /// This extension depends on the member type 'B' of '(MyFile.swift)::A'.
-  /// Currently, no extensions introduce this member type but we need to record
-  /// the dependency in case another extension introduces
-  /// '(MyFile.swift)::A' > 'B'. Hence, we say the introducing decl is `nil` (the
-  /// main declaration.)
-  ///
+      \(extensionState: .bound(
+        to: "_(File.swift)::A._(File.swift)::A",
+        dependencies: [
+          ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"]),
+        ]
+      ))
+      extension A.B {
+        struct C { // Initially treated as redecl
+          struct D {}
+        }
+      }
+
+      // Initially ambiguous ref to `C`
+      \(extensionState: .bound(
+        to: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D",
+        dependencies: [
+          ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"]),
+          ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A", members: ["C"]),
+          ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A._(File.swift)::C", members: ["D"]),
+        ]
+      ))
+      extension A.B.C.D { struct E {} }
+
+      // After `A` gains a member type `A`, `struct C` above
+      // resolves to `_::A._::A._::C`
+      extension A { struct A {} }
+      """
+    ])
+  }
+
+  /// Same as above but we bind `extension A.B.C.D` first.
+  func testExtensionNestedTypeRedeclaration2() {
+    assertTypeResolution([
+      "File.swift": """
+      struct A {
+        typealias B = A
+        struct C {}
+      }
+
+      extension A.B {
+        struct C { // Initially treated as redecl
+          struct D {}
+        }
+      }
+
+      // Initially ambiguous ref to `C`
+      //
+      // Because this is the first `\\(extensionState: ...)` assertion,
+      // we bind this extension first.
+      \(extensionState: .bound(
+        to: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D",
+        dependencies: [
+          ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"]),
+          ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A", members: ["C"]),
+          ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A._(File.swift)::C", members: ["D"]),
+        ]
+      ))
+      extension A.B.C.D { struct E {} }
+
+      // After `A` gains a member type `A`, `struct C` above
+      // resolves to `_::A._::A._::C`
+      extension A { struct A {} }
+      """
+    ])
+  }
 
   // func testCrossFileExtension() {
   //   assertQualifiedTypeName([

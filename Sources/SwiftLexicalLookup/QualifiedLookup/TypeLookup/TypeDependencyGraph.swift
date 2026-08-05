@@ -252,7 +252,7 @@ public struct TypeDependencyGraph {
     internal private(set) var version = 0
 
     /// Invariants: count >= 1; sorted by position in increasing order
-    private var _mainDecls: [MappedDeclGroup<NominalTypeDeclSyntax>]
+    fileprivate private(set) var _mainDecls: [MappedDeclGroup<NominalTypeDeclSyntax>]
 
     private(set) var boundExtensions: [SymbolTable3.Module: [SourceFileRoot<ExtensionDeclSyntax>: TypeTable]]
 
@@ -855,7 +855,7 @@ extension TypeDependencyGraph {
       request: "Removing `\(extensionDecl._memberlessDescription)`",
       describe: { _ in "" },
       perform: { `self` in
-        self._introspect(symbolTable: symbolTable)
+        self._introspect(symbolTable: symbolTable, onlyLogIfCorrupted: true)
         defer { self._introspect(symbolTable: symbolTable) }
         return self.__removeExtension(
           extensionDecl,
@@ -910,7 +910,7 @@ extension TypeDependencyGraph {
         )
       }
       // Ensure all members are unregistered (only happens with nominal-type declarations)
-      for (memberName, _) in extensionMembers.typeMembersToDecls {
+      for (memberName, member) in extensionMembers.typeMembersToDecls {
         let potentialMemberTypeName = extendedTypeName.addingComponents([
           QualifiedTypeNameGlobalType.Component(
             name: memberName,
@@ -919,11 +919,20 @@ extension TypeDependencyGraph {
             symbolTable: symbolTable
           )
         ])
-        guard namesToTypes[potentialMemberTypeName] == nil else {
+        // Ensure that if a type remains, none of the member declarations are still registered
+        //
+        // Note: The complexity of the following check is O(n*m) where `n` is the number of `_mainDecls`
+        // and `m` the number of decls named `memberName` in the given extension. But we usually have a
+        // single main declaration and single same-name declaration in an extension.
+        if let memberType = namesToTypes[potentialMemberTypeName],
+          memberType._mainDecls.contains(where: { nominalDecl in
+            member.decls.contains(where: { $0.typeDeclSyntax.as(NominalTypeDeclSyntax.self) == nominalDecl.declGroup })
+          })
+        {
           return .failure(ExtensionRemovalFailure.remainingRegistredMemberType(memberTypeName: potentialMemberTypeName))
         }
       }
-    case .failure(let failure):
+    case .failure:
       // Failed extensions don't introduce types => no dependents
       break
     }
@@ -993,7 +1002,7 @@ extension TypeDependencyGraph {
       request: "Unbinding member type '\(baseTypeName.debugDescription)' > '\(member.name.name)'",
       describe: { "" },
       perform: { `self` in
-        self._introspect(symbolTable: symbolTable)
+        self._introspect(symbolTable: symbolTable, onlyLogIfCorrupted: true)
         defer { self._introspect(symbolTable: symbolTable) }
         return self.__unbindMemberType(
           baseTypeName: baseTypeName,
@@ -1094,12 +1103,15 @@ extension TypeDependencyGraph {
 
   fileprivate mutating func _introspect(
     symbolTable: SymbolTable3,
+    onlyLogIfCorrupted: Bool = false,
     file: StaticString = #file,
     line: UInt = #line,
     function: StaticString = #function
   ) {
     let (description, hasErrors) = symbolTable._describeDependencyGraph(dependencyGraph: self)
-    log(!description.isEmpty ? description : "<empty graph>")
+    if hasErrors || !onlyLogIfCorrupted {
+      log(!description.isEmpty ? description : "<empty graph>")
+    }
     guard !hasErrors else {
       sleep(1)
       fatalError(
@@ -1122,7 +1134,7 @@ extension TypeDependencyGraph {
       request: "Unbinding `\(extensionDecl._memberlessDescription)`",
       describe: \.debugDescription,
       perform: { `self` in
-        self._introspect(symbolTable: symbolTable)
+        self._introspect(symbolTable: symbolTable, onlyLogIfCorrupted: true)
         defer { self._introspect(symbolTable: symbolTable) }
         return self.__unbindExtension(
           extensionDecl,
@@ -1224,7 +1236,7 @@ extension TypeDependencyGraph {
         "Invalidating dependents of '\(modifiedTypeName.debugDescription)' > \(modifiedMembers.typeMembersToDecls.map(\.key.name))",
       describe: { "\($0)" },
       perform: { `self` in
-        self._introspect(symbolTable: symbolTable)
+        self._introspect(symbolTable: symbolTable, onlyLogIfCorrupted: true)
         defer { self._introspect(symbolTable: symbolTable) }
         return self.__invalidateDependents(
           modifiedTypeName: modifiedTypeName,
@@ -1664,7 +1676,7 @@ extension TypeDependencyGraph {
 
       var invalidatedExtensionsTmp = [ExtensionState]()
       //let newTypeDependents =
-      _introspect(symbolTable: symbolTable)
+      _introspect(symbolTable: symbolTable, onlyLogIfCorrupted: true)
       _invalidateDependents(
         modifiedTypeName: extendedTypeName,
         modifiedMembers: mappedExtensionDecl.typeMap,

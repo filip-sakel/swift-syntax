@@ -368,6 +368,14 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
 // MARK: Assert Function
 
+/// Creates assertions for type resolution
+///
+/// Note that we don't guarantee that extension binding will
+/// happen in a specific order. If name lookup works properly,
+/// this arbitrary order may only impact performance. However,
+/// when debugging tests, you can place `\(extensionState: ...)`
+/// to the first extension you want to bind. After that, it's still
+/// up to the dependency graph to decide which extension goes next.
 func assertTypeResolution(
   _ lookupSources: KeyValuePairs<String, LexicalLookupSource<TypeResolutionMatcher>>,
   moduleName: StaticString = "MyModule",
