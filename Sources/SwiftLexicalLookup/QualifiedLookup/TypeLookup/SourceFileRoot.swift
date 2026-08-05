@@ -84,37 +84,15 @@ extension SourceFileRoot where Node == TypeAliasDeclSyntax {
   }
 }
 
-// TODO: Remove
-// extension SourceFileRoot: SyntaxProtocol {
-//   public init?(_ node: __shared some SyntaxProtocol) {
-//     self.init(_checked: node)
-//   }
-//
-//   init?(_ node: __shared Node) {
-//     self.init(_checked: node)
-//   }
-//
-//   /// Attempts to cast the current syntax node to a given specialized syntax type,
-//   /// maintaing the `SourceFileRoot` wrapper.
-//   ///
-//   /// - Returns: An instance of the specialized type, or `nil` if the cast fails.
-//   func `as`<S: SyntaxProtocol>(_ syntaxType: S.Type) -> SourceFileRoot<S>? {
-//     guard let castNode = node.as(S.self) else { return nil }
-//     return SourceFileRoot<S>(_unchecked: castNode)
-//   }
-//
-//   public var _syntaxNode: Syntax { node._syntaxNode }
-//
-//   public static var structure: SyntaxNodeStructure {
-//     Node.structure
-//   }
-//
-//   var fileRoot: SourceFileSyntax {
-//     // By `_syntaxNode` invariant
-//     node.root.cast(SourceFileSyntax.self)
-//   }
-// }
-
 extension SourceFileRoot: Sendable where Node: Sendable {}
 extension SourceFileRoot: Equatable where Node: Equatable {}
 extension SourceFileRoot: Hashable where Node: Hashable {}
+
+// MARK: Debug
+
+@_spi(_QualifiedLookupTests)
+extension SourceFileRoot: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    node.trimmedDescription
+  }
+}

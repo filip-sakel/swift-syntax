@@ -924,6 +924,31 @@ final class TestQualifiedTypeName: XCTestCase {
     ])
   }
 
+  func testRedeclarationInExtension() {
+    assertTypeResolution([
+      "File.swift": """
+      struct A {
+        struct B {}
+      }
+
+      extension A.B {
+        struct C {}
+      }
+
+      extension A.B.C { struct D {} }
+
+      // After `A` gains a member type `A`, `struct C` above
+      // resolves to `_::A._::A._::C`
+      extension A.B {
+        typealias C = A // Redeclaration of member `C`
+      }
+
+      // .invalidMembers([("D", .ambiguousTypeDecl(["struct C {}", "typealias C = A"]))])
+      let _: \(failure: .extensionNotBoundYet)A.B.C.D
+      """
+    ])
+  }
+
   // func testCrossFileExtension() {
   //   assertQualifiedTypeName([
   //     "FileA.swift": """

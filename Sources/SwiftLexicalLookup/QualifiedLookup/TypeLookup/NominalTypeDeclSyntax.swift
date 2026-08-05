@@ -155,3 +155,12 @@ extension NominalTypeDeclSyntax: DeclGroupSyntax {
     set { _setGroupProp(\.memberBlock, newValue: newValue) }
   }
 }
+
+// MARK: Upcasts
+
+extension SourceFileRoot where Node == TypeDeclSyntax {
+  init<S: NominalTypeDeclSyntaxProtocol>(_ node: __shared SourceFileRoot<S>) {
+    // All nominal-type declarations are type declarations.
+    self = node.as(TypeDeclSyntax.self)!
+  }
+}
