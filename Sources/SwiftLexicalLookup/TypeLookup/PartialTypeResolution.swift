@@ -57,12 +57,22 @@ public struct TypeReference: Sendable, CustomDebugStringConvertible {
     }
 
     public var debugDescription: String {
-      let modulePrefix = if let module { "\(module.name)::" } else { "" }
+      let modulePrefix: String
+      if let module {
+        modulePrefix = "\(module.name)::"
+      } else {
+        modulePrefix = ""
+      }
       return "\(modulePrefix)\(name.name)"
     }
   }
   public let base: Component
   public private(set) var memberChain: [Component] = []
+
+  // TODO: Simplify if this works
+  init() {
+    fatalError()
+  }
 
   var lastComponent: Component {
     memberChain.last ?? base
@@ -71,11 +81,12 @@ public struct TypeReference: Sendable, CustomDebugStringConvertible {
   func addingComponents(
     _ newComponents: [Component] /*, newTypeSyntax: TypeSyntax*/
   ) -> TypeReference {
-    TypeReference(
-      base: base,
-      memberChain: self.memberChain + newComponents
-        // typeSyntax: newTypeSyntax
-    )
+    fatalError()
+    // TypeReference(
+    //   base: base,
+    //   memberChain: self.memberChain + newComponents
+    //     // typeSyntax: newTypeSyntax
+    // )
   }
 
   public var debugDescription: String {
@@ -101,22 +112,12 @@ public struct InvalidTypeIdentifierFailure: Error {
 
 // MARK: Helpers
 
-extension PartiallyResolvedType {
-  /// Types for which we can use the suppression syntax.
-  /// E.g., `AnyKeyPath & ~Sendable`
-  fileprivate static let _knownSuppressibleTypes: Array = [
-    Identifier(canonicalName: "Copyable"),
-    Identifier(canonicalName: "Escapable"),
-  ]
-}
-
 extension TypeReference.Component {
   // E.g., `Int?` or `Int!` -> `Optional<Int>`
   fileprivate static func _optionalType(type: Attached<TypeSyntax>) -> TypeReference.Component {
     TypeReference.Component(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "Optional"),
-      // introducingSyntax: TypeLikeSyntax.typeSyntax(type)
       introducingSyntax: type
     )
   }
@@ -125,7 +126,6 @@ extension TypeReference.Component {
     TypeReference.Component(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "Array"),
-      // introducingSyntax: TypeLikeSyntax.typeSyntax(type)
       introducingSyntax: type
     )
   }
@@ -136,7 +136,6 @@ extension TypeReference.Component {
     TypeReference.Component(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "InlineArray"),
-      // introducingSyntax: TypeLikeSyntax.typeSyntax(type)
       introducingSyntax: type
     )
   }
@@ -145,7 +144,6 @@ extension TypeReference.Component {
     TypeReference.Component(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "Dictionary"),
-      // introducingSyntax: TypeLikeSyntax.typeSyntax(type)
       introducingSyntax: type
     )
   }
@@ -358,7 +356,7 @@ extension Attached where Node: TypeSyntaxProtocol {
     case .metatypeType, .namedOpaqueReturnType, .classRestrictionType:
       return Result.success(PartiallyResolvedType.composition([]))
     case .suppressedType:
-      // Don't diagnose here since suprressed types can be aliased, e.g.:
+      // Don't diagnose here since suppressed types can be aliased, e.g.:
       //   typealias A = Escapable
       //   struct B: ~A {}
       return Result.success(PartiallyResolvedType.anyType)
