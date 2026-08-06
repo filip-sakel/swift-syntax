@@ -13,7 +13,7 @@
 import SwiftSyntax
 
 /// A protocol for ``TypeLikeSyntax`` nodes.
-@_spi(_QualifiedLookup) public protocol TypeLikeSyntaxProtocol: SyntaxProtocol, SyntaxHashable {}
+@_spi(_QualifiedLookup) public protocol TypeLikeSyntaxProtocol: SyntaxProtocol {}
 
 @_spi(_QualifiedLookup) extension TypeSyntax: TypeLikeSyntaxProtocol {}
 @_spi(_QualifiedLookup) extension NominalTypeDeclSyntax: TypeLikeSyntaxProtocol {}
