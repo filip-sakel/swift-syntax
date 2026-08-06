@@ -39,7 +39,7 @@ public struct LookupConfig {
   /// Doesn't return `.lookForGenericParameters` for the extended type
   /// of an extension.
   ///
-  /// This flag should likely be removed and become the default behavior.
+  /// TODO: This flag should likely be removed and become the default behavior.
   ///
   /// For instance, if we turn on `_dontFindGenericParametersForExtendedType`:
   /// ```
@@ -69,8 +69,11 @@ public struct LookupConfig {
   /// - `finishInSequentialScope` - specifies whether lookup should finish
   ///   in the closest sequential scope. `false` by default.
   /// - `_lookupTopScope` - Whether the top-level scope (SourceFileSyntax) introduces name
-  ///    to the lookup (other than what's introduced from guard statements).
-  @_spi(Experimental) public init(
+  ///   to the lookup (other than what's introduced from guard statements).
+  /// - `_dontFindGenericParametersForExtendedType`: Whether we should avoid
+  ///   returning generic parameters for lookup initiated in an extension's
+  ///   extended-type syntax.
+  @_spi(_QualifiedLookupTests) public init(
     finishInSequentialScope: Bool = false,
     configuredRegions: ConfiguredRegions? = nil,
     _lookupTopScope: Bool,
