@@ -491,7 +491,7 @@ final class TypeResolutionTests: XCTestCase {
   func testNonNominalMembers() {
     // A member "MyType"
     let myTypeMember = ImplicitTypeReferenceComponent(
-      from: TypeReference.Component(
+      from: TypeReference(
         module: nil,
         name: Identifier(canonicalName: "MyType"),
         introducingSyntax: "MyType"

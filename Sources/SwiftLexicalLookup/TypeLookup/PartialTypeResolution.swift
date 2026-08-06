@@ -27,70 +27,42 @@ import SwiftSyntax
 @_spi(_QualifiedLookupTests)
 public enum PartiallyResolvedType {
   case anyType
-  case typeIdentifier(Result<TypeReference.Component, InvalidTypeIdentifierFailure>)
+  case typeIdentifier(Result<TypeReference, InvalidTypeIdentifierFailure>)
   case function(argumentCount: Int)
   case tuple(labels: [Identifier?])
   case member(
     base: Attached<TypeSyntax>,
-    memberComponent: Result<TypeReference.Component, InvalidTypeIdentifierFailure>
+    memberComponent: Result<TypeReference, InvalidTypeIdentifierFailure>
   )
   case composition([Attached<TypeSyntax>])
 }
 
 @_spi(_QualifiedLookupTests)
 public struct TypeReference: Sendable, CustomDebugStringConvertible {
-  public struct Component: Hashable, Sendable, CustomDebugStringConvertible {
-    let module: Identifier?
-    let name: Identifier
-    /// The `TypeSyntax` or `TokenSyntax` from which we derived this type reference component;
-    /// used for targeted diagnostics.
-    public let introducingSyntax: Attached<TypeSyntax>
+  let module: Identifier?
+  let name: Identifier
+  /// The `TypeSyntax` or `TokenSyntax` from which we derived this type reference component;
+  /// used for targeted diagnostics.
+  public let introducingSyntax: Attached<TypeSyntax>
 
-    public init(
-      module: Identifier? = nil,
-      name: Identifier,
-      introducingSyntax: Attached<TypeSyntax>
-    ) {
-      self.module = module
-      self.name = name
-      self.introducingSyntax = introducingSyntax
-    }
-
-    public var debugDescription: String {
-      let modulePrefix: String
-      if let module {
-        modulePrefix = "\(module.name)::"
-      } else {
-        modulePrefix = ""
-      }
-      return "\(modulePrefix)\(name.name)"
-    }
-  }
-  public let base: Component
-  public private(set) var memberChain: [Component] = []
-
-  // TODO: Simplify if this works
-  init() {
-    fatalError()
-  }
-
-  var lastComponent: Component {
-    memberChain.last ?? base
-  }
-
-  func addingComponents(
-    _ newComponents: [Component] /*, newTypeSyntax: TypeSyntax*/
-  ) -> TypeReference {
-    fatalError()
-    // TypeReference(
-    //   base: base,
-    //   memberChain: self.memberChain + newComponents
-    //     // typeSyntax: newTypeSyntax
-    // )
+  public init(
+    module: Identifier? = nil,
+    name: Identifier,
+    introducingSyntax: Attached<TypeSyntax>
+  ) {
+    self.module = module
+    self.name = name
+    self.introducingSyntax = introducingSyntax
   }
 
   public var debugDescription: String {
-    "\(base.debugDescription)\(memberChain.map({ ".\($0.debugDescription)" }).joined())"
+    let modulePrefix: String
+    if let module {
+      modulePrefix = "\(module.name)::"
+    } else {
+      modulePrefix = ""
+    }
+    return "\(modulePrefix)\(name.name)"
   }
 }
 
@@ -112,18 +84,18 @@ public struct InvalidTypeIdentifierFailure: Error {
 
 // MARK: Helpers
 
-extension TypeReference.Component {
+extension TypeReference {
   // E.g., `Int?` or `Int!` -> `Optional<Int>`
-  fileprivate static func _optionalType(type: Attached<TypeSyntax>) -> TypeReference.Component {
-    TypeReference.Component(
+  fileprivate static func _optionalType(type: Attached<TypeSyntax>) -> TypeReference {
+    TypeReference(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "Optional"),
       introducingSyntax: type
     )
   }
   /// E.g., `[Int]` -> `Array<Int>`
-  fileprivate static func _arrayType(type: Attached<TypeSyntax>) -> TypeReference.Component {
-    TypeReference.Component(
+  fileprivate static func _arrayType(type: Attached<TypeSyntax>) -> TypeReference {
+    TypeReference(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "Array"),
       introducingSyntax: type
@@ -132,16 +104,16 @@ extension TypeReference.Component {
   // E.g., `[5 of Int]` -> `InlineArray<5, Int>`
   fileprivate static func _inlineArrayType(
     type: Attached<TypeSyntax>
-  ) -> TypeReference.Component {
-    TypeReference.Component(
+  ) -> TypeReference {
+    TypeReference(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "InlineArray"),
       introducingSyntax: type
     )
   }
   // E.g., `[String: Int]` -> `Dictionary<String, Int>`
-  fileprivate static func _dictionaryType(type: Attached<TypeSyntax>) -> TypeReference.Component {
-    TypeReference.Component(
+  fileprivate static func _dictionaryType(type: Attached<TypeSyntax>) -> TypeReference {
+    TypeReference(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "Dictionary"),
       introducingSyntax: type
@@ -155,13 +127,13 @@ private func _parseModuleAndIdentifier(
   moduleNameToken: TokenSyntax?,
   nameToken: TokenSyntax,
   typeSyntax: Attached<TypeSyntax>
-) -> Result<TypeReference.Component, InvalidTypeIdentifierFailure> {
+) -> Result<TypeReference, InvalidTypeIdentifierFailure> {
   switch (moduleNameToken.map({ Identifier(validating: $0) }), Identifier(validating: nameToken)) {
   // Valid cases are:
   // (a) no module, valid name
   case (nil, let name?):
     return .success(
-      TypeReference.Component(
+      TypeReference(
         module: nil,
         name: name,
         introducingSyntax: typeSyntax
@@ -170,7 +142,7 @@ private func _parseModuleAndIdentifier(
   // (b) valid module, valid name
   case (let moduleName??, let name?):
     return .success(
-      TypeReference.Component(
+      TypeReference(
         module: moduleName,
         name: name,
         introducingSyntax: typeSyntax
