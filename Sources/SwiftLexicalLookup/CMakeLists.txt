@@ -24,13 +24,14 @@ add_swift_syntax_library(SwiftLexicalLookup
   Scopes/SequentialScopeSyntax.swift
   Scopes/WithGenericParametersScopeSyntax.swift
 
+  QualifiedLookup/Attached.swift
   QualifiedLookup/DeclGroupLookup.swift
   QualifiedLookup/DeclName.swift
   QualifiedLookup/DeclScope.swift
   QualifiedLookup/MemberKind.swift
+  QualifiedLookup/NominalTypeDeclSyntax.swift
   QualifiedLookup/ValueDeclSyntax.swift
 
-  TypeLookup/Attached.swift
   TypeLookup/MemberLookupResult.swift
   TypeLookup/ModuleLookup.swift
   TypeLookup/PartiallyResolvedType.swift
