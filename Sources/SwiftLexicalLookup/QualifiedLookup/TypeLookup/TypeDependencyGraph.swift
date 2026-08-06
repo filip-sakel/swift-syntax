@@ -1860,7 +1860,7 @@ extension TypeDependencyGraph {
     isUpdatingInvalidating isFixingInvalidating: Bool,
     to rawResult: Result<
       (qualifiedName: GlobalTypeName, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
-      TypeQualifier.Failure
+      TypeResolver.Failure
     >,
     dependencyTracker: DependencyTracker,
     configuredRegions: ConfiguredRegions?,
@@ -1881,7 +1881,7 @@ extension TypeDependencyGraph {
     let result:
       Result<
         (qualifiedName: GlobalTypeName, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
-        TypeQualifier.Failure
+        TypeResolver.Failure
       >
     switch rawResult {
     case .success(let (extendedTypeName, mainDecl)):
@@ -1900,7 +1900,7 @@ extension TypeDependencyGraph {
         result = .success((extendedTypeName, mainDecl))
       case .success(let cycle):
         // Found cycle, turn success into failure
-        result = .failure(TypeQualifier.Failure.cyclicalExtensionDependency(cycle))
+        result = .failure(TypeResolver.Failure.cyclicalExtensionDependency(cycle))
       case .failure(
         .unresolvedDependencyExtension(
           let dependentExtension,

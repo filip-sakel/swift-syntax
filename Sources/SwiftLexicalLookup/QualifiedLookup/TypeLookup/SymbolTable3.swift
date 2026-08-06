@@ -136,7 +136,7 @@ import SwiftSyntax
   /// Or an alias for `C` invalidates `extension A.B.C`.
   var dependencies: [Dependency]
   var dependents: Set<ExtensionDeclSyntax>
-  var resolution: Result<TypeName, TypeQualifier.Failure>
+  var resolution: Result<TypeName, TypeResolver.Failure>
   // var typeMemberAssumptions: [PartiallyResolvedTypeIdentifier.Component: ResolvedNominalTypeReference]
   // var dependentExtensionsStack: [PartiallyResolvedTypeIdentifier.Component: [ExtensionDeclSyntax]]
 }
@@ -433,7 +433,7 @@ extension SymbolTable3 {
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     to result: Result<
       (qualifiedName: GlobalTypeName, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
-      TypeQualifier.Failure
+      TypeResolver.Failure
     >,
     dependencies: DependencyTracker,
     verbose: Bool
@@ -477,7 +477,7 @@ extension SymbolTable3 {
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     to result: Result<
       (qualifiedName: GlobalTypeName, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
-      TypeQualifier.Failure
+      TypeResolver.Failure
     >,
     dependencies: DependencyTracker,
     verbose: Bool
@@ -497,7 +497,7 @@ extension SymbolTable3 {
     isUpdatingInvalidating isFixingInvalidating: Bool,
     to result: Result<
       (qualifiedName: GlobalTypeName, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
-      TypeQualifier.Failure
+      TypeResolver.Failure
     >,
     dependencies: DependencyTracker,
     verbose: Bool

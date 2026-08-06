@@ -134,7 +134,7 @@ extension ResolvedNominalTypeReference {
 // }
 
 @_spi(_QualifiedLookup)
-public indirect enum TypeQualifierFailure<TypeName: Sendable, MinimalNominal: Sendable, ExtendedNominal: Sendable>:
+public indirect enum TypeResolutionFailure<TypeName: Sendable, MinimalNominal: Sendable, ExtendedNominal: Sendable>:
   Error
 {
   /// Cannot find the given type identifier in scope (using unqualified lookup).
@@ -271,7 +271,7 @@ public indirect enum TypeQualifierFailure<TypeName: Sendable, MinimalNominal: Se
   case extensionNotBoundYet
 }
 
-extension TypeQualifierFailure where TypeName: CustomDebugStringConvertible {
+extension TypeResolutionFailure where TypeName: CustomDebugStringConvertible {
   /// Produce a simplified description for debugging.
   ///
   /// Namely, for syntax nodes we use `.trimmedDescription` and for `ResolvedNominalTypeReference`
@@ -367,7 +367,7 @@ extension TypeQualifierFailure where TypeName: CustomDebugStringConvertible {
   }
 }
 
-extension TypeQualifierFailure:
+extension TypeResolutionFailure:
   CustomDebugStringConvertible
 where
   TypeName: CustomDebugStringConvertible,
@@ -386,7 +386,7 @@ where
   }
 }
 
-extension TypeQualifierFailure {
+extension TypeResolutionFailure {
   /// Tries to pull out a ``.cyclicalTypeReference`` from this failure at depth
   /// zero or one (non-recursive).
   fileprivate var _nestedCycle: [TypeSyntax]? {
@@ -412,13 +412,13 @@ extension TypeQualifierFailure {
     // Only return a nested cycle if we have exactly one result.
     case .invalidMembers(let nestedFailures):
       guard
-        case (_, TypeQualifierFailure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
+        case (_, TypeResolutionFailure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
         nestedFailures.count == 1
       else { return nil }
       return nestedCycle
     case .invalidComposition(let nestedFailures):
       guard
-        case (_, TypeQualifierFailure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
+        case (_, TypeResolutionFailure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
         nestedFailures.count == 1
       else { return nil }
       return nestedCycle
@@ -476,7 +476,7 @@ extension TypeQualifierFailure {
 
 /// Finds the main declaration and qualified name of the nominal types
 /// to which the the given type syntax refers.
-@_spi(_QualifiedLookup) public struct TypeQualifier {
+@_spi(_QualifiedLookup) public struct TypeResolver {
   // var logText = ""
   var logPrefix = [String]()
 
@@ -492,7 +492,7 @@ extension TypeQualifierFailure {
   mutating func withLogging<T>(
     request: String,
     describe: (T) -> String,
-    perform action: (_ mutableSelf: inout TypeQualifier) -> T,
+    perform action: (_ mutableSelf: inout TypeResolver) -> T,
     file: StaticString = #file,
     line: UInt = #line
   ) -> T {
@@ -510,7 +510,7 @@ extension TypeQualifierFailure {
     return result
   }
 
-  public typealias Failure = TypeQualifierFailure<
+  public typealias Failure = TypeResolutionFailure<
     GlobalTypeName, ResolvedNominalTypeReference, NominalTypeRef
   >
 
@@ -612,7 +612,7 @@ extension TypeQualifierFailure {
     }
 
     // Partially resolve the type and handle each case accordingly
-    let partialType: Result<PartiallyResolvedType, TypeResolutionFailure> = typeSyntax.partiallyResolve()
+    let partialType: Result<PartiallyResolvedType, PartialTypeResolutionFailure> = typeSyntax.partiallyResolve()
     switch partialType {
     case .success(.anyType):
       return Result.success(MemberLookupResult.anyType)
@@ -1314,7 +1314,7 @@ extension TypeQualifierFailure {
 
 // MARK: Extension Binding
 
-extension TypeQualifier {
+extension TypeResolver {
   /// Resolve the given type syntax from an extension declaration
   /// to a single nominal type.
   ///
@@ -1690,7 +1690,7 @@ extension TypeQualifier {
 
 // MARK: Resolve Extension / Nominal
 
-extension TypeQualifier {
+extension TypeResolver {
   /// Resolve a qualified-type name to a nominal type with all accessible
   /// extensions bound.
   @_spi(_QualifiedLookupTests) public mutating func resolveNominalType(

@@ -230,8 +230,8 @@ extension TypeResolutionMatcher: LexicalMatcher {
       }
 
       // Evaluate the extended type
-      var typeQualifier = TypeQualifier(symbolTable: symbolTable, _verbose: verbose)
-      let _: Result<GenericResolvedNominalTypeReference<GlobalTypeName>, TypeQualifier.Failure> =
+      var typeQualifier = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
+      let _: Result<GenericResolvedNominalTypeReference<GlobalTypeName>, TypeResolver.Failure> =
         typeQualifier.bindExtension(extensionDecl)
 
       // After binding, we should we have a state
@@ -275,8 +275,8 @@ extension TypeResolutionMatcher: LexicalMatcher {
     }
 
     // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
-    var typeQualifier = TypeQualifier(symbolTable: symbolTable, _verbose: verbose)
-    let actualResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeQualifier.Failure>
+    var typeQualifier = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
+    let actualResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeResolver.Failure>
     do {
       var memberDependencies = DependencyTracker()
       actualResult = typeQualifier.resolveSyntax(

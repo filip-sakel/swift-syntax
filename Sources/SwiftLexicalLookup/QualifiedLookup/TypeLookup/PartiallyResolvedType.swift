@@ -12,48 +12,18 @@
 
 import SwiftSyntax
 
-// @_spi(_QualifiedLoookup) public enum PartiallyResolvedType: Sendable {
-//   // Non-nominal types
-//   case function(argumentCount: Int)
-//   case tuple(labels: [Identifier?])
-//   // Nominal
-//   case nominalIdentifier(module: Identifier?, name: Identifier)
-//   case nominalMember(bases: [PartiallyResolvedType], module: Identifier?, name: Identifier)
-//
-//   // Define known nominal types
-//   /// E.g., `Int?` -> `Optional<Int>`
-//   fileprivate static let _optionalType = PartiallyResolvedType.nominalIdentifier(
-//     module: Identifier(canonicalName: "Swift"),
-//     name: Identifier(canonicalName: "Optional")
-//   )
-//   /// E.g., `[Int]` -> `Array<Int>`
-//   fileprivate static let _arrayType = PartiallyResolvedType.nominalIdentifier(
-//     module: Identifier(canonicalName: "Swift"),
-//     name: Identifier(canonicalName: "Array")
-//   )
-//   // E.g., `[5 of Int]` -> `InlineArray<5, Int>`
-//   fileprivate static let _inlineArrayType = PartiallyResolvedType.nominalIdentifier(
-//     module: Identifier(canonicalName: "Swift"),
-//     name: Identifier(canonicalName: "InlineArray")
-//   )
-//   // E.g., `[String: Int]` -> `Dictionary<String, Int>`
-//   fileprivate static let _dictionaryType = PartiallyResolvedType.nominalIdentifier(
-//     module: Identifier(canonicalName: "Swift"),
-//     name: Identifier(canonicalName: "Dictionary")
-//   )
 extension PartiallyResolvedType {
   /// Types for which we can use the suppression syntax.
   /// E.g., `AnyKeyPath & ~Sendable`
   /// TODO: Get them all from the compiler
-  fileprivate static let _knownSuppressibleTypes: Set = [
+  fileprivate static let _knownSuppressibleTypes: Array = [
     Identifier(canonicalName: "Copyable"),
     Identifier(canonicalName: "Escapable"),
-    // Identifier(canonicalName: "Sendable"),
   ]
 }
 
 // TODO: Consider having invalidIdentifier, invalidMemberIdentifier failures
-@_spi(_QualifiedLoookup) public enum TypeResolutionFailure: Error {
+@_spi(_QualifiedLoookup) public enum PartialTypeResolutionFailure: Error {
   /// Missing types produce errors
   case missingType
 
@@ -73,7 +43,7 @@ extension PartiallyResolvedType {
 }
 
 @_spi(_QualifiedLoookup) public struct LocalizedTypeResolutionFailure: Error {
-  let failures: [TypeSyntax: TypeResolutionFailure]
+  let failures: [TypeSyntax: PartialTypeResolutionFailure]
 }
 // @_spi(_QualifiedLoookup) public enum PartiallyResolvedBaseType {
 //   case metatype(of: TypeSyntax)
@@ -135,13 +105,6 @@ extension PartiallyResolvedTypeIdentifier.Component {
   }
 }
 
-// @_spi(_QualifiedLoookup) public enum MemberLookupResultMergeFailure: Error {
-//   case tupleHasNoTypeMembers
-//   case functionHasNoTypeMembers
-//   case cannotComposeTuple
-//   case cannotComposeFunction
-// }
-
 extension SourceFileRoot where Node: TypeSyntaxProtocol {
   fileprivate func _parseModuleAndIdentifier(
     moduleNameToken: TokenSyntax?,
@@ -187,7 +150,7 @@ extension SourceFileRoot where Node: TypeSyntaxProtocol {
   }
 
   @_spi(_QualifiedLoookup)
-  public func partiallyResolve() -> Result<PartiallyResolvedType, TypeResolutionFailure> {
+  public func partiallyResolve() -> Result<PartiallyResolvedType, PartialTypeResolutionFailure> {
     switch TypeSyntax(node).as(TypeSyntaxEnum.self) {
     // Non-nominal base cases
     //
@@ -231,7 +194,7 @@ extension SourceFileRoot where Node: TypeSyntaxProtocol {
       // === Wildcard `_` ===
       // We can't do anything smart, so we defer to the type checker.
       case (_, .wildcard):
-        return Result.failure(TypeResolutionFailure.wildcardType)
+        return Result.failure(PartialTypeResolutionFailure.wildcardType)
       // === `Any` ===
       // Without a module selector, the keyword "Any" and the backtick-escaped
       // identifier "`Any`" are completely different in terms of lookup. Hence,
@@ -368,7 +331,7 @@ extension SourceFileRoot where Node: TypeSyntaxProtocol {
 
     // Invalid base case
     case .missingType:
-      return Result.failure(TypeResolutionFailure.missingType)
+      return Result.failure(PartialTypeResolutionFailure.missingType)
 
     // Type-sugar is a nominal-type base case
     case .optionalType(let optionalType):
