@@ -12,6 +12,9 @@
 
 import SwiftSyntax
 
+@_spi(_QualifiedLookupTests)
+public typealias ModuleName = Identifier
+
 // TODO: Implement
 func findExternalTopLevelUnqualifiedType(
   module: Identifier,

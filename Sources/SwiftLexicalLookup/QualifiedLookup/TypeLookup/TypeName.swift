@@ -74,7 +74,7 @@ public struct GlobalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
     public init(
       name: Identifier,
       file: SourceFileSyntax,
-      module: SymbolTable3.Module,
+      module: ModuleName,
       symbolTable: borrowing SymbolTable3
     ) {
       assert(

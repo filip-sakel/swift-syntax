@@ -256,7 +256,7 @@ public struct TypeDependencyGraph {
     /// `case redeclarations([MappedDeclGroup<NominalTypeDeclSyntax>])`
     fileprivate private(set) var _mainDecls: [MappedDeclGroup<NominalTypeDeclSyntax>]
 
-    private(set) var boundExtensions: [SymbolTable3.Module: [SourceFileRoot<ExtensionDeclSyntax>: TypeTable]]
+    private(set) var boundExtensions: [ModuleName: [SourceFileRoot<ExtensionDeclSyntax>: TypeTable]]
 
     /// Extensions dependending on qualified lookup of `member` on this type.
     ///
@@ -284,7 +284,7 @@ public struct TypeDependencyGraph {
     /// Returns `nil`  if extension is already bound.
     fileprivate consuming func _bindingExtension(
       _ mappedExtensionDecl: MappedDeclGroup<ExtensionDeclSyntax>,
-      module: SymbolTable3.Module
+      module: ModuleName
     ) -> NominalType? {
       var copy = self
       let oldValue = copy.boundExtensions[module, default: [:]].updateValue(
@@ -298,7 +298,7 @@ public struct TypeDependencyGraph {
 
     fileprivate consuming func _unbindingExtension(
       _ boundExtension: SourceFileRoot<ExtensionDeclSyntax>,
-      module: SymbolTable3.Module
+      module: ModuleName
     ) -> (newNominal: NominalType, extensionTypeTable: TypeTable)? {
       var copy = self
       let extensionTypeTable = copy.boundExtensions[module, default: [:]].removeValue(forKey: boundExtension)
@@ -508,8 +508,8 @@ extension TypeDependencyGraph {
   func findMemberType(
     baseType: NominalTypeRef,
     memberTypeName: Identifier,
-    origin: (typeSyntax: SourceFileRoot<TypeLikeSyntax>, module: SymbolTable3.Module),
-    moduleMap: [SourceFileSyntax: SymbolTable3.Module],
+    origin: (typeSyntax: SourceFileRoot<TypeLikeSyntax>, module: ModuleName),
+    moduleMap: [SourceFileSyntax: ModuleName],
     dependencyTracker: inout DependencyTracker,
     configuredRegions: ConfiguredRegions?
   ) -> Result<[SourceFileRoot<TypeDeclSyntax>], QualifiedTypeLookupFailure> {
@@ -936,7 +936,7 @@ extension TypeDependencyGraph {
 extension TypeDependencyGraph {
   fileprivate func _firstRegisteredMemberName(
     declGroup: SourceFileRoot<DeclGroupSyntaxType>,
-    declGroupModule: SymbolTable3.Module,
+    declGroupModule: ModuleName,
     declGroupTypeName: GlobalTypeName,
     members: TypeTable,
     symbolTable: SymbolTable3
@@ -993,7 +993,7 @@ extension TypeDependencyGraph {
 
   fileprivate mutating func _removeExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
-    extensionDeclModule: SymbolTable3.Module,
+    extensionDeclModule: ModuleName,
     symbolTable: SymbolTable3
   ) -> Result<ExtensionState, ExtensionRemovalFailure> {
     return withLogging(
@@ -1015,7 +1015,7 @@ extension TypeDependencyGraph {
   /// dependents.
   fileprivate mutating func __removeExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
-    extensionDeclModule: SymbolTable3.Module,
+    extensionDeclModule: ModuleName,
     symbolTable: SymbolTable3
   ) -> Result<ExtensionState, ExtensionRemovalFailure> {
     // Get state
@@ -1163,7 +1163,7 @@ extension TypeDependencyGraph {
   /// extensions unbound and no registered subtypes.
   fileprivate mutating func __removeNominalTypeDeclaration(
     _ nominalDecl: SourceFileRoot<NominalTypeDeclSyntax>,
-    nominalDeclModule: SymbolTable3.Module,
+    nominalDeclModule: ModuleName,
     typeName: GlobalTypeName,
     symbolTable: SymbolTable3
   ) -> Result<NominalType?, NominalRemovalFailure> {
@@ -1506,7 +1506,7 @@ extension TypeDependencyGraph {
   fileprivate mutating func _invalidateDependents(
     modifiedTypeName: GlobalTypeName,
     modifiedMembers: TypeTable,
-    modifiedExtensionModule: SymbolTable3.Module,
+    modifiedExtensionModule: ModuleName,
     invalidatedExtensions: inout [ExtensionState],
     symbolTable: borrowing SymbolTable3
   ) {  //-> [TypeDependent] {
@@ -1531,7 +1531,7 @@ extension TypeDependencyGraph {
   fileprivate mutating func __invalidateDependents(
     modifiedTypeName: GlobalTypeName,
     modifiedMembers: TypeTable,
-    modifiedExtensionModule: SymbolTable3.Module,
+    modifiedExtensionModule: ModuleName,
     // directDependents: [TypeDependent],
     invalidatedExtensions: inout [ExtensionState],
     symbolTable: borrowing SymbolTable3
@@ -1856,7 +1856,7 @@ extension TypeDependencyGraph {
   // invalid graph state)
   mutating func _admitExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
-    extensionDeclModule: SymbolTable3.Module,
+    extensionDeclModule: ModuleName,
     isUpdatingInvalidating isFixingInvalidating: Bool,
     to rawResult: Result<
       (qualifiedName: GlobalTypeName, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),

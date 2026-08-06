@@ -561,7 +561,7 @@ extension TypeQualifierFailure {
   }
 
   /// Assumes the file is registered; traps otherwise.
-  func extractModule<S: SyntaxProtocol>(syntax: SourceFileRoot<S>) -> SymbolTable3.Module {
+  func extractModule<S: SyntaxProtocol>(syntax: SourceFileRoot<S>) -> ModuleName {
     guard let module = symbolTable.moduleMap[syntax.fileRoot] else {
       // Should be checked upon entrance in `resolveSyntax`
       fatalError("[SwiftLexicalLookup] Internal error: Unexpectedly found unregistered file: ```\(syntax.fileRoot)```")
@@ -1036,12 +1036,12 @@ extension TypeQualifierFailure {
     }
 
     // Get the type chain
-    let typeChainResult: Result<ChainResolution, ChainResolutionFailure> =
-      nominalDecl.findTypeChain(symbolTable: symbolTable)
-    let typeChain: ChainResolution
-    switch typeChainResult {
+    let typeNameResolutionResult: Result<TypeNameResolution, TypeNameResolutionFailure> =
+      nominalDecl.resolveTypeName(symbolTable: symbolTable)
+    let typeNameResolution: TypeNameResolution
+    switch typeNameResolutionResult {
     case .success(let result):
-      typeChain = result
+      typeNameResolution = result
     case .failure(.unregisteredFile):
       // We check that the root is a source file (& registered in the symbol table)
       // at the top of ``resolveSyntax``.
@@ -1052,10 +1052,10 @@ extension TypeQualifierFailure {
       )
     case .failure(.invalidIdentifier(let invalidIdentifier)):
       // TODO: Decide if this is too granular and we shud have a more general `.invalidContext` instead.
-      return .failure(.other(ChainResolutionFailure.invalidIdentifier(invalidIdentifier)))
+      return .failure(.other(TypeNameResolutionFailure.invalidIdentifier(invalidIdentifier)))
     }
 
-    switch typeChain {
+    switch typeNameResolution {
     case .resolved(let qualifiedTypeName):
       return Result.success(
         MemberLookupResult.memberResults([
@@ -1066,7 +1066,7 @@ extension TypeQualifierFailure {
           )
         ])
       )
-    case .partiallyResolved(let partiallyResolvedName):
+    case .partial(let partiallyResolvedName):
       // Resolve the base extension and resolve the type chain
       let qualifiedBaseResult = bindExtension(partiallyResolvedName.base)
       // Get the module

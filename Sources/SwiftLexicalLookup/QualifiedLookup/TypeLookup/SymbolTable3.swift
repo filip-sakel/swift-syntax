@@ -163,10 +163,9 @@ import SwiftSyntax
   //   QualifiedTypeName
   // >
 
-  public typealias Module = Identifier
   /// Invariant: moduleToSources[moduleName] != nil
-  @_spi(_QualifiedLookupTests) public let moduleName: Module
-  @_spi(_QualifiedLookupTests) public let moduleToSources: [Module: [String: SourceFileSyntax]]
+  @_spi(_QualifiedLookupTests) public let moduleName: ModuleName
+  @_spi(_QualifiedLookupTests) public let moduleToSources: [ModuleName: [String: SourceFileSyntax]]
   let configuredRegions: ConfiguredRegions?
 
   // internal private(set) var typeState: [QualifiedTypeName: NominalType] = [:]
@@ -186,8 +185,8 @@ import SwiftSyntax
   @_spi(_QualifiedLookupTests) public private(set) var dependencyGraph = TypeDependencyGraph()
 
   public init?(
-    moduleName: Module,
-    moduleToSources: [Module: [String: SourceFileSyntax]],
+    moduleName: ModuleName,
+    moduleToSources: [ModuleName: [String: SourceFileSyntax]],
     configuredRegions: ConfiguredRegions?
   ) {
     guard moduleToSources[moduleName] != nil else { return nil }
@@ -212,8 +211,8 @@ import SwiftSyntax
     )
   }
 
-  private(set) lazy var moduleMap: [SourceFileSyntax: Module] = {
-    var result = [SourceFileSyntax: Module]()
+  private(set) lazy var moduleMap: [SourceFileSyntax: ModuleName] = {
+    var result = [SourceFileSyntax: ModuleName]()
     for (module, sources) in moduleToSources {
       for source in sources.values {
         result[source] = module
@@ -927,7 +926,7 @@ extension SymbolTable3 {
     baseType: NominalTypeRef,
     memberTypeName: Identifier,
     introducingTypeSyntax: SourceFileRoot<TypeLikeSyntax>,
-    introducingModule: Module,
+    introducingModule: ModuleName,
     dependencyTracker: inout DependencyTracker,
   ) -> Result<[SourceFileRoot<TypeDeclSyntax>], QualifiedTypeLookupFailure> {
     assert(

@@ -12,27 +12,18 @@
 
 import SwiftSyntax
 
-enum ChainResolution: CustomDebugStringConvertible {
+enum TypeNameResolution {
   case resolved(TypeName)
-  case partiallyResolved(PartiallyResolvedNominalTypeChain)
-
-  var debugDescription: String {
-    switch self {
-    case .resolved(let qualifiedName):
-      return ".resolved(\(qualifiedName.debugDescription))"
-    case .partiallyResolved(let partiallyResolvedName):
-      return ".partiallyResolved(\(partiallyResolvedName.debugDescription))"
-    }
-  }
+  case partial(PartialTypeName)
 }
-enum ChainResolutionFailure: Error {
+enum TypeNameResolutionFailure: Error {
   /// We need the fileRoot to be registered in the symbol table.
   case unregisteredFile
   /// We need all type names in the chain to be valid identifiers
   case invalidIdentifier(TokenSyntax)
 }
 
-struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
+struct PartialTypeName: CustomDebugStringConvertible {
   // Base and members should be in the same file
   let base: SourceFileRoot<ExtensionDeclSyntax>
   /// The names of the members.
@@ -51,7 +42,10 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
   ) {
     // Map and check source file
     let memberNames = members.map({ (decl, name) in
-      assert(decl.fileRoot == base.fileRoot, "Invalid decl root, not source file")
+      assert(
+        decl.fileRoot == base.fileRoot,
+        "[SwiftLexicalLookup] Internal error: Declaration's source file doesn't match base declaration's source file."
+      )
       return name
     })
 
@@ -64,7 +58,6 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
     let memberChain = memberNames.map(\.name).joined(separator: ".")
     return "<\(base.trimmedDescription)>.\(memberChain) (mainDecl: \(String(reflecting: mainDecl?.kind)))"
   }
-
 }
 
 extension SourceFileRoot where Node == NominalTypeDeclSyntax {
@@ -73,11 +66,11 @@ extension SourceFileRoot where Node == NominalTypeDeclSyntax {
   /// Local types (e.g. `func f() { struct A { struct B {} } }`) always resolve.
   /// Global types can also fully resolve, but they only partially resolve if
   /// they're nested within an extension (e.g. `extension A { struct B {} }`).
-  func findTypeChain(symbolTable: SymbolTable3) -> Result<ChainResolution, ChainResolutionFailure> {
+  func resolveTypeName(symbolTable: SymbolTable3) -> Result<TypeNameResolution, TypeNameResolutionFailure> {
     /// Parse the token into a valid identifier or throw
-    func parseName(_ token: TokenSyntax) -> Result<Identifier, ChainResolutionFailure> {
+    func parseName(_ token: TokenSyntax) -> Result<Identifier, TypeNameResolutionFailure> {
       guard let identifier = Identifier(validating: token) else {
-        return .failure(ChainResolutionFailure.invalidIdentifier(token))
+        return .failure(TypeNameResolutionFailure.invalidIdentifier(token))
       }
       return .success(identifier)
     }
@@ -106,8 +99,8 @@ extension SourceFileRoot where Node == NominalTypeDeclSyntax {
       // Extensions can't be resolved right now.
       else if let extensionDecl = currentAncestor.as(ExtensionDeclSyntax.self) {
         return .success(
-          ChainResolution.partiallyResolved(
-            PartiallyResolvedNominalTypeChain(base: extensionDecl, members: members)
+          TypeNameResolution.partial(
+            PartialTypeName(base: extensionDecl, members: members)
           )
         )
       }
@@ -115,7 +108,7 @@ extension SourceFileRoot where Node == NominalTypeDeclSyntax {
       else if currentAncestor.parent?.node == Syntax(self.fileRoot) {
         // Get the module from the symbol table
         guard let module = symbolTable.moduleMap[fileRoot] else {
-          return .failure(ChainResolutionFailure.unregisteredFile)
+          return .failure(TypeNameResolutionFailure.unregisteredFile)
         }
         // Create all the components
         let components = members.map({ (_, name) in
@@ -134,7 +127,7 @@ extension SourceFileRoot where Node == NominalTypeDeclSyntax {
         }
 
         return .success(
-          ChainResolution.resolved(TypeName.global(globalType))
+          TypeNameResolution.resolved(TypeName.global(globalType))
         )
       }
       // Nested scope (if CodeBlockItemListSyntax isn't nested directly under `SourceFileSyntax`)
@@ -149,7 +142,7 @@ extension SourceFileRoot where Node == NominalTypeDeclSyntax {
         }
 
         return .success(
-          ChainResolution.resolved(TypeName.local(localType))
+          TypeNameResolution.resolved(TypeName.local(localType))
         )
       }
 
@@ -163,7 +156,7 @@ extension SourceFileRoot where Node == NominalTypeDeclSyntax {
   }
 }
 
-extension PartiallyResolvedNominalTypeChain {
+extension PartialTypeName {
   /// Resolve using now-qualified base.
   ///
   /// Parameters:
@@ -174,7 +167,7 @@ extension PartiallyResolvedNominalTypeChain {
   func resolve(
     resolvedBase: GenericResolvedNominalTypeReference<GlobalTypeName>,
     originatingSyntax: SourceFileRoot<TypeLikeSyntax>,
-    originatingModule: SymbolTable3.Module,
+    originatingModule: ModuleName,
     symbolTable: borrowing SymbolTable3
   ) -> ResolvedNominalTypeReference {
     // Get the type's main declaration.
