@@ -152,14 +152,14 @@ public struct GlobalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
 @_spi(_QualifiedLookupTests)
 public struct LocalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
   /// The local scope at which this type is declared.
-  let scope: SourceFileRoot<CodeBlockItemListSyntax>
+  let scope: Attached<CodeBlockItemListSyntax>
   /// The type's components
   /// Invariant: `components.count >= 1`
   private(set) var components: [Identifier]
 
   /// Creates a local-type name from the given components; returns `nil`
   /// if no components are provided.
-  init?(scope: SourceFileRoot<CodeBlockItemListSyntax>, components: [Identifier]) {
+  init?(scope: Attached<CodeBlockItemListSyntax>, components: [Identifier]) {
     // Upholds invariant
     guard !components.isEmpty else { return nil }
 
@@ -167,7 +167,7 @@ public struct LocalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
     self.components = components
   }
 
-  init(scope: SourceFileRoot<CodeBlockItemListSyntax>, base: Identifier) {
+  init(scope: Attached<CodeBlockItemListSyntax>, base: Identifier) {
     // We force unwrap because we provide a component
     self.init(scope: scope, components: [base])!
   }

@@ -25,7 +25,7 @@ enum TypeNameResolutionFailure: Error {
 
 struct PartialTypeName: CustomDebugStringConvertible {
   // Base and members should be in the same file
-  let base: SourceFileRoot<ExtensionDeclSyntax>
+  let base: Attached<ExtensionDeclSyntax>
   /// The names of the members.
   ///
   /// E.g., in `extension Int { struct A { struct B {} } }` the
@@ -33,12 +33,12 @@ struct PartialTypeName: CustomDebugStringConvertible {
   let memberNames: [Identifier]
   /// The main declaration of the partially resolved type or `nil` if the
   /// type is not yet resolved (``memberNames`` is empty).
-  let mainDecl: SourceFileRoot<NominalTypeDeclSyntax>?
+  let mainDecl: Attached<NominalTypeDeclSyntax>?
 
   // IMPORTANT: Base and members must share the same fileSyntax root.
   init(
-    base: SourceFileRoot<ExtensionDeclSyntax>,
-    members: [(mainDecl: SourceFileRoot<NominalTypeDeclSyntax>, name: Identifier)]
+    base: Attached<ExtensionDeclSyntax>,
+    members: [(mainDecl: Attached<NominalTypeDeclSyntax>, name: Identifier)]
   ) {
     // Map and check source file
     let memberNames = members.map({ (decl, name) in
@@ -60,7 +60,7 @@ struct PartialTypeName: CustomDebugStringConvertible {
   }
 }
 
-extension SourceFileRoot where Node == NominalTypeDeclSyntax {
+extension Attached where Node == NominalTypeDeclSyntax {
   /// Walks to outer scopes to determine the type chain that uniquely identifies this type.
   ///
   /// Local types (e.g. `func f() { struct A { struct B {} } }`) always resolve.
@@ -82,13 +82,13 @@ extension SourceFileRoot where Node == NominalTypeDeclSyntax {
     case .failure(let failure): return .failure(failure)
     }
 
-    var ancestor: SourceFileRoot<Syntax>? = parent
+    var ancestor: Attached<Syntax>? = parent
     // All the members. Since we include `self`, `members.count>=1`
     var members = [(mainDecl: self, name: firstParsedName)]
 
     while let currentAncestor = ancestor {
       // Nominal types go to the front of the "chain"
-      if let nominalTypeDecl: SourceFileRoot<NominalTypeDeclSyntax> = currentAncestor.as(NominalTypeDeclSyntax.self) {
+      if let nominalTypeDecl: Attached<NominalTypeDeclSyntax> = currentAncestor.as(NominalTypeDeclSyntax.self) {
         let parsedName: Identifier
         switch parseName(nominalTypeDecl.node.name) {
         case .success(let success): parsedName = success
@@ -166,7 +166,7 @@ extension PartialTypeName {
   /// isn't registered in the symbol table.
   func resolve(
     resolvedBase: GenericResolvedNominalTypeReference<GlobalTypeName>,
-    originatingSyntax: SourceFileRoot<TypeLikeSyntax>,
+    originatingSyntax: Attached<TypeLikeSyntax>,
     originatingModule: ModuleName,
     symbolTable: borrowing SymbolTable
   ) -> ResolvedNominalTypeReference {

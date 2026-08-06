@@ -22,10 +22,10 @@ public enum PartiallyResolvedType {
   case function(argumentCount: Int)
   case tuple(labels: [Identifier?])
   case member(
-    base: SourceFileRoot<TypeSyntax>,
+    base: Attached<TypeSyntax>,
     memberComponent: Result<TypeReference.Component, InvalidTypeIdentifierFailure>
   )
-  case composition([SourceFileRoot<TypeSyntax>])
+  case composition([Attached<TypeSyntax>])
 }
 
 @_spi(_QualifiedLookupTests)
@@ -35,12 +35,12 @@ public struct TypeReference: Sendable, CustomDebugStringConvertible {
     let name: Identifier
     /// The `TypeSyntax` or `TokenSyntax` from which we derived this type reference component;
     /// used for targeted diagnostics.
-    public let introducingSyntax: SourceFileRoot<TypeSyntax>
+    public let introducingSyntax: Attached<TypeSyntax>
 
     public init(
       module: Identifier? = nil,
       name: Identifier,
-      introducingSyntax: SourceFileRoot<TypeSyntax>
+      introducingSyntax: Attached<TypeSyntax>
     ) {
       self.module = module
       self.name = name
@@ -104,7 +104,7 @@ extension PartiallyResolvedType {
 
 extension TypeReference.Component {
   // E.g., `Int?` or `Int!` -> `Optional<Int>`
-  fileprivate static func _optionalType(type: SourceFileRoot<TypeSyntax>) -> TypeReference.Component {
+  fileprivate static func _optionalType(type: Attached<TypeSyntax>) -> TypeReference.Component {
     TypeReference.Component(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "Optional"),
@@ -113,7 +113,7 @@ extension TypeReference.Component {
     )
   }
   /// E.g., `[Int]` -> `Array<Int>`
-  fileprivate static func _arrayType(type: SourceFileRoot<TypeSyntax>) -> TypeReference.Component {
+  fileprivate static func _arrayType(type: Attached<TypeSyntax>) -> TypeReference.Component {
     TypeReference.Component(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "Array"),
@@ -123,7 +123,7 @@ extension TypeReference.Component {
   }
   // E.g., `[5 of Int]` -> `InlineArray<5, Int>`
   fileprivate static func _inlineArrayType(
-    type: SourceFileRoot<TypeSyntax>
+    type: Attached<TypeSyntax>
   ) -> TypeReference.Component {
     TypeReference.Component(
       module: Identifier(canonicalName: "Swift"),
@@ -133,7 +133,7 @@ extension TypeReference.Component {
     )
   }
   // E.g., `[String: Int]` -> `Dictionary<String, Int>`
-  fileprivate static func _dictionaryType(type: SourceFileRoot<TypeSyntax>) -> TypeReference.Component {
+  fileprivate static func _dictionaryType(type: Attached<TypeSyntax>) -> TypeReference.Component {
     TypeReference.Component(
       module: Identifier(canonicalName: "Swift"),
       name: Identifier(canonicalName: "Dictionary"),
@@ -148,7 +148,7 @@ extension TypeReference.Component {
 private func _parseModuleAndIdentifier(
   moduleNameToken: TokenSyntax?,
   nameToken: TokenSyntax,
-  typeSyntax: SourceFileRoot<TypeSyntax>
+  typeSyntax: Attached<TypeSyntax>
 ) -> Result<TypeReference.Component, InvalidTypeIdentifierFailure> {
   switch (moduleNameToken.map({ Identifier(validating: $0) }), Identifier(validating: nameToken)) {
   // Valid cases are:
@@ -185,10 +185,10 @@ private func _parseModuleAndIdentifier(
 
 // MARK: Partial Resolution
 
-extension SourceFileRoot where Node: TypeSyntaxProtocol {
+extension Attached where Node: TypeSyntaxProtocol {
   // We force unwrap because type resolution just visits a type syntax's children.
-  fileprivate func _castChild<S: SyntaxProtocol>(_ syntax: S) -> SourceFileRoot<S> {
-    SourceFileRoot<S>(syntax)!
+  fileprivate func _castChild<S: SyntaxProtocol>(_ syntax: S) -> Attached<S> {
+    Attached<S>(syntax)!
   }
 
   @_spi(_QualifiedLoookup)

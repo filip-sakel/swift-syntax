@@ -51,8 +51,8 @@ import SwiftSyntax
   ])
 }
 
-extension SourceFileRoot where Node == TypeLikeSyntax {
-  internal init<S: TypeLikeSyntaxProtocol>(_ concrete: SourceFileRoot<S>) {
+extension Attached where Node == TypeLikeSyntax {
+  internal init<S: TypeLikeSyntaxProtocol>(_ concrete: Attached<S>) {
     // Cast should succeed because we can initialize `TypeLikeSyntax` with
     // a `TypeLikeSyntaxProtocol`-conforming type.
     self = concrete.as(TypeLikeSyntax.self)!

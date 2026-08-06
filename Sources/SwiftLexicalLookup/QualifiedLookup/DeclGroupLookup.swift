@@ -364,14 +364,14 @@ extension DeclGroupSyntax {
   }
 }
 
-extension SourceFileRoot where Node: DeclGroupSyntax {
+extension Attached where Node: DeclGroupSyntax {
   internal var _memberlessDescription: String {
     node._memberlessDescription
   }
 }
 
-extension SourceFileRoot where Node == DeclGroupSyntaxType {
-  internal init<DeclGroup: DeclGroupSyntax>(_ syntax: SourceFileRoot<DeclGroup>) {
+extension Attached where Node == DeclGroupSyntaxType {
+  internal init<DeclGroup: DeclGroupSyntax>(_ syntax: Attached<DeclGroup>) {
     self = syntax.as(DeclGroupSyntaxType.self)!
   }
 }

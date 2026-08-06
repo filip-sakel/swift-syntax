@@ -16,8 +16,8 @@ import SwiftSyntax
 // MARK: Extension Finder
 
 extension SymbolTable {
-  internal func _findUnresolvedExtensions() -> [SourceFileSyntax: OrderedSet<SourceFileRoot<ExtensionDeclSyntax>>] {
-    var result = [SourceFileSyntax: OrderedSet<SourceFileRoot<ExtensionDeclSyntax>>]()
+  internal func _findUnresolvedExtensions() -> [SourceFileSyntax: OrderedSet<Attached<ExtensionDeclSyntax>>] {
+    var result = [SourceFileSyntax: OrderedSet<Attached<ExtensionDeclSyntax>>]()
     for (_, files) in moduleToSources {
       for (_, file) in files {
         // TODO: Implement configuredRegions
@@ -38,7 +38,7 @@ extension SymbolTable {
   /// Register the given qualified name with the given main declaration.
   func registerNominalTypeReference(
     qualifiedName: TypeName,
-    mainDecl: SourceFileRoot<NominalTypeDeclSyntax>
+    mainDecl: Attached<NominalTypeDeclSyntax>
   ) -> Result<NominalTypeRef, TypeDependencyGraph.NominalRegistrationFailure> {
     return dependencyGraph.registerNominalTypeReference(
       rawQualifiedName: qualifiedName,
@@ -70,9 +70,9 @@ extension SymbolTable {
   ///
   /// Returns: Broken extensions or binding failure.
   func bindExtensionAndRegisterExtended(
-    _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
+    _ extensionDecl: Attached<ExtensionDeclSyntax>,
     to result: Result<
-      (qualifiedName: GlobalTypeName, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
+      (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
       TypeResolver.Failure
     >,
     dependencies: DependencyTracker,
@@ -114,9 +114,9 @@ extension SymbolTable {
   /// All invalidated extensions should be fixed before calling `bindExtension`
   /// again.
   func fixInvalidatedExtension(
-    _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
+    _ extensionDecl: Attached<ExtensionDeclSyntax>,
     to result: Result<
-      (qualifiedName: GlobalTypeName, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
+      (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
       TypeResolver.Failure
     >,
     dependencies: DependencyTracker,
@@ -133,10 +133,10 @@ extension SymbolTable {
 
   /// Helper for `bindExtension` and `fixInvalidatedExtension`.
   fileprivate func _admitExtension(
-    _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
+    _ extensionDecl: Attached<ExtensionDeclSyntax>,
     isUpdatingInvalidating isFixingInvalidating: Bool,
     to result: Result<
-      (qualifiedName: GlobalTypeName, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
+      (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
       TypeResolver.Failure
     >,
     dependencies: DependencyTracker,
@@ -209,10 +209,10 @@ extension SymbolTable {
   func findMemberType(
     baseType: NominalTypeRef,
     memberTypeName: Identifier,
-    introducingTypeSyntax: SourceFileRoot<TypeLikeSyntax>,
+    introducingTypeSyntax: Attached<TypeLikeSyntax>,
     introducingModule: ModuleName,
     dependencyTracker: inout DependencyTracker,
-  ) -> Result<[SourceFileRoot<TypeDeclSyntax>], QualifiedTypeLookupFailure> {
+  ) -> Result<[Attached<TypeDeclSyntax>], QualifiedTypeLookupFailure> {
     assert(
       moduleMap[introducingTypeSyntax.fileRoot] == introducingModule,
       "[SwiftLexicalLookup] Internal error: Caller passed wrong module for `\(introducingTypeSyntax.trimmedDescription)`: got '\(introducingModule.name)' but expected \(moduleMap[introducingTypeSyntax.fileRoot].debugDescription)"

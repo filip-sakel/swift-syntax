@@ -191,7 +191,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       return _assertTypeSyntax(
         // Force unwrap because we parsed this from `lookupSources`
-        typeSyntax: SourceFileRoot(typeSyntax)!,
+        typeSyntax: Attached(typeSyntax)!,
         expectedResult: expectedResult,
         markersToDefinitions: markersToDefinitions,
         syntaxToDefinitions: syntaxToDefinitions,
@@ -206,7 +206,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       return _assertExtensionBinding(
         // Force unwrap because we parsed this from `lookupSources`
-        extensionDecl: SourceFileRoot(extensionDecl)!,
+        extensionDecl: Attached(extensionDecl)!,
         expectedState: expectedState,
         verbose: verbose
       )
@@ -215,7 +215,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
   /// `assertExpectation` forwards extensions here.
   private func _assertExtensionBinding(
-    extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
+    extensionDecl: Attached<ExtensionDeclSyntax>,
     expectedState: GenericExtensionState<TestTypeName>,
     verbose: Bool
   ) -> [ExpectationFailure] {
@@ -263,7 +263,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
   /// `assertExpectation` forwards type syntax here.
   private func _assertTypeSyntax(
-    typeSyntax: SourceFileRoot<TypeSyntax>,
+    typeSyntax: Attached<TypeSyntax>,
     expectedResult: Result<MemberLookupResult<Character>, TypeResolutionFailure<TestTypeName, Character, Character>>,
     markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],

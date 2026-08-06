@@ -14,7 +14,7 @@ import SwiftIfConfig
 import SwiftSyntax
 
 struct MappedDeclGroup<DeclGroup: DeclGroupSyntax & SyntaxHashable> {
-  let declGroup: SourceFileRoot<DeclGroup>
+  let declGroup: Attached<DeclGroup>
   let typeMap: TypeTable
 
   var node: DeclGroup { declGroup.node }
@@ -31,7 +31,7 @@ extension MappedDeclGroup: Hashable {
 // MARK: Construction
 
 extension MappedDeclGroup {
-  static func from(declGroup: SourceFileRoot<DeclGroup>, configuredRegions: ConfiguredRegions?) -> MappedDeclGroup {
+  static func from(declGroup: Attached<DeclGroup>, configuredRegions: ConfiguredRegions?) -> MappedDeclGroup {
     MappedDeclGroup(
       declGroup: declGroup,
       typeMap: TypeTable(
@@ -42,18 +42,18 @@ extension MappedDeclGroup {
   }
 }
 
-extension SourceFileRoot where Node: DeclGroupSyntax {
+extension Attached where Node: DeclGroupSyntax {
   internal func _groupTypeMembers(
     configuredRegions: ConfiguredRegions?
-  ) -> [Identifier: [SourceFileRoot<TypeDeclSyntax>]] {
-    var result = [Identifier: [SourceFileRoot<TypeDeclSyntax>]]()
+  ) -> [Identifier: [Attached<TypeDeclSyntax>]] {
+    var result = [Identifier: [Attached<TypeDeclSyntax>]]()
     node.visitDirectMembers(
       configuredRegions: configuredRegions,
       visit: { valueDecl in
         guard let typeDecl = valueDecl.as(TypeDeclSyntax.self) else { return }
         guard let typeIdentifier = Identifier(validating: typeDecl.name) else { return }
         // Since these are our children, they will also be scope in the file.
-        let wrappedTypeDecl = SourceFileRoot<TypeDeclSyntax>(typeDecl)!
+        let wrappedTypeDecl = Attached<TypeDeclSyntax>(typeDecl)!
         result[typeIdentifier, default: []].append(wrappedTypeDecl)
       }
     )

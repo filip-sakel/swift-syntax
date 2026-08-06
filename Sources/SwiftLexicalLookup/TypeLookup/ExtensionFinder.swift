@@ -65,11 +65,11 @@ extension SourceFileSyntax {
 extension SourceFileSyntax {
   /// Helper visitor for `findExtensions`
   fileprivate final class _ExtensionVisitor: SyntaxVisitor {
-    var extensionDecls = OrderedSet<SourceFileRoot<ExtensionDeclSyntax>>()
+    var extensionDecls = OrderedSet<Attached<ExtensionDeclSyntax>>()
 
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
       // Force unwrap because this visitor should be called on `SourceFileSyntax`
-      extensionDecls.append(SourceFileRoot(node)!)
+      extensionDecls.append(Attached(node)!)
       return .visitChildren
     }
     // Don't go into to nested scopes; just the source file
@@ -88,11 +88,11 @@ extension SourceFileSyntax {
   /// Same as `_ExtensionVisitor`, but only visits active nodes according to
   /// the given configured regions.
   fileprivate final class _ConfiguredExtensionVisitor: ActiveSyntaxVisitor {
-    var extensionDecls = OrderedSet<SourceFileRoot<ExtensionDeclSyntax>>()
+    var extensionDecls = OrderedSet<Attached<ExtensionDeclSyntax>>()
 
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
       // Force unwrap because this visitor should be called on `SourceFileSyntax`
-      extensionDecls.append(SourceFileRoot(node)!)
+      extensionDecls.append(Attached(node)!)
       return .visitChildren
     }
     // Don't go into to nested scopes; just the source file
@@ -111,7 +111,7 @@ extension SourceFileSyntax {
 
   /// Finds all top-level extensions, visiting only active nodes if
   /// ``configuredRegions`` is provided.
-  func findExtensions(configuredRegions: ConfiguredRegions?) -> OrderedSet<SourceFileRoot<ExtensionDeclSyntax>> {
+  func findExtensions(configuredRegions: ConfiguredRegions?) -> OrderedSet<Attached<ExtensionDeclSyntax>> {
     if let configuredRegions {
       let visitor = _ConfiguredExtensionVisitor(viewMode: .all, configuredRegions: configuredRegions)
       visitor.walk(self)
@@ -139,7 +139,7 @@ extension SymbolTable {
     accessibleFrom lookupFile: SourceFileSyntax,
     configuredRegions: ConfiguredRegions?
       // TODO: Convert to array
-  ) -> OrderedSet<SourceFileRoot<ExtensionDeclSyntax>> {
+  ) -> OrderedSet<Attached<ExtensionDeclSyntax>> {
     // TODO: This should be imported *decls*, e.g., import struct Swift.Int
     let imports = lookupFile.findImportDecls(using: configuredRegions)
     let importedModules = imports.flatMap({ $0.path.compactMap({ Identifier(validating: $0.name) }) })

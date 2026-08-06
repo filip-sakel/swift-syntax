@@ -49,7 +49,7 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
   ///    `.A` to see if `A` has any member types named `Self`.
   /// 2. The second request will be to resolve `struct A` with no selected member
   ///    (i.e. type `A` itself)
-  case lookForType(SourceFileRoot<TypeDeclSyntax>, lookForSelectedMember: Bool)
+  case lookForType(Attached<TypeDeclSyntax>, lookForSelectedMember: Bool)
 
   /// Resolve the extension's extended type look for the desired member if
   /// ``lookForSelectedMember`` is `true`.
@@ -65,14 +65,14 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
   ///    `.Self` to see if `A` has any member types named `Self`.
   /// 2. The second request will be to resolve `extension A` with no selected member
   ///    (i.e. the extended type `A` itself)
-  case lookForExtension(SourceFileRoot<ExtensionDeclSyntax>, lookForSelectedMember: Bool)
+  case lookForExtension(Attached<ExtensionDeclSyntax>, lookForSelectedMember: Bool)
   /// E.g.
   /// ```swift
   /// extension Array {
   ///   func f(_: Element) {} // <- Element refers to a generic parameter
   /// }
   /// ```
-  case lookForGenericParameters(extensionDecl: SourceFileRoot<ExtensionDeclSyntax>)
+  case lookForGenericParameters(extensionDecl: Attached<ExtensionDeclSyntax>)
   case lookInModule
   case lookInImports([Identifier])
 
@@ -114,7 +114,7 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
   }
 }
 
-extension SourceFileRoot {
+extension Attached {
   func findUnqualifiedType(
     _ typeName: Identifier,
     configuredRegions: ConfiguredRegions?
@@ -130,8 +130,8 @@ extension SourceFileRoot {
 
     // We force unwrap because unqualified lookup just visits outer
     // scopes in the file, so we should still have a file root
-    func castChild<S: SyntaxProtocol>(_ syntax: S) -> SourceFileRoot<S> {
-      SourceFileRoot<S>(syntax)!
+    func castChild<S: SyntaxProtocol>(_ syntax: S) -> Attached<S> {
+      Attached<S>(syntax)!
     }
 
     let filteredResults = results.flatMap({ result -> [UnqualifiedTypeLookupResult] in

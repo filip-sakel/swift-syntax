@@ -167,8 +167,8 @@ extension NominalTypeDeclSyntax {
 
 // MARK: Upcasts
 
-extension SourceFileRoot where Node == TypeDeclSyntax {
-  init<S: NominalTypeDeclSyntaxProtocol>(_ node: __shared SourceFileRoot<S>) {
+extension Attached where Node == TypeDeclSyntax {
+  init<S: NominalTypeDeclSyntaxProtocol>(_ node: __shared Attached<S>) {
     // All nominal-type declarations are type declarations.
     self = node.as(TypeDeclSyntax.self)!
   }

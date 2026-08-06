@@ -23,7 +23,7 @@ extension TypeLikeSyntax: ExpressibleByStringLiteral {
   }
 }
 
-extension SourceFileRoot: ExpressibleByStringLiteral
+extension Attached: ExpressibleByStringLiteral
     & ExpressibleByExtendedGraphemeClusterLiteral
     & ExpressibleByUnicodeScalarLiteral
 where
@@ -37,7 +37,7 @@ where
       fatalError("Couldn't parse `\(value)` as TypeSyntax.")
     }
     // We should now be able to cast to SourceFileRoot
-    self = SourceFileRoot(typeSyntax)!
+    self = Attached(typeSyntax)!
   }
 }
 
@@ -94,7 +94,7 @@ extension GenericExtensionState where TypeName == TestTypeName {
     // Wrap the type syntax in a file
     var parser = Parser("extension")
     let sourceFile = SourceFileSyntax.parse(from: &parser)
-    let mockExtension = SourceFileRoot(sourceFile.children(ofType: ExtensionDeclSyntax.self)[0])!
+    let mockExtension = Attached(sourceFile.children(ofType: ExtensionDeclSyntax.self)[0])!
 
     self.init(
       _uncheckedDependencies: dependencies.map({

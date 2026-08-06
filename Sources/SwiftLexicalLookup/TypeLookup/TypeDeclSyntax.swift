@@ -99,7 +99,7 @@ extension TypeDeclSyntax {
   }
 }
 
-extension SourceFileRoot where Node == TypeDeclSyntax {
+extension Attached where Node == TypeDeclSyntax {
   internal var _memberlessDescription: String {
     node._memberlessDescription
   }
