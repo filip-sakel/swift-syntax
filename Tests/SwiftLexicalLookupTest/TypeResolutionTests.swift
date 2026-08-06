@@ -167,13 +167,13 @@ extension GenericExtensionState where TypeName == TestTypeName {
   }
 }
 
-// // Convenience `String` initializer for `TypeDeclSyntax`; will
-// // crash at runtime if given a non `TypeDeclSyntax`.
-// extension TypeDeclSyntax: ExpressibleByStringLiteral {
-//   public init(stringLiteral value: StringLiteralType) {
-//     self = Syntax(DeclSyntax(stringLiteral: value)).cast(TypeDeclSyntax.self)
-//   }
-// }
+// Convenience `String` initializer for `TypeDeclSyntax`; will
+// crash at runtime if given a non `TypeDeclSyntax`.
+extension TypeDeclSyntax: ExpressibleByStringLiteral {
+  public init(stringLiteral value: StringLiteralType) {
+    self = Syntax(DeclSyntax(stringLiteral: value)).cast(TypeDeclSyntax.self)
+  }
+}
 
 // TODO: Remove
 // extension ResolvedNominalTypeReference {
@@ -925,6 +925,7 @@ final class TestQualifiedTypeName: XCTestCase {
   }
 
   func testRedeclarationInExtension() {
+    // TODO: Fix determinism problem
     assertTypeResolution([
       "File.swift": """
       struct A {
@@ -943,8 +944,10 @@ final class TestQualifiedTypeName: XCTestCase {
         typealias C = A // Redeclaration of member `C`
       }
 
-      // .invalidMembers([("D", .ambiguousTypeDecl(["struct C {}", "typealias C = A"]))])
-      let _: \(failure: .extensionNotBoundYet)A.B.C.D
+      let _: \(failure: .invalidMembers([
+               ("A.B.C", .ambiguousTypeDecl(["struct C {}", "typealias C = A"]))
+             ]))
+             A.B.C.D
       """
     ])
   }

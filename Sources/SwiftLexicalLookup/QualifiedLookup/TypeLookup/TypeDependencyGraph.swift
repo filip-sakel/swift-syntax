@@ -334,7 +334,9 @@ public struct TypeDependencyGraph {
       // the type is ambiguous so not extensions should have resolved to
       // us; if we have just one main declaration, we'll remove the type and
       // lingering extensions be bound to an unregistered type)
-      guard copy.boundExtensions.isEmpty else {
+      //
+      // Here, we check that each module has an empty list.
+      guard copy.boundExtensions.allSatisfy(\.value.isEmpty) else {
         return .failure(NominalUnbindingFailure.remainingBoundExtensions)
       }
       // Ensure we have no dependents (similar reasoning with above)
@@ -396,7 +398,7 @@ public struct TypeDependencyGraph {
   // var parentsToTypeMembers: [QualifiedTypeName: TypeTable]
   @_spi(_QualifiedLookupTests) public var extensionsToState: [SourceFileRoot<ExtensionDeclSyntax>: ExtensionState]
 
-  var _verbose: Bool = true
+  var _verbose: Bool = false
   var logPrefix: [String] = [String]()
   /// The number of `withLogging` calls we can nest. Useful for debugging infinite loops
   /// that otherwise fill up standard output and become illegible.
@@ -497,7 +499,11 @@ public struct TypeDependencyGraph {
 
 extension TypeDependencyGraph {
   @_spi(_QualifiedLookupTests) public enum QualifiedTypeLookupFailure: Error {
+    /// References non-registered base type
     case invalidBase
+    // TODO: Enable
+    // /// There are multiple base declarations, making lookup ambiguous.
+    // case ambiguousBase(possibleBases: [SourceFileRoot<NominalTypeDeclSyntax>])
   }
   func findMemberType(
     baseType: NominalTypeRef,
@@ -527,6 +533,14 @@ extension TypeDependencyGraph {
       return .failure(QualifiedTypeLookupFailure.invalidBase)
     }
     // FIXME: Ensure reference's symbol-table version also matches
+
+    // Diagnose ambiguous base
+    // FIXME: Enable check
+    // guard registeredType.redeclarations.isEmpty else {
+    //   return .failure(
+    //     QualifiedTypeLookupFailure.ambiguousBase(possibleBases: registeredType._mainDecls.map(\.declGroup))
+    //   )
+    // }
 
     func directLookup(
       baseTypeName: QualifiedTypeNameGlobalType,
@@ -588,7 +602,63 @@ extension TypeDependencyGraph {
 }
 
 extension TypeDependencyGraph {
+  // TODO: Extract out to a better place
+  //
+  /// Get the declaration-group parent of the given node; returns `nil`
+  /// if no such parent exists and for top-level/local declarations.
+  fileprivate func _declGroupScope<S: SyntaxProtocol>(
+    of node: SourceFileRoot<S>
+  ) -> SourceFileRoot<DeclGroupSyntaxType>? {
+    // Ensure we have parent
+    guard let parent = node.parent else { return nil }
+
+    // Return `nil` for local declarationns
+    guard parent.kind != .codeBlockItemList else { return nil }
+
+    // Get the parent or recurse
+    guard let declGroupParent = parent.as(DeclGroupSyntaxType.self) else {
+      return _declGroupScope(of: parent)
+    }
+    return declGroupParent
+  }
+
   enum NominalRegistrationFailure: Error {
+    // TODO: Enable
+    // case parentNotRegistered(parentTypeName: QualifiedTypeNameGlobalType)
+    // /// Registering a global type with multiple components in its name implies a
+    // /// nested global nominal-type declaration.
+    // case noDeclGroupParent
+    // /// Can't register under a decl group that's a redeclaration.
+    // ///
+    // /// For instance, the following generates no error:
+    // /// ```swift
+    // /// struct A {
+    // ///     struct B {
+    // ///         func f(_: C) {}
+    // ///     }
+    // /// }
+    // /// extension A {
+    // ///     struct C {}
+    // /// }
+    // /// ```
+    // /// However, replacing the last extension with the following yields an error:
+    // /// ```swift
+    // /// struct A {
+    // ///     struct B {
+    // ///         func f(_: B) {} // ✅
+    // ///         func f(_: C) {} // ❌ error: Can't find `C`
+    // ///     }
+    // /// }
+    // /// struct A {
+    // ///     struct C {}
+    // /// }
+    // /// ```
+    // /// So, despite both `struct A`'s being nominal declarations for
+    // /// `_(File.swift)::A`, we can only register member type 'C' under
+    // /// the main declaration.
+    // case cannotRegisterUnderRedeclaration
+    // /// Cannot register type nested in extension that hasn't been registered yet.
+    // case parentExtensionUnbound(extensionDecl: SourceFileRoot<ExtensionDeclSyntax>)
   }
 
   /// Registers the given nominal-type reference or return the
@@ -610,26 +680,43 @@ extension TypeDependencyGraph {
       return .success(NominalTypeRef(localNominalType: mainDecl))
     }
 
-    // FIXME: SOS: Ensure we're not admitted child of redeclaration.
-    // E.g.
-    // struct A {
-    //   struct B {}
-    //   struct B {
-    //     struct C {}
+    // FIXME: Enable this check.
+    //
+    // Check parent is registered, if nested
+    // if let (qualifiedBaseName, member: _) = qualifiedName.baseAndMember {
+    //   guard let baseType = namesToTypes[qualifiedBaseName] else {
+    //     return .failure(NominalRegistrationFailure.parentNotRegistered(parentTypeName: qualifiedBaseName))
     //   }
-    // }
-    //
-    // Here, we shouldn't be able to register `C`!!
-    // I.e. admitted type's parent should be file scope or *the* main decl
-    // of a registered type.
-
-    // TODO: Remove if we remove this invariant.
-    //
-    // // Check parent is registered
-    // if let (qualifiedBaseName, member: _) = qualifiedName.baseAndMember,
-    //   namesToTypes[qualifiedBaseName] == nil
-    // {
-    //   return .failure(NominalRegistrationFailure.parentNotRegistered(parentName: qualifiedBaseName))
+    //   // At this point, we should get a declaration group
+    //   guard let parentDeclGroup = _declGroupScope(of: mainDecl) else {
+    //     return .failure(NominalRegistrationFailure.noDeclGroupParent)
+    //   }
+    //   // Check extension is bound
+    //   if let parentExtension = parentDeclGroup.as(ExtensionDeclSyntax.self),
+    //     let parentExtensionState = extensionsToState[parentExtension],
+    //     case .success(let extendedTypeName) = parentExtensionState.resolvedType,
+    //     extendedTypeName != qualifiedBaseName
+    //   {
+    //     return .failure(NominalRegistrationFailure.parentExtensionUnbound(extensionDecl: parentExtension))
+    //   }
+    //   // Check parent decl is the main decl
+    //   if let parentNominal = parentDeclGroup.as(NominalTypeDeclSyntax.self),
+    //     baseType.mainDecl.declGroup != parentNominal
+    //   {
+    //     // Note that we still register even if there are redeclarations. E.g.,
+    //     // in the following, we still register '_(File.swift)::A._(File.swift)::B',
+    //     // despite the parent '_(File.swift)::A' having redeclarations.
+    //     // struct A {
+    //     //     struct B {
+    //     //         func f(_: B) {} // ✅
+    //     //         func f(_: C) {} // ❌ error: No type 'C' in scope
+    //     //     }
+    //     // }
+    //     // struct A {} // ❌ error: Invalid redeclaration of 'A'
+    //     return .failure(NominalRegistrationFailure.cannotRegisterUnderRedeclaration)
+    //   }
+    // } else {
+    //   // Otherwise, a top-level declaration is fine
     // }
 
     // TODO: Add an assertion when registering an extension-dependent nominal, that
@@ -787,7 +874,7 @@ extension TypeDependencyGraph {
     return nil
   }
 
-  fileprivate func _findFirstCycleWhenBinding(
+  fileprivate mutating func _findFirstCycleWhenBinding(
     extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     extensionMembers: TypeTable,
     to boundTypeName: QualifiedTypeNameGlobalType,
@@ -808,7 +895,7 @@ extension TypeDependencyGraph {
 
     // TODO: Check that `extensionDependencies` have states and resolved to a type or throw an error
 
-    print(
+    log(
       "Checking cycles if introducing `\(extensionDecl._memberlessDescription)` with members '\(boundTypeName.debugDescription)' > \(extensionMembers.typeMembersToDecls.map(\.key.name))"
     )
 
@@ -819,7 +906,7 @@ extension TypeDependencyGraph {
         // TODO: Factor out to or remove `collidesWithDependency` helper above.
         // Check if dependency collides with introduces `boundTypeName` > `extensionMembers`.
         // Collisions require that the base type match and that members share a name.
-        print("Visiting `\(dependency._declarationlessDescription)` [path \(path)]")
+        log("Visiting `\(dependency._declarationlessDescription)` [path \(path)]")
         guard
           boundTypeName == dependency.dependencyTypeName,
           let firstConflictingMember = dependency.members.first(where: { member in

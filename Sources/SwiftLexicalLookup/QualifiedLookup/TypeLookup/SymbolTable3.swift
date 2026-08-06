@@ -533,7 +533,7 @@ extension SymbolTable3 {
     })
     // New graph description
     // TODO: Remove once done debugging
-    if true || verbose {
+    if false || verbose {
       let (dependencyGraphDescription, hasErrors) = _describeDependencyGraph(dependencyGraph: dependencyGraph)
       print(String(repeating: "-", count: 80))
       print(
