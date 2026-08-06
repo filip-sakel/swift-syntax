@@ -114,7 +114,7 @@ import SwiftSyntax
   /// means the type member can resolve properly. More than one types,
   /// on the other hand, give us ambiguities.
   @_spi(_QualifiedLookup) public struct Dependency: Sendable {
-    let baseTypeName: QualifiedTypeName
+    let baseTypeName: TypeName
     let typeMemberName: Identifier
     /// The resolved type declarations and the extensions in which they
     /// were declared (nil for main declaration)
@@ -136,7 +136,7 @@ import SwiftSyntax
   /// Or an alias for `C` invalidates `extension A.B.C`.
   var dependencies: [Dependency]
   var dependents: Set<ExtensionDeclSyntax>
-  var resolution: Result<QualifiedTypeName, TypeQualifier.Failure>
+  var resolution: Result<TypeName, TypeQualifier.Failure>
   // var typeMemberAssumptions: [PartiallyResolvedTypeIdentifier.Component: ResolvedNominalTypeReference]
   // var dependentExtensionsStack: [PartiallyResolvedTypeIdentifier.Component: [ExtensionDeclSyntax]]
 }
@@ -226,7 +226,7 @@ import SwiftSyntax
 // MARK: Cycle Detection
 
 extension SymbolTable3 {
-  typealias ExtensionBindingCycle = SwiftLexicalLookup.GenericExtensionBindingCycle<QualifiedTypeName>
+  typealias ExtensionBindingCycle = SwiftLexicalLookup.GenericExtensionBindingCycle<TypeName>
   // fileprivate func _findCyclicalDependency(
   //   baseTypeName: QualifiedTypeName,
   //   typeMembers: [Identifier: [TypeDeclSyntax]],
@@ -354,7 +354,7 @@ extension SymbolTable3 {
 
   /// Register the given qualified name with the given main declaration.
   func registerNominalTypeReference(
-    qualifiedName: QualifiedTypeName,
+    qualifiedName: TypeName,
     mainDecl: SourceFileRoot<NominalTypeDeclSyntax>
   ) -> Result<NominalTypeRef, TypeDependencyGraph.NominalRegistrationFailure> {
     return dependencyGraph.registerNominalTypeReference(
@@ -416,7 +416,7 @@ extension SymbolTable3 {
 extension SymbolTable3 {
 
   typealias InvalidatedExtensions = OrderedSet<ExtensionDeclSyntax>
-  typealias ExtensionBindingFailure = SwiftLexicalLookup.ExtensionBindingFailure<QualifiedTypeName>
+  typealias ExtensionBindingFailure = SwiftLexicalLookup.ExtensionBindingFailure<TypeName>
 
   // /// Inserts the given extension moving it from `unresolvedExtensions` to `extensions`
   // /// and updating the nominal type's lookup table and extensions.
@@ -433,7 +433,7 @@ extension SymbolTable3 {
   func bindExtensionAndRegisterExtended(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     to result: Result<
-      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
+      (qualifiedName: GlobalTypeName, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
       TypeQualifier.Failure
     >,
     dependencies: DependencyTracker,
@@ -443,7 +443,7 @@ extension SymbolTable3 {
     // also we get back a NominalTypeRef only to discard it)
     if case .success(let (qualifiedName, mainDecl)) = result {
       let nominalRegistrationResult = dependencyGraph.registerNominalTypeReference(
-        rawQualifiedName: QualifiedTypeName.topLevel(qualifiedName),
+        rawQualifiedName: TypeName.global(qualifiedName),
         mainDecl: mainDecl,
         configuredRegions: configuredRegions
       )
@@ -467,7 +467,7 @@ extension SymbolTable3 {
   /// using the current graph.
   ///
   /// Useful for getting the final version of a nominal type after binding extensions.
-  func getNominalTypeReference(name: QualifiedTypeNameGlobalType) -> NominalTypeRef? {
+  func getNominalTypeReference(name: GlobalTypeName) -> NominalTypeRef? {
     dependencyGraph.namesToTypes[name].map({ NominalTypeRef(qualifiedName: name, nominal: $0) })
   }
 
@@ -477,7 +477,7 @@ extension SymbolTable3 {
   func fixInvalidatedExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     to result: Result<
-      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
+      (qualifiedName: GlobalTypeName, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
       TypeQualifier.Failure
     >,
     dependencies: DependencyTracker,
@@ -497,7 +497,7 @@ extension SymbolTable3 {
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     isUpdatingInvalidating isFixingInvalidating: Bool,
     to result: Result<
-      (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
+      (qualifiedName: GlobalTypeName, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>),
       TypeQualifier.Failure
     >,
     dependencies: DependencyTracker,

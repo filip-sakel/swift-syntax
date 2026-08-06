@@ -16,7 +16,7 @@ import SwiftSyntax
 // TODO: Assert each decl has a source-file parent
 @_spi(_QualifiedLookupTests) public struct NominalType: Sendable {
   /// Globally unique name
-  @_spi(_QualifiedLookupTests) public let qualifiedName: QualifiedTypeName
+  @_spi(_QualifiedLookupTests) public let qualifiedName: TypeName
   /// The main declaration of this type
   let mainDecl: NominalTypeDeclSyntax
   /// Invalid redeclarations that use the same name

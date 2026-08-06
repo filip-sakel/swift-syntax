@@ -29,6 +29,7 @@ add_swift_syntax_library(SwiftLexicalLookup
   QualifiedLookup/DeclScope.swift
   QualifiedLookup/MemberKind.swift
   QualifiedLookup/ValueDeclSyntax.swift
+  QualifiedLookup/TypeLookup/TypeName.swift
 )
 
 target_link_swift_syntax_libraries(SwiftLexicalLookup PUBLIC

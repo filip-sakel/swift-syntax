@@ -12,20 +12,32 @@
 
 import SwiftSyntax
 
-// A global type name, `Swift::Int._(MyFileA.swift)::MyType`.
-@_spi(_QualifiedLookup) public struct QualifiedTypeNameGlobalType: Sendable, Hashable, CustomDebugStringConvertible {
+/// A global type name, `Swift::Int._(MyFileA.swift)::MyType`.
+///
+/// ### File-Name Specifier
+///
+/// We use the '_(FileName.swift)::MyType' notation to describe
+/// an internal type declared in 'FileName.swift'. This notation
+/// gives us an unambiguous way to refer to types of the same name
+/// in our module. Types exposed as public/usable-from-inline
+/// from an external module should have a unique name. Also, types
+/// of the same name within the same file are invalid redeclarations.
+@_spi(_QualifiedLookupTests)
+public struct GlobalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
   public enum Qualifier: Sendable, Hashable {
     case `internal`(fileID: SyntaxIdentifier)
     case external(moduleName: Identifier)
 
     fileprivate init(file: SourceFileSyntax, module: Identifier, internalModule: Identifier) {
       if module == internalModule {
-        self = QualifiedTypeNameGlobalType.Qualifier.internal(fileID: file.id)
+        self = GlobalTypeName.Qualifier.internal(fileID: file.id)
       } else {
-        self = QualifiedTypeNameGlobalType.Qualifier.external(moduleName: module)
+        self = GlobalTypeName.Qualifier.external(moduleName: module)
       }
     }
 
+    /// Like `CustomDebugStringConvertible`'s `debugDescription` but accepts
+    /// a `describeFileID` closure to get the file names.
     fileprivate func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
       switch self {
       case .internal(let fileID):
@@ -46,7 +58,7 @@ import SwiftSyntax
     let debugFileMap: DebugFileMap
 
     fileprivate init(
-      _uncheckedQualifier qualifier: QualifiedTypeNameGlobalType.Qualifier,
+      _uncheckedQualifier qualifier: GlobalTypeName.Qualifier,
       name: Identifier,
       debugFileMap: DebugFileMap
     ) {
@@ -59,7 +71,7 @@ import SwiftSyntax
     /// with respect to the given symbol table.
     ///
     /// Important: The file and module must be mapped as such in the symbol table.
-    @_spi(_QualifiedLookup) public init(
+    public init(
       name: Identifier,
       file: SourceFileSyntax,
       module: SymbolTable3.Module,
@@ -71,7 +83,7 @@ import SwiftSyntax
       )
 
       self.init(
-        _uncheckedQualifier: QualifiedTypeNameGlobalType.Qualifier(
+        _uncheckedQualifier: GlobalTypeName.Qualifier(
           file: file,
           module: module,
           internalModule: symbolTable.moduleName
@@ -87,16 +99,13 @@ import SwiftSyntax
     }
   }
 
-  /// The types components. Guaranteed to be non-empty
+  /// The type's components.
+  /// Invariant: `components.count >= 1`
   public let components: [Component]
 
-  /// Creates a a global type with the given components.
-  /// - Returns: `nil` if no components are provided
+  /// Creates a a global type with the given components; returns `nil` if no
+  /// components are provided
   public init?(components: [Component]) {
-    // precondition(
-    //   !components.isEmpty,
-    //   "[SwiftLexicalLookup] Internal error: Cannot have qualified type name with no components"
-    // )
     guard !components.isEmpty else { return nil }
     self.components = components
   }
@@ -106,19 +115,19 @@ import SwiftSyntax
     components.first!
   }
   /// If this is not a top-level type, break it up into a base and member.
-  var baseAndMember: (base: QualifiedTypeNameGlobalType, member: Component)? {
+  var baseAndMember: (base: GlobalTypeName, member: Component)? {
     var baseComponents = components
     // We have at least one component according to initializer precondition
     let member = baseComponents.popLast()!
-    guard let base = QualifiedTypeNameGlobalType(components: baseComponents) else {
+    guard let base = GlobalTypeName(components: baseComponents) else {
       return nil
     }
     return (base, member)
   }
 
-  public func addingComponents(_ tailComponents: [Component]) -> QualifiedTypeNameGlobalType {
+  public func addingComponents(_ tailComponents: [Component]) -> GlobalTypeName {
     // Shouldn't return `nil` because `self.components` should be nonempty
-    guard let newType = QualifiedTypeNameGlobalType(components: components + tailComponents) else {
+    guard let newType = GlobalTypeName(components: components + tailComponents) else {
       fatalError(
         "[SwiftLexicalLookup] Internal error: Unexpectedly got `QualifiedTypeNameNestedType` instance with empty components."
       )
@@ -131,83 +140,67 @@ import SwiftSyntax
   }
 }
 
-// Array of identifiers, e.g., `A.B.C`
-@_spi(_QualifiedLookup)
-public indirect enum QualifiedTypeNameNestedType: Sendable, Hashable, CustomDebugStringConvertible {
-  case base(Identifier)
-  case member(base: QualifiedTypeNameNestedType, name: Identifier)
+/// A local type is a type declared within a `CodeBlockItemListSyntax`, e.g.,
+/// in a while loop or function body.
+///
+/// Array of identifiers, e.g., `A.B.C` for
+/// ```swift
+/// func f() {
+///   struct A { struct B { struct C {} } }
+/// }
+/// ```
+@_spi(_QualifiedLookupTests)
+public struct LocalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
+  /// The local scope at which this type is declared.
+  let scope: SourceFileRoot<CodeBlockItemListSyntax>
+  /// The type's components
+  /// Invariant: `components.count >= 1`
+  private(set) var components: [Identifier]
 
-  private var _components: [Identifier] {
-    switch self {
-    case .base(let name):
-      return [name]
-    case .member(let base, let name):
-      return base._components + [name]
-    }
+  /// Creates a local-type name from the given components; returns `nil`
+  /// if no components are provided.
+  init?(scope: SourceFileRoot<CodeBlockItemListSyntax>, components: [Identifier]) {
+    // Upholds invariant
+    guard !components.isEmpty else { return nil }
+
+    self.scope = scope
+    self.components = components
   }
 
-  public init?(components: [Identifier]) {
-    guard let first = components.first else { return nil }
-    // TODO: Optimize
-    self = QualifiedTypeNameNestedType.base(first).addingComponents(Array(components.dropFirst()))
+  init(scope: SourceFileRoot<CodeBlockItemListSyntax>, base: Identifier) {
+    // We force unwrap because we provide a component
+    self.init(scope: scope, components: [base])!
   }
 
-  // TODO: Make more efficient
-  func addingComponents(_ tailComponents: [Identifier]) -> QualifiedTypeNameNestedType {
-    tailComponents.reduce(
-      self,
-      { currentBase, tail in
-        QualifiedTypeNameNestedType.member(base: currentBase, name: tail)
-      }
-    )
+  consuming func addingComponents(_ tailComponents: [Identifier]) -> LocalTypeName {
+    var copy = self
+    copy.components.append(contentsOf: tailComponents)
+    return copy
   }
 
-  /// If this is not a top-level type, break it up into a base and member.
-  var baseAndMembers: (base: QualifiedTypeNameNestedType, member: Identifier)? {
-    switch self {
-    case .base:
-      return nil
-    case .member(let base, let member):
-      return (base, member)
-    }
-    // var baseComponents = _components
-    // // We have at least one component according to initializer precondition
-    // let member = baseComponents.popLast()!
-    // guard let base = QualifiedTypeNameGlobalType(components: baseComponents) else {
-    //   return nil
-    // }
-    // return (base, member)
-  }
-
+  /// The debug description is NOT deterministic (depends on the scope id's hash value)
   public var debugDescription: String {
-    _components.map(\.name).joined(separator: ".")
+    let componentsDescription = components.map(\.name).joined(separator: ".")
+    return "\(scope.node.id.hashValue)>\(componentsDescription)"
   }
 }
 
-// TODO: Copy relevant comments from `ResolvedScope` and `ResolvedTypeName`
-@_spi(_QualifiedLookup) public enum QualifiedTypeName: Sendable, Hashable, CustomDebugStringConvertible {
+/// A globally unique type name. Either a global type (top-level type or nested
+/// under another global type), or a local type (nested in a `CodeBlockItemListSyntax`
+/// like a `while` loop or function body.)
+@_spi(_QualifiedLookupTests)
+public enum TypeName: Sendable, Hashable, CustomDebugStringConvertible {
   /// Specifies top-level type: a collection of internal and external components
-  case topLevel(QualifiedTypeNameGlobalType)
-  // Specifies an (internal) nested-level scope and a dot-separated sequence of identifiers.
-  case nestedScope(scope: SourceFileRoot<CodeBlockItemListSyntax>, type: QualifiedTypeNameNestedType)
-
-  var baseAndMemberName: (base: QualifiedTypeName, memberName: Identifier)? {
-    switch self {
-    case .topLevel(let topLevelName):
-      guard let (topLevelBaseName, memberComponent) = topLevelName.baseAndMember else { return nil }
-      return (QualifiedTypeName.topLevel(topLevelBaseName), memberComponent.name)
-    case .nestedScope(let scope, let nestedName):
-      guard let (nestedBaseName, memberName) = nestedName.baseAndMembers else { return nil }
-      return (QualifiedTypeName.nestedScope(scope: scope, type: nestedBaseName), memberName)
-    }
-  }
+  case global(GlobalTypeName)
+  // Specifies an (internal) local scope and a dot-separated sequence of identifiers.
+  case local(LocalTypeName)
 
   public var debugDescription: String {
     switch self {
-    case .topLevel(let globalType):
+    case .global(let globalType):
       return globalType.debugDescription
-    case .nestedScope(let scope, let nestedType):
-      return "\(scope.node.id.hashValue)>\(nestedType.debugDescription)"
+    case .local(let localType):
+      return localType.debugDescription
     }
   }
 }

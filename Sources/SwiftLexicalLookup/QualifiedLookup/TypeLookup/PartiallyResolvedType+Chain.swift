@@ -13,7 +13,7 @@
 import SwiftSyntax
 
 enum ChainResolution: CustomDebugStringConvertible {
-  case resolved(QualifiedTypeName)
+  case resolved(TypeName)
   case partiallyResolved(PartiallyResolvedNominalTypeChain)
 
   var debugDescription: String {
@@ -67,7 +67,7 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
   /// Returns: The resolved type reference or `nil` if the `originatingSyntax`
   /// isn't registered in the symbol table.
   func resolve(
-    resolvedBase: GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>,
+    resolvedBase: GenericResolvedNominalTypeReference<GlobalTypeName>,
     originatingSyntax: SourceFileRoot<TypeLikeSyntax>,
     originatingModule: SymbolTable3.Module,
     symbolTable: borrowing SymbolTable3
@@ -81,7 +81,7 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
 
     // Resolve the name
     let memberComponents = memberNames.map({ name in
-      QualifiedTypeNameGlobalType.Component(
+      GlobalTypeName.Component(
         name: name,
         file: originatingSyntax.fileRoot,
         module: originatingModule,
@@ -91,7 +91,7 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
 
     return ResolvedNominalTypeReference(
       mainDecl: resolvedMainDecl,
-      name: QualifiedTypeName.topLevel(
+      name: TypeName.global(
         resolvedBase.qualifiedName.addingComponents(memberComponents)
       ),
       originatingSyntax: originatingSyntax
@@ -193,7 +193,7 @@ extension SourceFileRoot where Node == NominalTypeDeclSyntax {
         }
         // Create all the components
         let components = members.map({ (_, name) in
-          QualifiedTypeNameGlobalType.Component(
+          GlobalTypeName.Component(
             name: name,
             file: fileRoot,
             module: module,
@@ -201,18 +201,14 @@ extension SourceFileRoot where Node == NominalTypeDeclSyntax {
           )
         })
         // Assert we have ennough members (we include `self` above)
-        guard let globalType = QualifiedTypeNameGlobalType(components: components) else {
+        guard let globalType = GlobalTypeName(components: components) else {
           fatalError(
             "[SwiftLexicalLookup] Internal error: Unexpectedly got `nil` globalType, implying that `components` is empty, which shouldn't happen since `members` are always nonempty."
           )
         }
 
         return .success(
-          ChainResolution.resolved(
-            QualifiedTypeName.topLevel(
-              globalType
-            )
-          )
+          ChainResolution.resolved(TypeName.global(globalType))
         )
       }
       // Nested scope (if CodeBlockItemListSyntax isn't nested directly under `SourceFileSyntax`)
@@ -220,19 +216,14 @@ extension SourceFileRoot where Node == NominalTypeDeclSyntax {
         let components = members.map(\.name)
 
         // Assert we have enough members (we include `self` above)
-        guard let nestedType = QualifiedTypeNameNestedType(components: components) else {
+        guard let localType = LocalTypeName(scope: scope, components: components) else {
           fatalError(
             "[SwiftLexicalLookup] Internal error: Unexpectedly got `nil` globalType, implying that `components` is empty, which shouldn't happen since `members` are always nonempty."
           )
         }
 
         return .success(
-          ChainResolution.resolved(
-            QualifiedTypeName.nestedScope(
-              scope: scope,
-              type: nestedType
-            )
-          )
+          ChainResolution.resolved(TypeName.local(localType))
         )
       }
 

@@ -231,7 +231,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Evaluate the extended type
       var typeQualifier = TypeQualifier(symbolTable: symbolTable, _verbose: verbose)
-      let _: Result<GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>, TypeQualifier.Failure> =
+      let _: Result<GenericResolvedNominalTypeReference<GlobalTypeName>, TypeQualifier.Failure> =
         typeQualifier.bindExtension(extensionDecl)
 
       // After binding, we should we have a state

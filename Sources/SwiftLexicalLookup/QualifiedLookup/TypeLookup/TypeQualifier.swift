@@ -97,14 +97,14 @@ public struct GenericResolvedNominalTypeReference<TypeName: Sendable & Hashable 
 }
 
 @_spi(_QualifiedLookup) public typealias ResolvedNominalTypeReference = GenericResolvedNominalTypeReference<
-  QualifiedTypeName
+  TypeName
 >
 
 extension ResolvedNominalTypeReference {
-  init(_ globalTypeReference: GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>) {
+  init(_ globalTypeReference: GenericResolvedNominalTypeReference<GlobalTypeName>) {
     self.init(
       mainDecl: globalTypeReference.mainDecl,
-      name: QualifiedTypeName.topLevel(globalTypeReference.qualifiedName),
+      name: TypeName.global(globalTypeReference.qualifiedName),
       originatingSyntax: globalTypeReference.originatingSyntax
     )
   }
@@ -374,7 +374,7 @@ where
   MinimalNominal: CustomDebugStringConvertible,
   ExtendedNominal: CustomDebugStringConvertible
 {
-  func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
+  func _describe(describeTypeName: (TypeName) -> String) -> String {
     _describeDebug(
       resolveMininalNominal: \.debugDescription,
       resolveExtendedNominal: \.debugDescription
@@ -511,7 +511,7 @@ extension TypeQualifierFailure {
   }
 
   public typealias Failure = TypeQualifierFailure<
-    QualifiedTypeNameGlobalType, ResolvedNominalTypeReference, NominalTypeRef
+    GlobalTypeName, ResolvedNominalTypeReference, NominalTypeRef
   >
 
   let symbolTable: SymbolTable3
@@ -883,7 +883,7 @@ extension TypeQualifierFailure {
           },
           perform: {
             // Resolve extended type
-            let baseType: GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>
+            let baseType: GenericResolvedNominalTypeReference<GlobalTypeName>
             switch $0.bindExtension(extensionDecl) {
             case .success(let type):
               baseType = type
@@ -1464,7 +1464,7 @@ extension TypeQualifier {
   /// - Precondition: `extensionDecl` must be in `self.requestedExtensions`
   private mutating func _bindRequestedExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>
-  ) -> Result<GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>, Failure> {
+  ) -> Result<GenericResolvedNominalTypeReference<GlobalTypeName>, Failure> {
     withLogging(
       request: "Binding `\(extensionDecl._memberlessDescription)`",
       describe: \._debugDescription
@@ -1490,7 +1490,7 @@ extension TypeQualifier {
   /// e.g. if we're resolving `extension A.B {}`, we will prob have to fully resolve `A`.
   private mutating func __bindRequestedExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>
-  ) -> Result<GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>, Failure> {
+  ) -> Result<GenericResolvedNominalTypeReference<GlobalTypeName>, Failure> {
     // Uphold invariant
     assert(
       self.requestedExtensions.contains(extensionDecl),
@@ -1498,9 +1498,9 @@ extension TypeQualifier {
     )
 
     func mapToNominalTypeReference(
-      _ typeInfo: (qualifiedName: QualifiedTypeNameGlobalType, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>)
-    ) -> GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType> {
-      GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>(
+      _ typeInfo: (qualifiedName: GlobalTypeName, mainDecl: SourceFileRoot<NominalTypeDeclSyntax>)
+    ) -> GenericResolvedNominalTypeReference<GlobalTypeName> {
+      GenericResolvedNominalTypeReference<GlobalTypeName>(
         mainDecl: typeInfo.mainDecl,
         name: typeInfo.qualifiedName,
         originatingSyntax: SourceFileRoot<TypeLikeSyntax>(extensionDecl.extendedType)
@@ -1542,7 +1542,7 @@ extension TypeQualifier {
         //          func f(_: Self) {} // <- Lookup up here
         //        }
         //      }
-        guard case .topLevel(let extendedGlobalName) = extendedTypeReference.qualifiedName else {
+        guard case .global(let extendedGlobalName) = extendedTypeReference.qualifiedName else {
           fatalError(
             "[SwiftLexicalLookup] Internal error: Unexpectedly resolved extension to local type \(extendedTypeReference.qualifiedName)"
           )
@@ -1749,7 +1749,7 @@ extension TypeQualifier {
     //
     // For instance, there's no way to extend `A` in `func f() { struct A {} }`
     // since extensions may only be declared at the top level.
-    guard case .topLevel(let qualifiedGlobalName) = typeReference.qualifiedName else { return currentNominal }
+    guard case .global(let qualifiedGlobalName) = typeReference.qualifiedName else { return currentNominal }
 
     // TODO: Remove
     //
@@ -1796,7 +1796,7 @@ extension TypeQualifier {
 
   @_spi(_QualifiedLookupTests) public mutating func bindExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>
-  ) -> Result<GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>, Failure> {
+  ) -> Result<GenericResolvedNominalTypeReference<GlobalTypeName>, Failure> {
     withLogging(
       request: "Binding extension `\(extensionDecl._memberlessDescription)`",
       describe: \._debugDescription,
@@ -1808,10 +1808,10 @@ extension TypeQualifier {
 
   fileprivate mutating func _bindExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>
-  ) -> Result<GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>, Failure> {
+  ) -> Result<GenericResolvedNominalTypeReference<GlobalTypeName>, Failure> {
     if let alreadyBoundResult = symbolTable.dependencyGraph.getExtensionResolvedType(extensionDecl) {
       return alreadyBoundResult.map({ typeInfo in
-        GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>(
+        GenericResolvedNominalTypeReference<GlobalTypeName>(
           mainDecl: typeInfo.mainDecl,
           name: typeInfo.qualifiedName,
           originatingSyntax: SourceFileRoot<TypeLikeSyntax>(extensionDecl.extendedType)
@@ -1836,7 +1836,7 @@ extension TypeQualifier {
     }
 
     return boundTypeResult.map({ typeInfo in
-      GenericResolvedNominalTypeReference<QualifiedTypeNameGlobalType>(
+      GenericResolvedNominalTypeReference<GlobalTypeName>(
         mainDecl: typeInfo.mainDecl,
         name: typeInfo.qualifiedName,
         originatingSyntax: SourceFileRoot<TypeLikeSyntax>(extensionDecl.extendedType)
