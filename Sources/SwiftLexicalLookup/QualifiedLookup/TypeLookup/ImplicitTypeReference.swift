@@ -25,7 +25,7 @@ import SwiftSyntax
     self.introducingSyntax = introducingSyntax
   }
 
-  @_spi(_QualifiedLookupTests) public init(from sourceComponent: PartiallyResolvedTypeIdentifier.Component) {
+  @_spi(_QualifiedLookupTests) public init(from sourceComponent: TypeReference.Component) {
     self.module = sourceComponent.module
     self.name = sourceComponent.name
     self.introducingSyntax = SourceFileRoot<TypeLikeSyntax>(sourceComponent.introducingSyntax)

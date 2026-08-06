@@ -499,7 +499,7 @@ final class TestQualifiedTypeName: XCTestCase {
   func testNonNominalMembers() {
     // A member "MyType"
     let myTypeMember = ImplicitTypeReferenceComponent(
-      from: PartiallyResolvedTypeIdentifier.Component(
+      from: TypeReference.Component(
         module: nil,
         name: Identifier(canonicalName: "MyType"),
         introducingSyntax: "MyType"
