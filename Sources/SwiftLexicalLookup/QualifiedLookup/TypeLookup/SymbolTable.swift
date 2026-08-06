@@ -14,7 +14,7 @@ import SwiftIfConfig
 import SwiftSyntax
 
 // TODO: Add .lookForSupertype, .lookForDynamicMember & implemenet internal/external module lookup
-@_spi(_QualifiedLookup) public final class SymbolTable3 {
+@_spi(_QualifiedLookup) public final class SymbolTable {
   /// Invariant: moduleToSources[moduleName] != nil
   @_spi(_QualifiedLookupTests)
   public let moduleName: ModuleName
@@ -47,7 +47,7 @@ import SwiftSyntax
   }
 }
 
-extension SymbolTable3 {
+extension SymbolTable {
   /// Initializes `moduleMap`
   private func _generateModuleMap() -> [SourceFileSyntax: ModuleName] {
     var result = [SourceFileSyntax: ModuleName]()
@@ -62,7 +62,7 @@ extension SymbolTable3 {
 
 // MARK: DebugFileMap
 
-extension SymbolTable3 {
+extension SymbolTable {
   private func _generateDebugFileMap() -> DebugFileMap {
     #if DEBUG
     // By `moduleName` invariant

@@ -466,7 +466,7 @@ extension TypeResolutionFailure {
     GlobalTypeName, ResolvedNominalTypeReference, NominalTypeRef
   >
 
-  let symbolTable: SymbolTable3
+  let symbolTable: SymbolTable
   var requestedExtensions: OrderedSet<SourceFileRoot<ExtensionDeclSyntax>> = []
   // var visitedTypeSyntax: OrderedSet<SourceFileRoot<TypeSyntax>> = []
 
@@ -476,7 +476,7 @@ extension TypeResolutionFailure {
   let _logNestingLimit: Int?
   let _checkNominalInCompositionIsClassOrProtocol = true
 
-  public init(symbolTable: SymbolTable3, _verbose: Bool, _logNestingLimit: Int? = nil) {
+  public init(symbolTable: SymbolTable, _verbose: Bool, _logNestingLimit: Int? = nil) {
     self.symbolTable = symbolTable
     self._verbose = _verbose
     self._logNestingLimit = _logNestingLimit
@@ -1154,7 +1154,7 @@ extension TypeResolutionFailure {
       // First, get the module
       let introducingModule = extractModule(syntax: typeMember.introducingSyntax)
       // Look up
-      let memberTypeDeclsResult: Result<[SourceFileRoot<TypeDeclSyntax>], SymbolTable3.QualifiedTypeLookupFailure> =
+      let memberTypeDeclsResult: Result<[SourceFileRoot<TypeDeclSyntax>], SymbolTable.QualifiedTypeLookupFailure> =
         symbolTable.findMemberType(
           baseType: nominalBaseType,
           memberTypeName: typeMember.name,
@@ -1482,7 +1482,7 @@ extension TypeResolver {
     )
 
     // Register in the symbol table to get invalidated extensions
-    let bindingResult: Result<BindingResult, SymbolTable3.ExtensionBindingFailure>
+    let bindingResult: Result<BindingResult, SymbolTable.ExtensionBindingFailure>
     bindingResult = symbolTable.bindExtensionAndRegisterExtended(
       extensionDecl,
       // Only get the name

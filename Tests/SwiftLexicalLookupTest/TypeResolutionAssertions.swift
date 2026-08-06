@@ -56,7 +56,7 @@ struct TypeResolutionMatcher {
     case extensionBinding(GenericExtensionState<TestTypeName>)
   }
 
-  let symbolTable: SymbolTable3
+  let symbolTable: SymbolTable
   let moduleName: Identifier
   let lookupFiles: [(String, SourceFileSyntax)]
 }
@@ -396,7 +396,7 @@ func assertTypeResolution(
   _assertLexicalLookup(
     lookupSources,
     matcher: TypeResolutionMatcher(
-      symbolTable: SymbolTable3(
+      symbolTable: SymbolTable(
         moduleName: moduleIdentifier,
         moduleToSources: [moduleIdentifier: uniquedLookupFiles],
         configuredRegions: configuredRegions

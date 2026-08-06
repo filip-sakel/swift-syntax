@@ -15,7 +15,7 @@ import SwiftSyntax
 
 // MARK: Extension Finder
 
-extension SymbolTable3 {
+extension SymbolTable {
   internal func _findUnresolvedExtensions() -> [SourceFileSyntax: OrderedSet<SourceFileRoot<ExtensionDeclSyntax>>] {
     var result = [SourceFileSyntax: OrderedSet<SourceFileRoot<ExtensionDeclSyntax>>]()
     for (_, files) in moduleToSources {
@@ -30,7 +30,7 @@ extension SymbolTable3 {
 
 // MARK: Registering Nominal
 
-extension SymbolTable3 {
+extension SymbolTable {
   enum NominalRegistrationFailure: Error {
     case invalidReregistration(existingMainDecl: NominalTypeDeclSyntax)
   }
@@ -57,7 +57,7 @@ extension SymbolTable3 {
 
 // MARK: Extension Binding
 
-extension SymbolTable3 {
+extension SymbolTable {
   typealias InvalidatedExtensions = OrderedSet<ExtensionDeclSyntax>
   typealias ExtensionBindingFailure = SwiftLexicalLookup.ExtensionBindingFailure<TypeName>
 
@@ -197,7 +197,7 @@ extension SymbolTable3 {
 
 // MARK: Qualified Type Lookup
 
-extension SymbolTable3 {
+extension SymbolTable {
   @_spi(_QualifiedLookupTests) public enum QualifiedTypeLookupFailure: Error {
     /// Type syntax doesn't have source-file root or source-file root isn't in
     /// module map.

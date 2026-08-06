@@ -124,7 +124,7 @@ extension SourceFileSyntax {
   }
 }
 
-extension SymbolTable3 {
+extension SymbolTable {
   // TODO: Merge with nominal-type lookup-position-sensitive code
   //
   // Extensions come from several sources:

@@ -971,7 +971,7 @@ extension TypeDependencyGraph {
     declGroupModule: ModuleName,
     declGroupTypeName: GlobalTypeName,
     members: TypeTable,
-    symbolTable: SymbolTable3
+    symbolTable: SymbolTable
   ) -> GlobalTypeName? {
     for (memberName, member) in members.typeMembersToDecls {
       // Construct the type the member would have
@@ -1026,7 +1026,7 @@ extension TypeDependencyGraph {
   fileprivate mutating func _removeExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     extensionDeclModule: ModuleName,
-    symbolTable: SymbolTable3
+    symbolTable: SymbolTable
   ) -> Result<ExtensionState, ExtensionRemovalFailure> {
     return withLogging(
       request: "Removing `\(extensionDecl._memberlessDescription)`",
@@ -1048,7 +1048,7 @@ extension TypeDependencyGraph {
   fileprivate mutating func __removeExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     extensionDeclModule: ModuleName,
-    symbolTable: SymbolTable3
+    symbolTable: SymbolTable
   ) -> Result<ExtensionState, ExtensionRemovalFailure> {
     // Get state
     guard let extensionState = extensionsToState[extensionDecl] else {
@@ -1197,7 +1197,7 @@ extension TypeDependencyGraph {
     _ nominalDecl: SourceFileRoot<NominalTypeDeclSyntax>,
     nominalDeclModule: ModuleName,
     typeName: GlobalTypeName,
-    symbolTable: SymbolTable3
+    symbolTable: SymbolTable
   ) -> Result<NominalType?, NominalRemovalFailure> {
     // Get the state
     guard let type: NominalType = namesToTypes[typeName] else {
@@ -1265,7 +1265,7 @@ extension TypeDependencyGraph {
     baseType: NominalType,
     member: TypeMember,
     invalidatedExtensions: inout [ExtensionState],
-    symbolTable: SymbolTable3
+    symbolTable: SymbolTable
   ) {
     return withLogging(
       request: "Unbinding member type '\(baseTypeName.debugDescription)' > '\(member.name.name)'",
@@ -1293,7 +1293,7 @@ extension TypeDependencyGraph {
     baseType: NominalType,
     member: TypeMember,
     invalidatedExtensions: inout [ExtensionState],
-    symbolTable: SymbolTable3
+    symbolTable: SymbolTable
   ) {
     // Invalidate dependent extensions
     _invalidateDependents(
@@ -1415,7 +1415,7 @@ extension TypeDependencyGraph {
   }
 
   fileprivate mutating func _introspect(
-    symbolTable: SymbolTable3,
+    symbolTable: SymbolTable,
     onlyLogIfCorrupted: Bool = false,
     file: StaticString = #file,
     line: UInt = #line,
@@ -1438,7 +1438,7 @@ extension TypeDependencyGraph {
   mutating func _unbindExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     invalidatedExtensions: inout [ExtensionState],
-    symbolTable: borrowing SymbolTable3
+    symbolTable: borrowing SymbolTable
   ) -> ExtensionState? {
     return withLogging(
       request: "Unbinding `\(extensionDecl._memberlessDescription)`",
@@ -1458,7 +1458,7 @@ extension TypeDependencyGraph {
   mutating func __unbindExtension(
     _ extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
     invalidatedExtensions: inout [ExtensionState],
-    symbolTable: borrowing SymbolTable3
+    symbolTable: borrowing SymbolTable
   ) -> ExtensionState? {
     guard let extensionState = extensionsToState[extensionDecl] else {
       // TODO: Remove
@@ -1540,7 +1540,7 @@ extension TypeDependencyGraph {
     modifiedMembers: TypeTable,
     modifiedExtensionModule: ModuleName,
     invalidatedExtensions: inout [ExtensionState],
-    symbolTable: borrowing SymbolTable3
+    symbolTable: borrowing SymbolTable
   ) {  //-> [TypeDependent] {
     return withLogging(
       request:
@@ -1566,7 +1566,7 @@ extension TypeDependencyGraph {
     modifiedExtensionModule: ModuleName,
     // directDependents: [TypeDependent],
     invalidatedExtensions: inout [ExtensionState],
-    symbolTable: borrowing SymbolTable3
+    symbolTable: borrowing SymbolTable
   ) {  //-> [TypeDependent] {
     // TODO: Clean up if we go for immutable `get`
     func popLastConflictingDependent() -> TypeDependent? {
@@ -1896,7 +1896,7 @@ extension TypeDependencyGraph {
     >,
     dependencyTracker: DependencyTracker,
     configuredRegions: ConfiguredRegions?,
-    symbolTable: borrowing SymbolTable3
+    symbolTable: borrowing SymbolTable
   ) -> Result<BindingResult, ExtensionAdmissionFailure> {
     // Ensure extension isn't already bound
     if let existingExtensionState = extensionsToState[extensionDecl] {
@@ -2438,7 +2438,7 @@ extension GenericExtensionBindingCycle: CustomDebugStringConvertible where TypeN
 
 extension TypeDependencyGraph {
   @_spi(_QualifiedLookupTests) public func _describe(
-    symbolTable: SymbolTable3
+    symbolTable: SymbolTable
   ) -> (description: String, hasErrors: Bool) {
     var description = ""
     var group = GroupedDiagnostics()

@@ -75,7 +75,7 @@ public struct GlobalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
       name: Identifier,
       file: SourceFileSyntax,
       module: ModuleName,
-      symbolTable: borrowing SymbolTable3
+      symbolTable: borrowing SymbolTable
     ) {
       assert(
         symbolTable.moduleMap[file] == module,

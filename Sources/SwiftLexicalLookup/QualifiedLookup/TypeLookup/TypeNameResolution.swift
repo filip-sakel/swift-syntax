@@ -66,7 +66,7 @@ extension SourceFileRoot where Node == NominalTypeDeclSyntax {
   /// Local types (e.g. `func f() { struct A { struct B {} } }`) always resolve.
   /// Global types can also fully resolve, but they only partially resolve if
   /// they're nested within an extension (e.g. `extension A { struct B {} }`).
-  func resolveTypeName(symbolTable: SymbolTable3) -> Result<TypeNameResolution, TypeNameResolutionFailure> {
+  func resolveTypeName(symbolTable: SymbolTable) -> Result<TypeNameResolution, TypeNameResolutionFailure> {
     /// Parse the token into a valid identifier or throw
     func parseName(_ token: TokenSyntax) -> Result<Identifier, TypeNameResolutionFailure> {
       guard let identifier = Identifier(validating: token) else {
@@ -168,7 +168,7 @@ extension PartialTypeName {
     resolvedBase: GenericResolvedNominalTypeReference<GlobalTypeName>,
     originatingSyntax: SourceFileRoot<TypeLikeSyntax>,
     originatingModule: ModuleName,
-    symbolTable: borrowing SymbolTable3
+    symbolTable: borrowing SymbolTable
   ) -> ResolvedNominalTypeReference {
     // Get the type's main declaration.
     //
