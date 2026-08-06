@@ -34,6 +34,7 @@ extension SyntaxProtocol {
   /// by an identifier pattern is accessible from a static context, we need to
   /// see if the parent variable declaration is static. Here's an example:
   ///   DeclSyntax("var myVar: Int").children(ofType: IdentifierPatternSyntax.self)[0]
+  // TODO: Should this be moved into a 'Utilities' file?
   func children<T: SyntaxProtocol>(ofType: T.Type) -> [T] {
     let visitor = SyntaxAsTypeVisitor<T>(viewMode: .all)
     visitor.walk(self)
@@ -41,7 +42,7 @@ extension SyntaxProtocol {
   }
 }
 
-final class TestValueDeclSyntax: XCTestCase {
+final class ValueDeclTests: XCTestCase {
   /// Assert the given declaration syntax can be cast to a ``ValueDeclSyntax``,
   /// exhibiting the given properties.
   ///

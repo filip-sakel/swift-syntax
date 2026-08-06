@@ -167,14 +167,6 @@ extension GenericExtensionState where TypeName == TestTypeName {
   }
 }
 
-// Convenience `String` initializer for `TypeDeclSyntax`; will
-// crash at runtime if given a non `TypeDeclSyntax`.
-extension TypeDeclSyntax: ExpressibleByStringLiteral {
-  public init(stringLiteral value: StringLiteralType) {
-    self = Syntax(DeclSyntax(stringLiteral: value)).cast(TypeDeclSyntax.self)
-  }
-}
-
 // TODO: Remove
 // extension ResolvedNominalTypeReference {
 //   fileprivate static func _mockMarkerType(_ kind: SyntaxKind, marker: Character) -> ResolvedNominalTypeReference? {
@@ -199,7 +191,7 @@ extension TypeDeclSyntax: ExpressibleByStringLiteral {
 //   }
 // }
 
-final class TestQualifiedTypeName: XCTestCase {
+final class TypeResolutionTests: XCTestCase {
   func testSimpleCase() {
     assertTypeResolution(
       [

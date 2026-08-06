@@ -13,16 +13,6 @@
 import SwiftIfConfig
 import SwiftSyntax
 
-extension Result where Success: CustomDebugStringConvertible, Failure: CustomDebugStringConvertible {
-  var _debugDescription: String {
-    switch self {
-    case .success(let success):
-      return ".success(\(success.debugDescription))"
-    case .failure(let error):
-      return ".error(\(error.debugDescription))"
-    }
-  }
-}
 extension Result where Success: SyntaxProtocol, Failure: CustomDebugStringConvertible {
   fileprivate var _debugSyntaxDescription: String {
     switch self {

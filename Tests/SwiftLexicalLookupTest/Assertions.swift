@@ -16,22 +16,6 @@ import SwiftParser
 import XCTest
 import _SwiftSyntaxTestSupport
 
-extension String {
-  fileprivate func _keycapToNumber() -> String {
-    var result = self
-    let keycapMap: [String: String] = [
-      "0️⃣": "0", "1️⃣": "1", "2️⃣": "2",
-      "3️⃣": "3", "4️⃣": "4", "5️⃣": "5",
-      "6️⃣": "6", "7️⃣": "7", "8️⃣": "8",
-      "9️⃣": "9", "🔟": "10",
-    ]
-    for (keycap, digit) in keycapMap {
-      result = result.replacingOccurrences(of: keycap, with: digit)
-    }
-    return result
-  }
-}
-
 /// `methodUnderTest` is called with the token at every position marker in the keys of `expected`.
 /// It then asserts that the positions of the syntax nodes returned by `methodUnderTest` are the values in `expected`.
 /// It also checks whether result types match rules specified in `expectedResultTypes`.
@@ -129,13 +113,6 @@ func assertLexicalNameLookup(
             // )
             return names.map({ $0.syntax })
           } else {
-            let niceIdentifier: String = lookupIdentifier?.name ?? ""
-            let niceMarker: String = marker._keycapToNumber()
-            let nameSyntax: String = lookupName.syntax.trimmedDescription
-            // print(
-            //   "Lookup results looking for '\(niceIdentifier)' [marker: \(niceMarker)] are: \(nameSyntax)"
-            //     .precomposedStringWithCompatibilityMapping
-            // )
             return [lookupName.syntax]
           }
         }

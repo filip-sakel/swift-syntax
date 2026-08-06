@@ -24,7 +24,7 @@ import SwiftSyntax
 /// struct AnyObject {}
 /// let a: AnyObject = AnyObject()
 /// ```
-@_spi(_QualifiedLoookupTests)
+@_spi(_QualifiedLookupTests)
 public enum PartiallyResolvedType {
   case anyType
   case typeIdentifier(Result<TypeReference.Component, InvalidTypeIdentifierFailure>)
@@ -83,7 +83,7 @@ public struct TypeReference: Sendable, CustomDebugStringConvertible {
   }
 }
 
-@_spi(_QualifiedLoookupTests)
+@_spi(_QualifiedLookupTests)
 public enum PartialTypeResolutionFailure: Error {
   /// Missing types produce errors
   case missingType
@@ -94,10 +94,9 @@ public enum PartialTypeResolutionFailure: Error {
   case unknownSuppressedType
 }
 
-@_spi(_QualifiedLoookupTests)
+@_spi(_QualifiedLookupTests)
 public struct InvalidTypeIdentifierFailure: Error {
-  let invalidModuleName: TokenSyntax?
-  let invalidName: TokenSyntax?
+  public init() {}
 }
 
 // MARK: Helpers
@@ -179,16 +178,10 @@ private func _parseModuleAndIdentifier(
         introducingSyntax: typeSyntax
       )
     )
-  // Invalid cases are:
-  // (a) no module/valid module,  invalid name
-  case (nil, nil), (_??, nil):
-    return .failure(InvalidTypeIdentifierFailure(invalidModuleName: nil, invalidName: nameToken))
-  // (b) invalid module, valid name
-  case (.some(nil), _?):
-    return .failure(InvalidTypeIdentifierFailure(invalidModuleName: moduleNameToken, invalidName: nil))
-  // (c) invalid module, invalid name
-  case (.some(nil), nil):
-    return .failure(InvalidTypeIdentifierFailure(invalidModuleName: moduleNameToken, invalidName: nameToken))
+  // Invalid cases
+  // (c) invalid name/module
+  case (_, nil), (nil?, _):
+    return .failure(InvalidTypeIdentifierFailure())
   }
 }
 
@@ -200,7 +193,7 @@ extension Attached where Node: TypeSyntaxProtocol {
     Attached<S>(syntax)!
   }
 
-  @_spi(_QualifiedLoookup)
+  @_spi(_QualifiedLookupTests)
   public func partiallyResolve() -> Result<PartiallyResolvedType, PartialTypeResolutionFailure> {
     switch TypeSyntax(node).as(TypeSyntaxEnum.self) {
     // Non-nominal base cases
@@ -422,6 +415,54 @@ extension Attached where Node: TypeSyntaxProtocol {
           compositionType.elements.map({ _castChild($0.type) })
         )
       )
+    }
+  }
+}
+
+// MARK: Debug
+
+extension Result where Success: CustomDebugStringConvertible, Failure: CustomDebugStringConvertible {
+  @_spi(_QualifiedLookupTests) public var _debugDescription: String {
+    switch self {
+    case .success(let success):
+      return "success(\(success.debugDescription))"
+    case .failure(let error):
+      return "error(\(error.debugDescription))"
+    }
+  }
+}
+
+extension InvalidTypeIdentifierFailure: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    "InvalidTypeIdentifierFailure()"
+  }
+}
+
+extension PartialTypeResolutionFailure: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    switch self {
+    case .missingType: return ".missingType"
+    case .unknownSuppressedType: return ".unknownSuppressedType"
+    case .wildcardType: return ".wildcardType"
+    }
+  }
+}
+
+extension PartiallyResolvedType: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    switch self {
+    case .anyType:
+      return ".anyType"
+    case .typeIdentifier(let typeIdentifierResult):
+      return ".typeIdentifier(\(typeIdentifierResult._debugDescription))"
+    case .function(let argumentCount):
+      return ".function(argumentCount: \(argumentCount))"
+    case .tuple(let labels):
+      return ".tuple([\(labels.map({ $0?.name ?? "nil" }).joined(separator: ", "))])"
+    case .member(let base, let memberComponent):
+      return ".member(base: `\(base.trimmedDescription)`, memberComponent: \(memberComponent._debugDescription))"
+    case .composition(let children):
+      return ".composition([\(children.map(\.trimmedDescription))])"
     }
   }
 }

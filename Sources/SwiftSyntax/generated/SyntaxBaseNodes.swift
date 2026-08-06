@@ -155,7 +155,7 @@ extension Syntax {
 }
 
 /// ### Subtypes
-/// 
+///
 /// - ``AccessorDeclSyntax``
 /// - ``ActorDeclSyntax``
 /// - ``AssociatedTypeDeclSyntax``
@@ -457,7 +457,7 @@ extension Syntax {
 }
 
 /// ### Subtypes
-/// 
+///
 /// - ``ArrayExprSyntax``
 /// - ``ArrowExprSyntax``
 /// - ``AsExprSyntax``
@@ -813,7 +813,7 @@ extension Syntax {
 }
 
 /// ### Subtypes
-/// 
+///
 /// - ``ExpressionPatternSyntax``
 /// - ``IdentifierPatternSyntax``
 /// - ``IsTypePatternSyntax``
@@ -1078,7 +1078,7 @@ extension Syntax {
 }
 
 /// ### Subtypes
-/// 
+///
 /// - ``BreakStmtSyntax``
 /// - ``ContinueStmtSyntax``
 /// - ``DeferStmtSyntax``
@@ -1362,7 +1362,7 @@ extension Syntax {
 }
 
 /// ### Subtypes
-/// 
+///
 /// - ``ArrayTypeSyntax``
 /// - ``AttributedTypeSyntax``
 /// - ``ClassRestrictionTypeSyntax``
