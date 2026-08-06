@@ -34,7 +34,7 @@ add_swift_syntax_library(SwiftLexicalLookup
 
   TypeLookup/MemberLookupResult.swift
   TypeLookup/ModuleLookup.swift
-  TypeLookup/PartiallyResolvedType.swift
+  TypeLookup/PartialTypeResolution.swift
   TypeLookup/SymbolTable.swift
   TypeLookup/TypeName.swift
   TypeLookup/TypeNameResolution.swift
