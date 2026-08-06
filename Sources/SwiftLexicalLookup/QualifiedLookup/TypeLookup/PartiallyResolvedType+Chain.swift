@@ -25,6 +25,12 @@ enum ChainResolution: CustomDebugStringConvertible {
     }
   }
 }
+enum ChainResolutionFailure: Error {
+  /// We need the fileRoot to be registered in the symbol table.
+  case unregisteredFile
+  /// We need all type names in the chain to be valid identifiers
+  case invalidIdentifier(TokenSyntax)
+}
 
 struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
   // Base and members should be in the same file
@@ -59,86 +65,6 @@ struct PartiallyResolvedNominalTypeChain: CustomDebugStringConvertible {
     return "<\(base.trimmedDescription)>.\(memberChain) (mainDecl: \(String(reflecting: mainDecl?.kind)))"
   }
 
-  /// Resolve using now-qualified base.
-  ///
-  /// Parameters:
-  /// - originatingSyntax: The syntax which we're resolving with this request.
-  ///
-  /// Returns: The resolved type reference or `nil` if the `originatingSyntax`
-  /// isn't registered in the symbol table.
-  func resolve(
-    resolvedBase: GenericResolvedNominalTypeReference<GlobalTypeName>,
-    originatingSyntax: SourceFileRoot<TypeLikeSyntax>,
-    originatingModule: SymbolTable3.Module,
-    symbolTable: borrowing SymbolTable3
-  ) -> ResolvedNominalTypeReference {
-    // Get the type's main declaration.
-    //
-    // If ``memberNames`` is empty, we didn't have a resolved main declaration so
-    // ``mainDecl`` is `nil`; if ``memberNames`` isn't an empty, ``mainDecl`` should
-    // have been set.
-    let resolvedMainDecl = mainDecl ?? resolvedBase.mainDecl
-
-    // Resolve the name
-    let memberComponents = memberNames.map({ name in
-      GlobalTypeName.Component(
-        name: name,
-        file: originatingSyntax.fileRoot,
-        module: originatingModule,
-        symbolTable: symbolTable
-      )
-    })
-
-    return ResolvedNominalTypeReference(
-      mainDecl: resolvedMainDecl,
-      name: TypeName.global(
-        resolvedBase.qualifiedName.addingComponents(memberComponents)
-      ),
-      originatingSyntax: originatingSyntax
-    )
-  }
-}
-
-// Resolve all types required to qualify this type
-extension SyntaxProtocol {
-  // enum DeclRoot {
-  //   case fileScope(SourceFileSyntax)
-  //   case nestedScope(CodeBlockItemListSyntax)
-  //   case `extension`(ExtensionDeclSyntax)
-  // }
-  // // Either file scope, nested scope, or extension.
-  // // TODO: Merge with PartiallyResolvedType+Qualified
-  // var declRoot: DeclRoot {
-  //   guard let sourceFile = root.as(SourceFileSyntax.self) else {
-  //     // FIXME: Throw
-  //   }
-  //   var ancestor: Syntax? = parent
-  //   while let currentAncestor = ancestor {
-  //     switch currentAncestor.as(SyntaxEnum.self) {
-  //     case .codeBlockItemList(let itemList):
-  //       if sourceFile.statements == itemList {
-  //         return .fileScope(sourceFile)
-  //       } else {
-  //         return .nestedScope(itemList)
-  //       }
-  //     case .
-  //     }
-  //
-  //     ancestor = currentAncestor.parent
-  //   }
-  //   // FIXME: Precondition failure (internal)
-  // }
-  //
-  // func resolveDeclContext() -> PartiallyResolvedType {
-  //   var parent =
-  // }
-}
-
-enum ChainResolutionFailure: Error {
-  /// We need the fileRoot to be registered in the symbol table.
-  case unregisteredFile
-  /// We need all type names in the chain to be valid identifiers
-  case invalidIdentifier(TokenSyntax)
 }
 
 extension SourceFileRoot where Node == NominalTypeDeclSyntax {
@@ -233,6 +159,47 @@ extension SourceFileRoot where Node == NominalTypeDeclSyntax {
     // Shouldn't happen because we checked there's a source-file root above.
     fatalError(
       "[SwiftLexicalLookup] Internal error: Unexpectedly got no result despite having verified source-file root."
+    )
+  }
+}
+
+extension PartiallyResolvedNominalTypeChain {
+  /// Resolve using now-qualified base.
+  ///
+  /// Parameters:
+  /// - originatingSyntax: The syntax which we're resolving with this request.
+  ///
+  /// Returns: The resolved type reference or `nil` if the `originatingSyntax`
+  /// isn't registered in the symbol table.
+  func resolve(
+    resolvedBase: GenericResolvedNominalTypeReference<GlobalTypeName>,
+    originatingSyntax: SourceFileRoot<TypeLikeSyntax>,
+    originatingModule: SymbolTable3.Module,
+    symbolTable: borrowing SymbolTable3
+  ) -> ResolvedNominalTypeReference {
+    // Get the type's main declaration.
+    //
+    // If ``memberNames`` is empty, we didn't have a resolved main declaration so
+    // ``mainDecl`` is `nil`; if ``memberNames`` isn't an empty, ``mainDecl`` should
+    // have been set.
+    let resolvedMainDecl = mainDecl ?? resolvedBase.mainDecl
+
+    // Resolve the name
+    let memberComponents = memberNames.map({ name in
+      GlobalTypeName.Component(
+        name: name,
+        file: originatingSyntax.fileRoot,
+        module: originatingModule,
+        symbolTable: symbolTable
+      )
+    })
+
+    return ResolvedNominalTypeReference(
+      mainDecl: resolvedMainDecl,
+      name: TypeName.global(
+        resolvedBase.qualifiedName.addingComponents(memberComponents)
+      ),
+      originatingSyntax: originatingSyntax
     )
   }
 }
