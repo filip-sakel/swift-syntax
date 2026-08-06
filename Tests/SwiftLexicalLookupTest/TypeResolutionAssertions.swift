@@ -51,7 +51,7 @@ struct TypeResolutionMatcher {
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
   enum Expectation {
     case syntaxResolution(
-      Result<MemberLookupResult<Character>, TypeQualifierFailure<TestTypeName, Character, Character>>
+      Result<MemberLookupResult<Character>, TypeResolutionFailure<TestTypeName, Character, Character>>
     )
     case extensionBinding(GenericExtensionState<TestTypeName>)
   }
@@ -264,7 +264,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
   /// `assertExpectation` forwards type syntax here.
   private func _assertTypeSyntax(
     typeSyntax: SourceFileRoot<TypeSyntax>,
-    expectedResult: Result<MemberLookupResult<Character>, TypeQualifierFailure<TestTypeName, Character, Character>>,
+    expectedResult: Result<MemberLookupResult<Character>, TypeResolutionFailure<TestTypeName, Character, Character>>,
     markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool,
@@ -433,14 +433,14 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     )
   }
   mutating func appendInterpolation(
-    result: Result<MemberLookupResult<Character>, TypeQualifierFailure<TestTypeName, Character, Character>>,
+    result: Result<MemberLookupResult<Character>, TypeResolutionFailure<TestTypeName, Character, Character>>,
     file: StaticString = #file,
     line: UInt = #line
   ) {
     appendInterpolation(expects: [TypeResolutionMatcher.Expectation.syntaxResolution(result)], file: file, line: line)
   }
   mutating func appendInterpolation(
-    failure: TypeQualifierFailure<TestTypeName, Character, Character>,
+    failure: TypeResolutionFailure<TestTypeName, Character, Character>,
     file: StaticString = #file,
     line: UInt = #line
   ) {

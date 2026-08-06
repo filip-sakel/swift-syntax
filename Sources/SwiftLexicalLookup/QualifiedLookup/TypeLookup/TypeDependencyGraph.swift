@@ -98,7 +98,7 @@ extension Array {
 
 @_spi(_QualifiedLookupTests) public typealias GenericBindingFailure<
   TypeName: Sendable & Hashable & CustomDebugStringConvertible
-> = TypeQualifierFailure<
+> = TypeResolutionFailure<
   TypeName, ResolvedNominalTypeReference, NominalTypeRef
 >
 @_spi(_QualifiedLookupTests) public typealias InvalidatedExtensions = [ExtensionState]
