@@ -14,7 +14,16 @@ import SwiftSyntax
 
 // MARK: Result Types
 
-// TODO: Handle `AnyObject`
+/// A partially resolved type reference. Non-nominal leaf types are resolved,
+/// leaving nominal types for the type resolver.
+///
+/// We resolve `AnyObject` to a regular nominal type. That's because, it's
+/// just an alias for a built-in object defined in the standard library,
+/// which we can also shadow:
+/// ```swift
+/// struct AnyObject {}
+/// let a: AnyObject = AnyObject()
+/// ```
 @_spi(_QualifiedLoookupTests)
 public enum PartiallyResolvedType {
   case anyType
