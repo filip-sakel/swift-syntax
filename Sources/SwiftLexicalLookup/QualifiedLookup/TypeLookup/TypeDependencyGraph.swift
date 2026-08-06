@@ -205,10 +205,6 @@ public struct GenericExtensionState<TypeName: Sendable & Hashable & CustomDebugS
   }
 }
 
-// TODO: Consider optimization where we don't issue module-lookup requests when looking
-//       for type members of internal types (external modules can't depend on internal types)
-// TODO: Think about making lookup lazy (what are the actual places where we *need* to find
-//       redeclarations)
 /// A directed acyclic graph where types are nodes and extensions are edges.
 ///
 ///
@@ -217,7 +213,7 @@ public struct GenericExtensionState<TypeName: Sendable & Hashable & CustomDebugS
 ///       However, we also keep track of nominal types b/c they might be introduced by
 ///       extensions and we crucially resolve to them and need a unique reference to each.
 ///
-/// Features:
+/// Features: (TODO: Rework)
 /// 0. Iterating type->extensions, O(# of exts)
 ///    a. For quick qualified lookup
 /// 0. Access extension->state, O(1)
@@ -236,6 +232,42 @@ public struct GenericExtensionState<TypeName: Sendable & Hashable & CustomDebugS
 ///         func f(_: B) // <- Look up here needs to quickly
 ///                      //    find that `A>B` is a valid member.
 ///       }
+///
+/// Extension binding is challenging because it's incremental, i.e., we process
+/// one extension at a time. Hence, we process just one extension at a time
+/// using just current lookup results, keeping track of dependencies. This
+/// approach allows us to remain in a consistent state. When we add other
+/// extensions --and eventually all accessible extensions-- we use those
+/// dependencies and the new lookup state to update old results.
+///
+/// Extension binding is incremental because:
+/// 1. Extensions may depend on other extensions, e.g.:
+///    ```swift
+///    struct A {}
+///    extension A.Inner {} // <- Resolving this extension requires finding 'Inner' in `A`
+///    extension A { typealias Inner = A }
+///    ```
+/// 2. We might get a module's extensions later in compilation
+///
+/// Here's how this would play out in the above example if we wanted to
+/// bind all of A's extensions:
+/// 1. We start with `extension A.Inner`
+///    a. We resolve `A` to '_(MyFile.swift)::A'
+///    b. Currently, `A` has no type members, so `A.Inner` doesn't exist
+///       This is the desired result, because if our program was just
+///         struct A {}; extension A.Inner {}`
+///       that's the exact error we'd expect.
+///    c. So we mark `extension A.Inner` as invalid and record this result's dependence
+///       on the fact that `A` has not memebr `Inner`
+/// 2. We look at `extension A`
+///    a. We resolve `A` to '_(MyFile.swift)::A' and bind the extension to '_(MyFile.swift)::A'
+///    b. Now, `A` gains a type member `Inner`
+///    c. We find `extension A.Inner` depended on this member so we recompute
+///       it
+///    d. Now, `extension A.Inner` resolves to '_(MyFile.swift)::A' depending on
+///       the fact that '_(MyFile.swift)::A' has no type member `A`
+///       * This dependence comes from resolving `typealias Inner = A`
+///    e. Finally, we bind `extension A.Inner` to '_(MyFile.swift)::A'
 @_spi(_QualifiedLookupTests)
 public struct TypeDependencyGraph {
   @_spi(_QualifiedLookupTests) public struct TypeDependent: Sendable, Hashable, CustomDebugStringConvertible {
@@ -1389,7 +1421,7 @@ extension TypeDependencyGraph {
     line: UInt = #line,
     function: StaticString = #function
   ) {
-    let (description, hasErrors) = symbolTable._describeDependencyGraph(dependencyGraph: self)
+    let (description, hasErrors) = _describe(symbolTable: symbolTable)
     if hasErrors || !onlyLogIfCorrupted {
       log(!description.isEmpty ? description : "<empty graph>")
     }
@@ -2401,5 +2433,41 @@ extension GenericExtensionBindingCycle: CustomDebugStringConvertible where TypeN
         dependencyMember: '\(dependencyMember.name)'
       )"
       """
+  }
+}
+
+extension TypeDependencyGraph {
+  @_spi(_QualifiedLookupTests) public func _describe(
+    symbolTable: SymbolTable3
+  ) -> (description: String, hasErrors: Bool) {
+    var description = ""
+    var group = GroupedDiagnostics()
+
+    // Add all registered files
+    var addedNames = Set<String>()
+    for (moduleIdentifier, moduleFiles) in symbolTable.moduleToSources {
+      for (fileName, fileSyntax) in moduleFiles {
+        let fileIdentifier = "\(moduleIdentifier.name)/\(fileName)"
+        // Don't readmit duplicate file names
+        // TODO: Should handle modules
+        guard addedNames.insert(fileIdentifier).inserted else {
+          description += "Duplicate file identifier \(fileIdentifier)\n"
+          continue
+        }
+
+        group.addSourceFile(tree: fileSyntax, displayName: fileIdentifier)
+      }
+    }
+
+    // Add dependency-graph diagnostics
+    let (diagnostics, hasErrors) = _describeWithDiagnostics()
+    for diagnostic in diagnostics {
+      group.addDiagnostic(diagnostic)
+    }
+
+    // Print to result
+    description += DiagnosticsFormatter(colorize: true).annotateSources(in: group)
+
+    return (description, hasErrors)
   }
 }

@@ -426,54 +426,6 @@ extension TypeResolutionFailure {
   }
 }
 
-// TODO: Remove
-//
-// @_spi(_QualifiedLookupTests) public enum ExtensionBindingState {
-//   case singleRequest(
-//     currentRequest: SourceFileRoot<ExtensionDeclSyntax>,
-//     nestedRequests: OrderedSet<SourceFileRoot<ExtensionDeclSyntax>>
-//   )
-//   case batchRequest(requests: OrderedSet<SourceFileRoot<ExtensionDeclSyntax>>)
-//
-//   // private(set) var singleRequest: SourceFileRoot<ExtensionDeclSyntax>?
-//   // private(set) var batchBinding: OrderedSet<SourceFileRoot<ExtensionDeclSyntax>>
-// }
-//
-// extension Optional where Wrapped == ExtensionBindingState {
-//   /// Marks that we'll start binding the given extension and returns `true` if
-//   /// possible. Returns `false` if we already have binding requests underway.
-//   fileprivate mutating func attemptToStartBindingSingle(extensionDecl: SourceFileRoot<ExtensionDeclSyntax>) -> Bool {
-//     switch self {
-//     case nil:
-//       // No request underway; just add us
-//       self = ExtensionBindingState.singleRequest(currentRequest: extensionDecl, nestedRequests: [])
-//       return true
-//     case
-//       // We're processing a single different request with no
-//       ExtensionBindingState.singleRequest(currentRequest: _, nestedRequests: [])?,
-//       //
-//       ExtensionBindingState.singleRequest(currentRequest: extensionDecl, nestedRequests: _)?:
-//       return false
-//     case :
-//       // A single request underway without a batch; don't add
-//       return false
-//     case ExtensionBindingState.singleRequest(let currentRequest, var nestedRequests)?
-//     where currentRequest != extensionDecl /* && nestedRequests != [] */:
-//       // A single request underway with a nested request; we add to said request if not already added
-//       let shouldBind = nestedRequests.append(extensionDecl).inserted
-//       self = ExtensionBindingState.singleRequest(currentRequest: currentRequest, nestedRequests: nestedRequests)
-//       return shouldBind
-//     case ExtensionBindingState.batchRequest(var requests)?:
-//       // If there's a batch request, just add there
-//       let shouldBind = requests.append(extensionDecl).inserted
-//       self = ExtensionBindingState.batchRequest(requests: requests)
-//       return shouldBind
-//     }
-//   }
-// }
-
-// TODO: Add .lookForSupertype, .lookForDynamicMember & implemenet internal/external module lookup
-
 /// Finds the main declaration and qualified name of the nominal types
 /// to which the the given type syntax refers.
 @_spi(_QualifiedLookup) public struct TypeResolver {

@@ -89,7 +89,7 @@ public struct GlobalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
           internalModule: symbolTable.moduleName
         ),
         name: name,
-        debugFileMap: DebugFileMap(symbolTable: symbolTable)
+        debugFileMap: symbolTable.debugFileMap
       )
     }
 

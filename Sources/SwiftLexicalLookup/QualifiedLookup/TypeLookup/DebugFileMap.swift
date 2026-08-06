@@ -29,11 +29,14 @@ struct DebugFileMap: Sendable, Hashable {
   let fileMap: [SyntaxIdentifier: (fileName: String, file: SourceFileSyntax)]
   #endif
 
-  init(symbolTable: borrowing SymbolTable3) {
-    #if DEBUG
-    self.fileMap = symbolTable.internalFileMap
-    #endif
+  // Initialized by SymbolTable
+  #if DEBUG
+  init(_internalFileMap: [SyntaxIdentifier: (fileName: String, file: SourceFileSyntax)]) {
+    self.fileMap = _internalFileMap
   }
+  #else
+  init() {}
+  #endif
 
   /// Find the file name of the given source-file `SyntaxIdentifier`.
   /// Falls back to printing the file hash (non deterministic;
