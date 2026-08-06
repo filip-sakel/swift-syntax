@@ -12,6 +12,8 @@
 
 import SwiftSyntax
 
+/// The type result of structural type resolution. `Result`
+/// represents a nominal type.
 @_spi(_QualifiedLookup) public enum MemberLookupResult<Result> {
   case function(argumentCount: Int)
   case tuple(labels: [Identifier?])
@@ -32,9 +34,13 @@ import SwiftSyntax
   }
 }
 
+// MARK: Conformances
+
 extension MemberLookupResult: Sendable where Result: Sendable {}
 extension MemberLookupResult: Equatable where Result: Equatable {}
 extension MemberLookupResult: Hashable where Result: Hashable {}
+
+// MARK: Debug Description
 
 extension MemberLookupResult {
   internal func _describe(describeMembers: ([Result]) -> String) -> String {
@@ -58,26 +64,3 @@ extension MemberLookupResult: CustomDebugStringConvertible where Result: CustomD
     })
   }
 }
-// extension MemberLookupResult: CustomDebugStringConvertible where Result: SyntaxProtocol {
-//   public var debugDescription: String {
-//     _description(describeMembers: { members in
-//       members.map({ "```\($0.trimmedDescription)```" }).joined(separator: "\n")
-//     })
-//   }
-// }
-
-// extension MemberLookupResult where Result == ValueDeclSyntax {
-//   var names: [DeclName] {
-//     switch self {
-//     case .function(let argumentCount): return [.callAsFunction(args: [Identifier?](repeating: nil, count: argumentCount))]
-//     case .tuple(let labels):
-//       labels.enumerated().flatMap({ i, optionalLabel in
-//         // No way to create `StaticString` name from runtime integer
-//         let indexName = DeclName.identifier(macro: nil, identifier: Identifier, args: DeclNameArgs?)
-//         if let label = optionalLabel {
-//           return [DeclName.identifier(identifier: label, args: )]
-//         }
-//       })
-//     }
-//   }
-// }

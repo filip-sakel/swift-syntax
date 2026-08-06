@@ -12,38 +12,9 @@
 
 import SwiftSyntax
 
-@_spi(_QualifiedLookupInternal) public struct ProtocolsLackGenericParametersError: Equatable, Error {}
-
 /// Protocol encapusulating `NominalTypeDeclSyntax`. Only `[Struct/Enum/Class/Actor/Protocol]DeclSyntax`
 /// should conform.
-@_spi(_QualifiedLookup) public protocol NominalTypeDeclSyntaxProtocol: DeclGroupSyntax, NamedDeclSyntax {
-  // @_spi(_QualifiedLookupInternal) var _genericParameterClause:
-  //   Result<GenericParameterClauseSyntax?, ProtocolsLackGenericParametersError>
-  // { get }
-}
-
-// // Structs, enums, classes, and actors may have generic-parameter clauses.
-// extension NominalTypeDeclSyntaxProtocol where Self: WithGenericParametersSyntax {
-//   @_spi(_QualifiedLookupInternal) public var _genericParameterClause:
-//     Result<GenericParameterClauseSyntax?, ProtocolsLackGenericParametersError>
-//   {
-//     .success(genericParameterClause)
-//   }
-// }
-// @_spi(_QualifiedLookup) extension StructDeclSyntax: NominalTypeDeclSyntaxProtocol {}
-// @_spi(_QualifiedLookup) extension EnumDeclSyntax: NominalTypeDeclSyntaxProtocol {}
-// @_spi(_QualifiedLookup) extension ClassDeclSyntax: NominalTypeDeclSyntaxProtocol {}
-// @_spi(_QualifiedLookup) extension ActorDeclSyntax: NominalTypeDeclSyntaxProtocol {}
-//
-// // Protocols don't have generic-parameter clauses; they may just have primary
-// // associated types (but we use regular associated types for lookup).
-// @_spi(_QualifiedLookup) extension ProtocolDeclSyntax: NominalTypeDeclSyntaxProtocol {
-//   @_spi(_QualifiedLookupInternal) public var _genericParameterClause:
-//     Result<SwiftSyntax.GenericParameterClauseSyntax?, ProtocolsLackGenericParametersError>
-//   {
-//     .failure(ProtocolsLackGenericParametersError())
-//   }
-// }
+@_spi(_QualifiedLookup) public protocol NominalTypeDeclSyntaxProtocol: DeclGroupSyntax, NamedDeclSyntax {}
 
 /// A nominal type declaration (struct, enum, class, actor, protocol).
 @_spi(_QualifiedLookup) public struct NominalTypeDeclSyntax: NominalTypeDeclSyntaxProtocol, SyntaxHashable {
@@ -68,6 +39,8 @@ import SwiftSyntax
     ])
   }
 }
+
+// MARK: Properties
 
 extension NominalTypeDeclSyntax: DeclGroupSyntax {
   private func _getGroupProp<T>(_ prop: KeyPath<any NominalTypeDeclSyntaxProtocol, T>) -> T {
@@ -153,6 +126,42 @@ extension NominalTypeDeclSyntax: DeclGroupSyntax {
   public var memberBlock: MemberBlockSyntax {
     get { _getGroupProp(\.memberBlock) }
     set { _setGroupProp(\.memberBlock, newValue: newValue) }
+  }
+}
+
+// MARK: Generic Parameters
+
+extension NominalTypeDeclSyntax {
+  /// Find the given generic parameter in this nominal-type declaration.
+  /// Empty for protocols (they only have associated types)
+  func findGenericParameters(withName name: Identifier?) -> [GenericParameterSyntax] {
+    // Extract the parameter clause, or `nil` for protocols.
+    let parameterClause: GenericParameterClauseSyntax?
+    switch _syntaxNode.as(SyntaxEnum.self) {
+    case .structDecl(let nonProtocolDecl):
+      parameterClause = nonProtocolDecl.genericParameterClause
+    case .enumDecl(let nonProtocolDecl):
+      parameterClause = nonProtocolDecl.genericParameterClause
+    case .classDecl(let nonProtocolDecl):
+      parameterClause = nonProtocolDecl.genericParameterClause
+    case .actorDecl(let nonProtocolDecl):
+      parameterClause = nonProtocolDecl.genericParameterClause
+    case .protocolDecl:
+      parameterClause = nil
+    default:
+      assertionFailure(
+        "[SwiftLexicalLookup] Internal error: Unexpectedly got nominal type declaration of unrecognized kind '\(kind)'."
+      )
+      return []
+    }
+
+    guard let parameterClause else { return [] }
+
+    // Return all parameters if we don't filter by name
+    guard let name else { return Array(parameterClause.parameters) }
+    return parameterClause.parameters.filter({ parameter in
+      parameter.name.identifier == name
+    })
   }
 }
 
