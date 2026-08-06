@@ -15,7 +15,7 @@ import Foundation
 import SwiftSyntax
 import XCTest
 
-final class TestNameLookup: XCTestCase {
+final class NameLookupTests: XCTestCase {
   func testCodeBlockSimpleCase() {
     assertLexicalNameLookup(
       source: """
@@ -364,6 +364,40 @@ final class TestNameLookup: XCTestCase {
       expectedResultTypes: .all(
         IdentifierPatternSyntax.self
       )
+    )
+  }
+
+  func testSimpleLookupInProtocol() {
+    // We don't look for members when triggered within an inheritance clause.
+    //
+    // Also, `Self` always appears, matching ASTScope behavior. Related to:
+    // https://github.com/swiftlang/swift-syntax/pull/2852#discussion_r1775049671
+    assertLexicalNameLookup(
+      source: """
+        protocol P48a { associatedtype A = Int }
+        protocol P48b { associatedtype B }
+        1️⃣protocol P48c: 2️⃣P48a, 3️⃣P48b where 4️⃣A == 5️⃣B {}
+        """,
+      references: [
+        "2️⃣": [
+          .fromScope(ProtocolDeclSyntax.self, expectedNames: [NameExpectation.implicit(.Self("1️⃣"))])
+        ],
+        "3️⃣": [
+          .fromScope(ProtocolDeclSyntax.self, expectedNames: [NameExpectation.implicit(.Self("1️⃣"))])
+        ],
+        "4️⃣": [
+          .fromScope(ProtocolDeclSyntax.self, expectedNames: [NameExpectation.implicit(.Self("1️⃣"))]),
+          .lookForMembers(ProtocolDeclSyntax.self),
+        ],
+        "5️⃣": [
+          .fromScope(ProtocolDeclSyntax.self, expectedNames: [NameExpectation.implicit(.Self("1️⃣"))]),
+          .lookForMembers(ProtocolDeclSyntax.self),
+        ],
+      ],
+      expectedResultTypes: .none,
+      // We don't filter names by an identifier. This allows us to get `Self`
+      // in the results.
+      useNilAsTheParameter: true
     )
   }
 

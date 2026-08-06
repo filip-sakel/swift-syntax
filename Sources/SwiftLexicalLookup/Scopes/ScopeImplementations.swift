@@ -454,10 +454,11 @@ import SwiftSyntax
 
     let lookInMembers: [LookupResult]
 
-    if inheritanceClause?.range.contains(lookUpPosition) != false {
-      lookInMembers = [.lookForMembers(in: Syntax(self))]
-    } else {
+    // Don't look for members if we're in the inheritance clause
+    if inheritanceClause?.range.contains(lookUpPosition) == true {
       lookInMembers = []
+    } else {
+      lookInMembers = [.lookForMembers(in: Syntax(self))]
     }
 
     return results

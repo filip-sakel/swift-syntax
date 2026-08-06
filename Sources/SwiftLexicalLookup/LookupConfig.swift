@@ -39,7 +39,7 @@ public struct LookupConfig {
   /// Doesn't return `.lookForGenericParameters` for the extended type
   /// of an extension.
   ///
-  /// TODO: This flag should likely be removed and become the default behavior.
+  /// This flag should likely be removed and become the default behavior.
   ///
   /// For instance, if we turn on `_dontFindGenericParametersForExtendedType`:
   /// ```
@@ -73,7 +73,7 @@ public struct LookupConfig {
   /// - `_dontFindGenericParametersForExtendedType`: Whether we should avoid
   ///   returning generic parameters for lookup initiated in an extension's
   ///   extended-type syntax.
-  @_spi(_QualifiedLookupTests) public init(
+  @_spi(Experimental) public init(
     finishInSequentialScope: Bool = false,
     configuredRegions: ConfiguredRegions? = nil,
     _lookupTopScope: Bool,
