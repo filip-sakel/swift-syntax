@@ -176,7 +176,6 @@ extension Attached where Node: TypeSyntaxProtocol {
       // Single-element tuples are just the type, e.g., the tuple type syntax
       // `(Int)` is just `Int`.
       // We diagnose single-element labels elsewhere
-      // TODO: Should we diagnose single-element labels here?
       if let soleTupleElement = tupleType.elements.first, tupleType.elements.count == 1 {
         // Forward resolution
         return _castChild(soleTupleElement.type).partiallyResolve()
@@ -233,7 +232,6 @@ extension Attached where Node: TypeSyntaxProtocol {
       case (nil, .keyword(.Any)):
         return Result.success(PartiallyResolvedType.anyType)
       case (_?, .keyword(.Any)):
-        // TODO: Is this safe?
         nameToken = identifierType.name.with(\.tokenKind, .identifier("Any"))
       // === `Self` ===
       // Basically the opposite of `Any`: Whether with or without a module

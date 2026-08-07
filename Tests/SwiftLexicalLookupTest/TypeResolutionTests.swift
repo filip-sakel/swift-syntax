@@ -918,30 +918,33 @@ final class TypeResolutionTests: XCTestCase {
 
   func testRedeclarationInExtension() {
     // TODO: Fix determinism problem
-    assertTypeResolution([
-      "File.swift": """
-      struct A {
-        struct B {}
-      }
+    assertTypeResolution(
+      [
+        "File.swift": """
+        struct A {
+          struct B {}
+        }
 
-      extension A.B {
-        struct C {}
-      }
+        extension A.B {
+          struct C {}
+        }
 
-      extension A.B.C { struct D {} }
+        extension A.B.C { struct D {} }
 
-      // After `A` gains a member type `A`, `struct C` above
-      // resolves to `_::A._::A._::C`
-      extension A.B {
-        typealias C = A // Redeclaration of member `C`
-      }
+        // After `A` gains a member type `A`, `struct C` above
+        // resolves to `_::A._::A._::C`
+        extension A.B {
+          typealias C = A // Redeclaration of member `C`
+        }
 
-      let _: \(failure: .invalidMembers([
+        let _: \(failure: .invalidMembers([
                ("A.B.C", .ambiguousTypeDecl(["struct C {}", "typealias C = A"]))
              ]))
-             A.B.C.D
-      """
-    ])
+               A.B.C.D
+        """
+      ],
+      verbose: true
+    )
   }
 
   // func testCrossFileExtension() {

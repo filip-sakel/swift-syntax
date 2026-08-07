@@ -1107,7 +1107,8 @@ extension TypeResolutionFailure {
     //
     // Also, collecting all failures surfaces all errors at once for better
     // diagnostics.
-    var results = [Attached<TypeDeclSyntax>: MemberLookupResult<ResolvedNominalTypeReference>]()
+    var visitedDecls = Set<Attached<TypeDeclSyntax>>()
+    var declsAndResults = [(decl: Attached<TypeDeclSyntax>, result: MemberLookupResult<ResolvedNominalTypeReference>)]()
     var failures = [(Attached<TypeLikeSyntax>, Failure)]()
     var nominalBaseTypes = [NominalTypeRef]()
 
@@ -1125,7 +1126,9 @@ extension TypeResolutionFailure {
       defer {
         switch memberResult {
         case Result.success((let memberTypeDecl, let memberResult)?):
-          results[memberTypeDecl] = memberResult
+          // Add if not already added
+          guard visitedDecls.insert(memberTypeDecl).inserted else { break }
+          declsAndResults.append((memberTypeDecl, memberResult))
         case Result.success(nil):
           // No results; continue in case next one has a result.
           break
@@ -1235,7 +1238,7 @@ extension TypeResolutionFailure {
     // Diagnose if we get no results
     // E.g. `(Any & Sendable).MyType` yields no results for either `Any.MyType` or
     //   `Sendable.MyType`; hence, `MyType` isn't a member of `Any & Sendable`.
-    guard let (_, firstResult) = results.first else {
+    guard let (_, firstResult) = declsAndResults.first else {
       return Result.failure(
         Failure.noTypeMember(
           member: typeMember,
@@ -1244,9 +1247,9 @@ extension TypeResolutionFailure {
       )
     }
     // TODO: Ensure we're properly shadowing and not giving false-positive errors
-    guard results.count == 1 else {
+    guard declsAndResults.count == 1 else {
       return Result.failure(
-        Failure.ambiguousTypeDecl(results.keys.map(\.node))
+        Failure.ambiguousTypeDecl(declsAndResults.map(\.decl.node))
       )
     }
 
