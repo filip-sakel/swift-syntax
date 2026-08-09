@@ -13,7 +13,7 @@
 import SwiftSyntax
 
 enum TypeNameResolution {
-  case resolved(TypeName)
+  case resolved(Result<ResolvedNominalTypeReference, TypeResolver.Failure>)
   case partial(PartialTypeName)
 }
 enum TypeNameResolutionFailure: Error {
@@ -153,5 +153,22 @@ extension Attached where Node == NominalTypeDeclSyntax {
     fatalError(
       "[SwiftLexicalLookup] Internal error: Unexpectedly got no result despite having verified source-file root."
     )
+  }
+}
+
+extension GlobalTypeName {
+  func register(
+    members: [(Attached<NominalTypeDeclSyntax>, Identifier)],
+    symbolTable: SymbolTable
+  ) -> Result<ResolvedNominalTypeReference, TypeResolver.Failure>? {
+    // TODO: Think about the broader architecture. Do I really need to be registering
+    // types not declared in extensions?
+    guard let firstMember = members.first else { return nil }
+    let baseName =
+      symbolTable.registerNominalTypeReference(
+        qualifiedName: TypeName,
+        mainDecl: Attached<NominalTypeDeclSyntax>,
+        originatingSyntax: Attached<TypeLikeSyntax>
+      )
   }
 }

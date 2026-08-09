@@ -61,40 +61,62 @@ extension Result where Success == [TypeDeclSyntax], Failure: CustomDebugStringCo
 ///
 /// TODO: Make into `NominalTypeRef` + `TypeLikeSyntax`
 @_spi(_QualifiedLookup)
-public struct GenericResolvedNominalTypeReference<TypeName: Sendable & Hashable & CustomDebugStringConvertible>:
+public struct GenericResolvedNominalTypeReference<TypeRef: Sendable & Hashable & CustomDebugStringConvertible>:
   Sendable, Hashable, CustomDebugStringConvertible
 {
+  // public let mainDecl: Attached<NominalTypeDeclSyntax>
+  // public let qualifiedName: TypeName
+  public let nominalTypeRef: TypeRef
+  // The main declaration helps in two ways:
+  // 1. To detect if we have a class/protocol for compositions
+  // 2. To find generic parameters
   public let mainDecl: Attached<NominalTypeDeclSyntax>
-  public let qualifiedName: TypeName
-  // public let nominalTypeRef: NominalTypeRef
   public let originatingSyntax: Attached<TypeLikeSyntax>
 
-  @_spi(_QualifiedLookup) public init(
+  @_spi(_QualifiedLookupTests) public init(
+    // _mainDecl mainDecl: Attached<NominalTypeDeclSyntax>,
+    // name: TypeName,
+    nominalTypeRef: TypeRef,
     mainDecl: Attached<NominalTypeDeclSyntax>,
-    name: TypeName,
-    // nominalTypeRef: NominalTypeRef,
     originatingSyntax: Attached<TypeLikeSyntax>,
   ) {
+    // self.mainDecl = mainDecl
+    // self.qualifiedName = name
+    self.nominalTypeRef = nominalTypeRef
     self.mainDecl = mainDecl
-    self.qualifiedName = name
-    // self.nominalTypeRef = nominalTypeRef
     self.originatingSyntax = originatingSyntax
   }
 
   public var debugDescription: String {
-    "\(qualifiedName.debugDescription) (\(mainDecl.kind))"
+    "\(nominalTypeRef.debugDescription) [\(mainDecl.kind)]"
   }
 }
 
 @_spi(_QualifiedLookup) public typealias ResolvedNominalTypeReference = GenericResolvedNominalTypeReference<
-  TypeName
+  NominalTypeRef
 >
 
+extension GenericResolvedNominalTypeReference where TypeRef == NominalTypeRef {
+  var _succinctDescription: String {
+    switch nominalTypeRef.storage {
+    case .global(let global):
+      return global.name.debugDescription
+    case .local(let nominalDecl):
+      return nominalDecl._memberlessDescription
+    }
+  }
+}
+
 extension ResolvedNominalTypeReference {
-  init(_ globalTypeReference: GenericResolvedNominalTypeReference<GlobalTypeName>) {
+  init(_ globalTypeReference: GenericResolvedNominalTypeReference<GlobalNominalTypeRef>) {
+    // self.init(
+    //   _mainDecl: globalTypeReference.mainDecl,
+    //   name: TypeName.global(globalTypeReference.qualifiedName),
+    //   originatingSyntax: globalTypeReference.originatingSyntax
+    // )
     self.init(
+      nominalTypeRef: NominalTypeRef(globalReference: globalTypeReference.nominalTypeRef),
       mainDecl: globalTypeReference.mainDecl,
-      name: TypeName.global(globalTypeReference.qualifiedName),
       originatingSyntax: globalTypeReference.originatingSyntax
     )
   }
@@ -825,7 +847,7 @@ extension TypeResolutionFailure {
           },
           perform: {
             // Resolve extended type
-            let baseType: GenericResolvedNominalTypeReference<GlobalTypeName>
+            let baseType: GenericResolvedNominalTypeReference<GlobalNominalTypeRef>
             switch $0.bindExtension(extensionDecl) {
             case .success(let type):
               baseType = type
@@ -999,14 +1021,35 @@ extension TypeResolutionFailure {
 
     switch typeNameResolution {
     case .resolved(let qualifiedTypeName):
-      return Result.success(
-        MemberLookupResult.memberResults([
-          ResolvedNominalTypeReference(
-            mainDecl: nominalDecl,
-            name: qualifiedTypeName,
-            originatingSyntax: originatingSyntax
+      // Register nominal
+      let nominalReferenceResult =
+        symbolTable.registerNominalTypeReference(
+          qualifiedName: qualifiedTypeName,
+          mainDecl: nominalDecl,
+          originatingSyntax: originatingSyntax
+        ) as Result<ResolvedNominalTypeReference, TypeDependencyGraph.NominalRegistrationFailure>
+
+      // Extract name, or handle failure
+      let nominalReference: ResolvedNominalTypeReference
+      switch nominalReferenceResult {
+      case .success(let success):
+        nominalReference = success
+      case .failure(let failure):
+        switch failure {
+        case .cannotRegisterUnderRedeclaration:
+          // TODO: Throw ambiguousTypeDecl error
+        case .parentNotRegistered(parentTypeName: GlobalTypeName):
+
+        case .parentNotRegistered(parentTypeName: _):
+          // TODO: We should be registering in `nominalDecl.resolveTypeName`
+        case .parentExtensionUnbound(extensionDecl: _):
+          fatalError(
+            "[SwiftLexicalLookup] Internal error: Unexpectedly got .parentExtensionUnbound error despite type-name resolution successfully resolving."
           )
-        ])
+        }
+      }
+      return Result.success(
+        MemberLookupResult.memberResults([registeredNominalReference])
       )
     case .partial(let partiallyResolvedName):
       // Resolve the base extension and resolve the type chain
@@ -1476,7 +1519,7 @@ extension TypeResolver {
 
     // Register in the symbol table to get invalidated extensions
     let bindingResult: Result<BindingResult, SymbolTable.ExtensionBindingFailure>
-    bindingResult = symbolTable.bindExtensionAndRegisterExtended(
+    bindingResult = symbolTable.bindExtension(
       extensionDecl,
       // Only get the name
       to: extendedTypeResult.map({ extendedTypeReference in
@@ -1653,7 +1696,15 @@ extension TypeResolver {
   /// Implements `resolveNominalType`
   fileprivate mutating func _resolveNominalType(
     typeReference: ResolvedNominalTypeReference
-  ) -> NominalTypeRef {
+  ) -> Result<NominalTypeRef, Failure> {
+    // Skip extension binding for local declarations.
+    //
+    // For instance, there's no way to extend `A` in `func f() { struct A {} }`
+    // since extensions may only be declared at the top level.
+    guard case .global(let qualifiedGlobalRef) = typeReference.nominalTypeRef.storage else {
+      return typeReference.nominalTypeRef
+    }
+
     // TODO: See if we actually need to check for accessible extensions even if
     // there's an ongoing request.
     // TODO: At least find a way to cache available extensions. (E.g. don't
@@ -1666,16 +1717,19 @@ extension TypeResolver {
     // 3. The symbol table has a cached/resolved version
 
     // Get the nominal type from the symbol table (or register accordingly)
-    let currentNominalResult: Result<NominalTypeRef, TypeDependencyGraph.NominalRegistrationFailure> =
-      symbolTable.registerNominalTypeReference(
-        qualifiedName: typeReference.qualifiedName,
-        mainDecl: typeReference.mainDecl
-      )
+    let currentNominalResult: Result<NominalTypeRef, TypeDependencyGraph.NominalTypeRefUpdateFailure> =
+      symbolTable.dependencyGraph.updateNominalTypeReference(oldReference: typeReference.nominalTypeRef)
+
     // Handle reregistration (we should diagnose reregistrations and not save them in the table)
     let currentNominal: NominalTypeRef
     switch currentNominalResult {
     case .success(let success):
       currentNominal = success
+    // If the reference changed, report those failures
+    case .failure(.redeclared(let declarations)):
+      return .failure(Failure.ambiguousTypeDecl(declarations.map({ TypeDeclSyntax($0.node) })))
+    case .failure(.removed):
+      return .failure(Failure.noTypeInScope)
     // TODO: Remove if we don't handle this failure
     //
     // case .failure(.parentNotRegistered(let parentName)):
@@ -1689,12 +1743,6 @@ extension TypeResolver {
     //     "[SwiftLexicalLookup] Internal error: Unexpectedly found nominal type `\(typeReference.qualifiedName)` registered under a different main declaration."
     //   )
     }
-
-    // Skip extension binding for local declarations.
-    //
-    // For instance, there's no way to extend `A` in `func f() { struct A {} }`
-    // since extensions may only be declared at the top level.
-    guard case .global(let qualifiedGlobalName) = typeReference.qualifiedName else { return currentNominal }
 
     // TODO: Remove
     //
@@ -1723,25 +1771,32 @@ extension TypeResolver {
     // Return if no extensions are available
     guard !unadmittedExtensions.isEmpty else {
       log("No extensions to bind.")
-      return currentNominal
+      return .success(currentNominal)
     }
 
     admitExtensions(unadmittedExtensions)
 
     // After binding all extensions, get the new nominal type
-    guard let finalizedNominalRef = symbolTable.getNominalTypeReference(name: qualifiedGlobalName) else {
+    guard
+      case .success(let finalizedNominalRef) = symbolTable.dependencyGraph.updateNominalTypeReference(
+        oldReference: NominalTypeRef(globalReference: qualifiedGlobalRef)
+      )
+    else {
       // We checked the nominal type is registered at the start.
+      // TODO: Make sure this assumption holds true
       fatalError(
         "[SwiftLexicalLookup] Internal error: Nominal type unexpectedly removed from symbol table after binding extensions."
       )
     }
 
-    return finalizedNominalRef
+    return .success(finalizedNominalRef)
   }
 
+  /// Returns the nominal-type reference with the extension's extended-type
+  /// syntax as the originating syntax.
   @_spi(_QualifiedLookupTests) public mutating func bindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<GenericResolvedNominalTypeReference<GlobalTypeName>, Failure> {
+  ) -> Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, Failure> {
     withLogging(
       request: "Binding extension `\(extensionDecl._memberlessDescription)`",
       describe: \._debugDescription,
@@ -1753,15 +1808,9 @@ extension TypeResolver {
 
   fileprivate mutating func _bindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<GenericResolvedNominalTypeReference<GlobalTypeName>, Failure> {
-    if let alreadyBoundResult = symbolTable.dependencyGraph.getExtensionResolvedType(extensionDecl) {
-      return alreadyBoundResult.map({ typeInfo in
-        GenericResolvedNominalTypeReference<GlobalTypeName>(
-          mainDecl: typeInfo.mainDecl,
-          name: typeInfo.qualifiedName,
-          originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
-        )
-      })
+  ) -> Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, Failure> {
+    if let alreadyBoundResult = symbolTable.getExtensionResolvedType(extensionDecl) {
+      return alreadyBoundResult
     }
 
     admitExtensions([extensionDecl])
@@ -1780,10 +1829,10 @@ extension TypeResolver {
       return .failure(Failure.extensionNotBoundYet)
     }
 
-    return boundTypeResult.map({ typeInfo in
-      GenericResolvedNominalTypeReference<GlobalTypeName>(
-        mainDecl: typeInfo.mainDecl,
-        name: typeInfo.qualifiedName,
+    return boundTypeResult.map({ (globalReference, mainDecl) in
+      GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
+        nominalTypeRef: globalReference,
+        declKind: mainDecl.kind,
         originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
       )
     })

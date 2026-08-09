@@ -36,15 +36,35 @@ extension SymbolTable {
   }
 
   /// Register the given qualified name with the given main declaration.
+  // func registerNominalTypeReference(
+  //   qualifiedName: TypeName,
+  //   mainDecl: Attached<NominalTypeDeclSyntax>
+  // ) -> Result<NominalTypeRef, TypeDependencyGraph.NominalRegistrationFailure> {
+  //   return dependencyGraph.registerNominalTypeReference(
+  //     rawQualifiedName: qualifiedName,
+  //     mainDecl: mainDecl,
+  //     configuredRegions: configuredRegions
+  //   )
+  // }
+
+  /// Like above but returns `ResolvedNominalTypeReference`
   func registerNominalTypeReference(
     qualifiedName: TypeName,
-    mainDecl: Attached<NominalTypeDeclSyntax>
-  ) -> Result<NominalTypeRef, TypeDependencyGraph.NominalRegistrationFailure> {
+    mainDecl: Attached<NominalTypeDeclSyntax>,
+    originatingSyntax: Attached<TypeLikeSyntax>
+  ) -> Result<ResolvedNominalTypeReference, TypeDependencyGraph.NominalRegistrationFailure> {
     return dependencyGraph.registerNominalTypeReference(
       rawQualifiedName: qualifiedName,
       mainDecl: mainDecl,
       configuredRegions: configuredRegions
-    )
+    ).map({ nominalRef in
+      ResolvedNominalTypeReference(
+        nominalTypeRef: nominalRef,
+        // We'll get a failure if `mainDecl` is a redeclaration.
+        declKind: mainDecl.kind,
+        originatingSyntax: originatingSyntax
+      )
+    })
   }
 }
 
@@ -69,7 +89,7 @@ extension SymbolTable {
   /// Handles failed resolutions and resolutions that cause cycles.
   ///
   /// Returns: Broken extensions or binding failure.
-  func bindExtensionAndRegisterExtended(
+  func bindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     to result: Result<
       (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
@@ -78,21 +98,23 @@ extension SymbolTable {
     dependencies: DependencyTracker,
     verbose: Bool
   ) -> Result<BindingResult, ExtensionBindingFailure> {
-    // TODO: Refactor; super ugly (perhaps the caller should have this responsibility;
-    // also we get back a NominalTypeRef only to discard it)
-    if case .success(let (qualifiedName, mainDecl)) = result {
-      let nominalRegistrationResult = dependencyGraph.registerNominalTypeReference(
-        rawQualifiedName: TypeName.global(qualifiedName),
-        mainDecl: mainDecl,
-        configuredRegions: configuredRegions
-      )
-
-      // TODO: Rewrite so we don't even have a failure
-      // Ensure we succeed (guards against future cases)
-      switch nominalRegistrationResult {
-      case .success(_): break
-      }
-    }
+    // TODO: Remove
+    // // TODO: Refactor; super ugly (perhaps the caller should have this responsibility;
+    // // also we get back a NominalTypeRef only to discard it)
+    // if case .success(let (qualifiedName, mainDecl)) = result {
+    //   let nominalRegistrationResult = dependencyGraph.registerNominalTypeReference(
+    //     rawQualifiedName: TypeName.global(qualifiedName),
+    //     mainDecl: mainDecl,
+    //     configuredRegions: configuredRegions
+    //   )
+    //
+    //   // TODO: Rewrite so we don't even have a failure
+    //   // Ensure we succeed (guards against future cases)
+    //   switch nominalRegistrationResult {
+    //   case .success(_): break
+    //   case .failure(TypeDependencyGraph.NominalRegistrationFailure.parentNotRegistered)
+    //   }
+    // }
     return _admitExtension(
       extensionDecl,
       isUpdatingInvalidating: false,
@@ -107,7 +129,24 @@ extension SymbolTable {
   ///
   /// Useful for getting the final version of a nominal type after binding extensions.
   func getNominalTypeReference(name: GlobalTypeName) -> NominalTypeRef? {
-    dependencyGraph.namesToTypes[name].map({ NominalTypeRef(qualifiedName: name, nominal: $0) })
+    dependencyGraph.namesToTypes[name].map({
+      NominalTypeRef(globalReference: GlobalNominalTypeRef(qualifiedName: name, nominal: $0))
+    })
+  }
+
+  func getExtensionResolvedType(
+    _ extensionDecl: Attached<ExtensionDeclSyntax>
+  ) -> Result<
+    GenericResolvedNominalTypeReference<GlobalNominalTypeRef>,
+    BindingFailure
+  >? {
+    dependencyGraph.getExtensionResolvedType(extensionDecl)?.map({ (globalReference, mainDecl) in
+      GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
+        nominalTypeRef: globalReference,
+        declKind: mainDecl.kind,
+        originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
+      )
+    })
   }
 
   /// Similar to `bindExtension` but for the extensions that were invalidated.
