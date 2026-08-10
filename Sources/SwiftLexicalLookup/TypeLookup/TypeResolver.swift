@@ -1020,7 +1020,8 @@ extension TypeResolutionFailure {
     }
 
     switch typeNameResolution {
-    case .resolved(let qualifiedTypeName):
+    case .base(let (qualifiedTypeName, mainDecl, scope)):
+      scope.node.lookup
       // Register nominal
       let nominalReferenceResult =
         symbolTable.registerNominalTypeReference(
@@ -1051,7 +1052,7 @@ extension TypeResolutionFailure {
       return Result.success(
         MemberLookupResult.memberResults([registeredNominalReference])
       )
-    case .partial(let partiallyResolvedName):
+    case .nested(let partiallyResolvedName):
       // Resolve the base extension and resolve the type chain
       let qualifiedBaseResult = bindExtension(partiallyResolvedName.base)
       // Get the module
@@ -1077,6 +1078,9 @@ extension TypeResolutionFailure {
 
   /// Resolves the given member reference of the provided, resolved base type,
   /// recording our dependencies on qualified-lookup queries.
+  ///
+  /// Note: The base type might have redeclarations, in which case we return
+  /// the appropriate error.
   fileprivate mutating func resolveMember(
     baseType: Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>,
     typeMember: ImplicitTypeReferenceComponent,

@@ -110,6 +110,12 @@ public struct GlobalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
     self.components = components
   }
 
+  /// Creates a a global type with the given component.
+  public init(component: Component) {
+    // Force unwrap because we provide non-empty components.
+    self.init(components: [component])!
+  }
+
   var baseComponent: Component {
     // Asserted at init
     components.first!
