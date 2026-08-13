@@ -43,10 +43,10 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
     parentScope: Attached<CodeBlockItemListSyntax>
   )
 
-  case lookForMember(declGroupParent: Attached<DeclGroupSyntaxType>)
-
-  /// Find `Self` of the given nominal type or extension.
-  case findSelf(declGroup: Attached<DeclGroupSyntaxType>)
+  /// Search for the given type declaration as a member of `declGroupParent`.
+  /// If `lookForSelf==true`, then we're not looking for the identifier `Self`,
+  /// but for implicit `Self` instead.
+  case lookForMember(declGroupParent: Attached<DeclGroupSyntaxType>, lookForSelf: Bool)
 
   /// E.g.
   /// ```swift
@@ -151,8 +151,9 @@ extension Attached {
             // declarations (also named `Self`).
             guard typeDecls.isEmpty else { continue }
 
-            return UnqualifiedTypeLookupResult.findSelf(
-              declGroup: castChild(declGroup),
+            return UnqualifiedTypeLookupResult.lookForMember(
+              declGroupParent: castChild(declGroup),
+              lookForSelf: true
             )
           case .declaration(let decl):
             // TODO: Should this be a ValueDeclSyntax?
@@ -241,7 +242,8 @@ extension Attached {
           // // ❌ error: cannot access associated type 'T' from 'any P'
           // ```
           return UnqualifiedTypeLookupResult.lookForMember(
-            declGroupParent: castChild(DeclGroupSyntaxType(protocolParent))
+            declGroupParent: castChild(DeclGroupSyntaxType(protocolParent)),
+            lookForSelf: false
           )
         } else {
           // Shouldn't happen; TODO: Make sure
@@ -258,7 +260,8 @@ extension Attached {
         }
         // TODO: Should still return redecls of `decl` if they exist?? (or will symbol table handle that?)
         return UnqualifiedTypeLookupResult.lookForMember(
-          declGroupParent: castChild(declGroupParent)
+          declGroupParent: castChild(declGroupParent),
+          lookForSelf: false
         )
       case .lookForGenericParameters(let extensionDecl):
         return UnqualifiedTypeLookupResult.lookForGenericParameters(extensionDecl: castChild(extensionDecl))
