@@ -513,6 +513,29 @@ final class TypeResolutionTests: XCTestCase {
     ])
   }
 
+  // MARK: `Self`
+  func testTopLevelSelf() {
+    assertTypeResolution([
+      "MyFile.swift": """
+      func f() { let _: \(.invalid)Self }
+      """
+    ])
+  }
+  func testLocalTopLevelSelf() {
+    // TODO: Test second occurance of `Self` succeeds
+    assertTypeResolution([
+      "MyFile.swift": """
+      func f() {
+        func g() { let _: \(.invalid)Self }
+        \("🟩")
+        struct A {
+          func h() { let _: \(nominal: "🟩")Self }
+        }
+      }
+      """
+    ])
+  }
+
   // MARK: Extensions
 
   func testSimpleExtension() {

@@ -88,13 +88,6 @@ extension TypeDeclSyntax {
   }
 }
 
-extension Attached where Node == TypeDeclSyntax {
-  public init<S: NominalTypeDeclSyntaxProtocol>(_ nominalType: Attached<S>) {
-    // Force unwrap because all nominal-type declarations are type declarations.
-    self = nominalType.as(TypeDeclSyntax.self)!
-  }
-}
-
 // MARK: Debug Description
 
 extension TypeDeclSyntax {

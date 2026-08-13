@@ -35,37 +35,19 @@ import SwiftSyntax
 //      qualifying the type means qualifying all parent scopes, which necessitates
 //      resolving parent scopes.
 enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
-  /// Resolve the given type decl and look for the desired member if
-  /// ``lookForSelectedMember`` is `true`.
-  ///
-  /// E.g.
-  /// ```swift
-  /// struct A {
-  ///   func f(_: A) {} // Look up `A` here
-  /// }
-  /// ```
-  /// We'll generate two `lookInside(type:lookForSelectedMember:)` requests.
-  /// 1. One will be to resolve `struct A` selecting the member named
-  ///    `.A` to see if `A` has any member types named `Self`.
-  /// 2. The second request will be to resolve `struct A` with no selected member
-  ///    (i.e. type `A` itself)
-  case lookForType(Attached<TypeDeclSyntax>, lookForSelectedMember: Bool)
+  /// Resolve the given type decl, collecting redeclarations and
+  /// the parent 'with-statements' scope containing these declarations.
+  case nonNestedTypeDecl(
+    decl: Attached<TypeDeclSyntax>,
+    redeclarations: [Attached<TypeDeclSyntax>],
+    parentScope: Attached<CodeBlockItemListSyntax>
+  )
 
-  /// Resolve the extension's extended type look for the desired member if
-  /// ``lookForSelectedMember`` is `true`.
-  ///
-  /// E.g.
-  /// ```swift
-  /// extension A {
-  ///   func f(_: Self) {} // Look up `Self` here
-  /// }
-  /// ```
-  /// We'll generate two `lookInside(extension:memberChain:)` requests.
-  /// 1. One will be to resolve `extension A` selecting the member named
-  ///    `.Self` to see if `A` has any member types named `Self`.
-  /// 2. The second request will be to resolve `extension A` with no selected member
-  ///    (i.e. the extended type `A` itself)
-  case lookForExtension(Attached<ExtensionDeclSyntax>, lookForSelectedMember: Bool)
+  case lookForMember(declGroupParent: Attached<DeclGroupSyntaxType>)
+
+  /// Find `Self` of the given nominal type or extension.
+  case findSelf(declGroup: Attached<DeclGroupSyntaxType>)
+
   /// E.g.
   /// ```swift
   /// extension Array {
@@ -81,9 +63,9 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
     case .lookForExtension(let extensionDecl, let lookForSelectedMember):
       return
         ".lookForExtension(\(extensionDecl._memberlessDescription), lookForSelectedMember: \(lookForSelectedMember))"
-    case .lookForType(let type, let lookForSelectedMember):
+    case .lookForType(let type, let lookForSelectedMember, let scope):
       return
-        ".lookForType(\(type._memberlessDescription), lookForSelectedMember: \(lookForSelectedMember)))"
+        ".lookForType(decls: [\(type.map(\._memberlessDescription).joined(separator: ", "))], lookForSelectedMember: \(lookForSelectedMember)))"
     case .lookForGenericParameters(let extensionDecl):
       return ".lookForGenericParameters(in: \(extensionDecl._memberlessDescription))"
     case .lookInModule:
@@ -103,7 +85,7 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
         "'\(extensionDecl._memberlessDescription)'\(lookForSelectedMember ? memberSearchDescription : ""))"
     case .lookForType(let type, let lookForSelectedMember):
       return
-        "'\(type._memberlessDescription)'\(lookForSelectedMember ? memberSearchDescription : "")"
+        "[\(type.map(\._memberlessDescription).joined(separator: ", "))]\(lookForSelectedMember ? memberSearchDescription : "")"
     case .lookForGenericParameters(let extensionDecl):
       return "'\(extensionDecl._memberlessDescription)' > generic parameters"
     case .lookInModule:
@@ -134,9 +116,9 @@ extension Attached {
       Attached<S>(syntax)!
     }
 
-    let filteredResults = results.flatMap({ result -> [UnqualifiedTypeLookupResult] in
+    let filteredResults = results.compactMap({ result -> UnqualifiedTypeLookupResult? in
       switch result {
-      case .fromScope(_, let names):
+      case .fromScope(let scope, let names):
         // Note that we skip non-type declarations, even if they have the same name.
         // For instance:
         //   struct A {
@@ -146,46 +128,46 @@ extension Attached {
         //       var hey: A  = self
         //     }
         //   }
-        return names.compactMap({ name -> UnqualifiedTypeLookupResult? in
+        var typeDecls = [Attached<TypeDeclSyntax>]()
+        for name: LookupName in names {
           switch name {
           case .implicit(.`Self`(let decl)):
+            // According to the docs, `decl` is either a protocol or extension decl.
+            //
             // TODO: Should probably be DeclGroupSyntax to begin with
-            guard let declGroup = decl.as(DeclGroupSyntaxType.self) else { return nil }
-            if let nominalDecl = declGroup.as(NominalTypeDeclSyntax.self) {
-              return UnqualifiedTypeLookupResult.lookForType(
-                castChild(TypeDeclSyntax(nominalDecl)),
-                lookForSelectedMember: false
+            //
+            // TODO: How do we handle top-level `Self` or `Self` in a method, e.g.:
+            // // File.swift
+            // func f() { let _: Self } // What error?
+            // struct A {
+            //   func g() { let _: Self } // Refers to `A`
+            // }
+            guard let declGroup = decl.as(DeclGroupSyntaxType.self) else {
+              fatalError(
+                "[SwiftLexicalLookup] Internal error: Expected syntax in .implicit(.Self) to be a declaration group but got \(decl.kind) instead."
               )
-            } else if let extensionDecl = declGroup.as(ExtensionDeclSyntax.self) {
-              return UnqualifiedTypeLookupResult.lookForExtension(
-                castChild(extensionDecl),
-                lookForSelectedMember: false
-              )
-            } else {
-              assertionFailure(
-                "[SwiftLexicalLookup] Internal error: Expected declaration group to either be a nominal type or extension declaration."
-              )
-              return nil
             }
+            // Only return implicit `Self` if we don't have other matching
+            // declarations (also named `Self`).
+            guard typeDecls.isEmpty else { continue }
+
+            return UnqualifiedTypeLookupResult.findSelf(
+              declGroup: castChild(declGroup),
+            )
           case .declaration(let decl):
             // TODO: Should this be a ValueDeclSyntax?
 
             // Skip non-type declarations
             //
             // Note: We handle extensions above
-            guard let typeDecl = TypeDeclSyntax(decl) else { return nil }
+            guard let typeDecl = TypeDeclSyntax(decl) else { continue }
 
-            return UnqualifiedTypeLookupResult.lookForType(
-              castChild(typeDecl),
-              lookForSelectedMember: false
-            )
+            typeDecls.append(castChild(typeDecl))
           case .identifier(let identifierSyntax, accessibleAfter: _):
             // The only `TypeDeclSyntax` "identifiers" are generic parameters.
-            guard let genericParameter = identifierSyntax.as(GenericParameterSyntax.self) else { return nil }
-            return UnqualifiedTypeLookupResult.lookForType(
-              castChild((TypeDeclSyntax(genericParameter))),
-              lookForSelectedMember: false
-            )
+            guard let genericParameter = identifierSyntax.as(GenericParameterSyntax.self) else { continue }
+            typeDecls.append(castChild((TypeDeclSyntax(genericParameter))))
+
           // `self`, `newValue`, `error`, and `oldValue` can't be type decls.
           // Also, `equivalentNames` always refers to variable identifiers in
           // switch cases
@@ -193,30 +175,96 @@ extension Attached {
             .implicit(.error), .equivalentNames:
             return nil
           }
-        })
-      case .lookForMembers(let decl):
-        // TODO: Should probably already be a `DeclGroupSyntaxType`
-        guard let declGroup = DeclGroupSyntaxType(decl) else { return [] }
-        if let nominalDecl = declGroup.as(NominalTypeDeclSyntax.self) {
-          return [
-            UnqualifiedTypeLookupResult.lookForType(
-              castChild(TypeDeclSyntax(nominalDecl)),
-              lookForSelectedMember: true
-            )
-          ]
-        } else if let extensionDecl = declGroup.as(ExtensionDeclSyntax.self) {
-          return [UnqualifiedTypeLookupResult.lookForExtension(castChild(extensionDecl), lookForSelectedMember: true)]
-        } else {
-          assertionFailure(
-            "[SwiftLexicalLookup] Internal error: Expected declaration group to either be a nominal type or extension declaration."
-          )
-          return []
         }
+
+        // Skip if we couldn't find type declarations
+        guard let firstTypeDecl = typeDecls.first else { return nil }
+        let redeclarations = Array(typeDecls[1...])
+
+        // Return based on scope: either nested (under a decl group) or
+        // non-nested (directly under a CodeBlockItemListSyntax, like a
+        // source file or function body)
+        //
+        // Note: Type decls in a `.fromScope` result should be introduced
+        // by a `WithStatementsSyntax` scope. The only non-`WithStatementsSyntax`
+        // scopes are:
+        // 1. implicit `Self` inside an `AccessorDeclSyntax` or an `ExtensionDeclSyntax`,
+        // 2. `guard` statements (which can't introduce types), and
+        // 3. associated types inside protocol declarations
+        //
+        // Rationale: We surface regular type decls introduced in a declaration
+        // group with `.lookForMembers`, since qualified lookup needs to handle
+        // those, e.g.:
+        // ```swift
+        // struct A {
+        //   struct B {
+        //     func f(_: B) {} // <- Look up here
+        //   }
+        // }
+        // ```
+        // We defer to qualified lookup because if we later had
+        // `extension A { typealias B = () }`, we'd need to diagnose the
+        // ambiguity.
+        if let statementScope = scope.asProtocol((any WithStatementsSyntax).self) {
+          return UnqualifiedTypeLookupResult.nonNestedTypeDecl(
+            decl: firstTypeDecl,
+            redeclarations: redeclarations,
+            parentScope: castChild(statementScope.statements)
+          )
+        } else if let protocolParent = scope.as(ProtocolDeclSyntax.self) {
+          // As described above, this happens only for associated types.
+          // We'll find all types, not just the associated types.
+          // TODO: Check what the compiler does; might need to change behaviors
+          //
+          // Note `typealias`es of associated types in protocol extensions are peculiar;
+          // they don't participate in lookup; the just act like default values
+          //   (TODO: find precise rules).
+          // ```swift
+          // protocol P {
+          //     associatedtype T
+          // }
+          // extension P {
+          //     typealias T = Int
+          //     func f(x: T) {
+          //         let int: Int = x
+          //         // ❌ error: cannot convert value of type 'Self.T' to specified type 'Int'
+          //     }
+          // }
+          // struct A: P { typealias T = () }
+          // // ✅ No redeclaration error
+          //
+          // struct B: P {}
+          // // ✅ `T` inferred as `Int`
+          //
+          // let _: (any P).T = 0
+          // let _: P.T = 0
+          // // ❌ error: cannot access associated type 'T' from 'any P'
+          // ```
+          return UnqualifiedTypeLookupResult.lookForMember(
+            declGroupParent: castChild(DeclGroupSyntaxType(protocolParent))
+          )
+        } else {
+          // Shouldn't happen; TODO: Make sure
+          fatalError(
+            "[SwiftLexicalLookup] Internal error: Expected a `WithStatementsSyntax` or `protocol` scope but got `\(scope.kind)` for names: \(names)"
+          )
+        }
+      case .lookForMembers(let parentSyntax):
+        // TODO: Should probably already be a `DeclGroupSyntaxType`
+        guard let declGroupParent = DeclGroupSyntaxType(parentSyntax) else {
+          fatalError(
+            "[SwiftLexicalLookup] Internal error; Expected .lookForMembers to have a DeclGroupSyntax but found \(parentSyntax.kind)."
+          )
+        }
+        // TODO: Should still return redecls of `decl` if they exist?? (or will symbol table handle that?)
+        return UnqualifiedTypeLookupResult.lookForMember(
+          declGroupParent: castChild(declGroupParent)
+        )
       case .lookForGenericParameters(let extensionDecl):
-        return [.lookForGenericParameters(extensionDecl: castChild(extensionDecl))]
+        return UnqualifiedTypeLookupResult.lookForGenericParameters(extensionDecl: castChild(extensionDecl))
       // Closure parameters can't be type declarations
       case .lookForImplicitClosureParameters(_):
-        return []
+        return nil
       }
     })
     // TODO: Expose imports
