@@ -61,7 +61,7 @@ extension SymbolTable {
       ResolvedNominalTypeReference(
         nominalTypeRef: nominalRef,
         // We'll get a failure if `mainDecl` is a redeclaration.
-        declKind: mainDecl.kind,
+        mainDecl: mainDecl,
         originatingSyntax: originatingSyntax
       )
     })
@@ -124,30 +124,20 @@ extension SymbolTable {
     )
   }
 
-  /// Gets the final nominal-type reference with the given qualified name
-  /// using the current graph.
-  ///
-  /// Useful for getting the final version of a nominal type after binding extensions.
-  func getNominalTypeReference(name: GlobalTypeName) -> NominalTypeRef? {
-    dependencyGraph.namesToTypes[name].map({
-      NominalTypeRef(globalReference: GlobalNominalTypeRef(qualifiedName: name, nominal: $0))
-    })
-  }
-
-  func getExtensionResolvedType(
-    _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<
-    GenericResolvedNominalTypeReference<GlobalNominalTypeRef>,
-    BindingFailure
-  >? {
-    dependencyGraph.getExtensionResolvedType(extensionDecl)?.map({ (globalReference, mainDecl) in
-      GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
-        nominalTypeRef: globalReference,
-        declKind: mainDecl.kind,
-        originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
-      )
-    })
-  }
+  // func getExtensionResolvedType(
+  //   _ extensionDecl: Attached<ExtensionDeclSyntax>
+  // ) -> Result<
+  //   GenericResolvedNominalTypeReference<GlobalNominalTypeRef>,
+  //   BindingFailure
+  // >? {
+  //   dependencyGraph.getExtensionResolvedType(extensionDecl)?.map({ (globalReference, mainDecl) in
+  //     GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
+  //       nominalTypeRef: globalReference,
+  //       mainDecl: mainDecl,
+  //       originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
+  //     )
+  //   })
+  // }
 
   /// Similar to `bindExtension` but for the extensions that were invalidated.
   /// All invalidated extensions should be fixed before calling `bindExtension`
@@ -185,7 +175,7 @@ extension SymbolTable {
     guard let module = moduleMap[extensionDecl.fileRoot] else {
       return .failure(ExtensionBindingFailure.nonRegisteredSyntaxRoot)
     }
-    let admissionResult = dependencyGraph._admitExtension(
+    let admissionResult = dependencyGraph.admitExtension(
       extensionDecl,
       extensionDeclModule: module,
       isUpdatingInvalidating: isFixingInvalidating,

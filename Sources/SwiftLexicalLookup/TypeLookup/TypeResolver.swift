@@ -759,24 +759,6 @@ extension TypeResolutionFailure {
     case codeBlock(Attached<CodeBlockItemListSyntax>)
   }
 
-  fileprivate func _findDeclContext(ofDeclGroup node: Attached<DeclGroupSyntaxType>) -> DeclContext {
-    var currentAncestor: Attached<Syntax>? = node.parent
-    while let ancestor = currentAncestor {
-      if let codeBlockScope = ancestor.as(CodeBlockItemListSyntax.self) {
-        return DeclContext.codeBlock(codeBlockScope)
-      } else if let declGroupScope = ancestor.as(DeclGroupSyntaxType.self) {
-        return DeclContext.declGroup(declGroupScope)
-      } else {
-        currentAncestor = ancestor.parent
-      }
-    }
-    // Shouldn't happen because `Attached<DeclGroupSyntaxType>` has
-    // a `SourceFileSyntax` root that we should have run into.
-    fatalError(
-      "[SwiftLexicalLookup] Internal error: Unexpectedly didn't find declaration context of attached decl group `\(node._memberlessDescription)`."
-    )
-  }
-
   /// Implements `resolveTypeReference`
   fileprivate mutating func _resolveTypeReference(
     typeComponent: ImplicitTypeReferenceComponent,
@@ -818,7 +800,7 @@ extension TypeResolutionFailure {
     log("Lookup results: \(lookupResults)")
 
     // Find first matching type declaration
-    for lookupResult in lookupResults {
+    for lookupResult: UnqualifiedTypeLookupResult in lookupResults {
       // The enclosing type, and whether to look for the selected member.
       //
       // `lookForSelectedMember` is false if we can return the enclosing type
@@ -832,7 +814,7 @@ extension TypeResolutionFailure {
       defer { logPrefix.removeLast() }
 
       switch lookupResult {
-      case .nonNestedTypeDecl(let typeDecl, let redeclarations, let parentCodeBlock):
+      case .nonNestedTypeDecl(let typeDecl, redeclarations: _, let parentCodeBlock):
         enclosingTypeResult = resolveTypeDecl(
           typeDecl: typeDecl,
           declContext: DeclContext.codeBlock(parentCodeBlock),
@@ -841,8 +823,6 @@ extension TypeResolutionFailure {
           visitedTypeSyntax: visitedTypeSyntax
         )
       case .lookForMember(let declGroupParent, let lookForSelf):
-        let declContext = _findDeclContext(ofDeclGroup: declGroupParent)
-
         // We might have to look inside an extension
         // For instance:
         //   extension Int {
@@ -860,7 +840,6 @@ extension TypeResolutionFailure {
         // just append `.A` to the member chain. Hence, we look for `.A.B` in `Swift::Int`
         enclosingTypeResult = resolveDeclGroup(
           declGroup: declGroupParent,
-          declContext: declContext,
           originatingSyntax: typeComponent.introducingSyntax,
           memberDependencies: &memberDependencies,
           visitedTypeSyntax: visitedTypeSyntax
@@ -962,13 +941,33 @@ extension TypeResolutionFailure {
     return Result.failure(Failure.noTypeInScope)
   }
 
+  /// Helper for `resolveDeclGroup`
+  fileprivate func _findDeclContext(ofDeclGroup node: Attached<DeclGroupSyntaxType>) -> DeclContext {
+    var currentAncestor: Attached<Syntax>? = node.parent
+    while let ancestor = currentAncestor {
+      if let codeBlockScope = ancestor.as(CodeBlockItemListSyntax.self) {
+        return DeclContext.codeBlock(codeBlockScope)
+      } else if let declGroupScope = ancestor.as(DeclGroupSyntaxType.self) {
+        return DeclContext.declGroup(declGroupScope)
+      } else {
+        currentAncestor = ancestor.parent
+      }
+    }
+    // Shouldn't happen because `Attached<DeclGroupSyntaxType>` has
+    // a `SourceFileSyntax` root that we should have run into.
+    fatalError(
+      "[SwiftLexicalLookup] Internal error: Unexpectedly didn't find declaration context of attached decl group `\(node._memberlessDescription)`."
+    )
+  }
+
   fileprivate mutating func resolveDeclGroup(
     declGroup: Attached<DeclGroupSyntaxType>,
-    declContext: DeclContext,
     originatingSyntax: Attached<TypeLikeSyntax>,
     memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<Attached<TypeSyntax>>
   ) -> Result<ResolvedNominalTypeReference, Failure> {
+    let declContext: DeclContext = _findDeclContext(ofDeclGroup: declGroup)
+
     if let nominalTypeDecl = declGroup.as(NominalTypeDeclSyntax.self) {
       return resolveNominalTypeDecl(
         nominalDecl: nominalTypeDecl,
@@ -1078,119 +1077,128 @@ extension TypeResolutionFailure {
     memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<Attached<TypeSyntax>>
   ) -> Result<ResolvedNominalTypeReference, Failure> {
-    // Get the type chain, or handle failure
-    let typeNameResolutionResult: Result<TypeNameResolution, TypeNameResolutionFailure> =
-      nominalDecl.resolveTypeName(symbolTable: symbolTable)
-    let typeNameResolution: TypeNameResolution
-    switch typeNameResolutionResult {
-    case .success(let result):
-      typeNameResolution = result
-    case .failure(.unregisteredFile):
-      // We check that the root is a source file (& registered in the symbol table)
-      // at the top of ``resolveSyntax``.
-      //
-      // TODO: Maybe merge with general-case `extractModule` failure
-      fatalError(
-        "[SwiftLexicalLookup] Internal error: Unexpectedly asked to resolve a type declaration whose file isn't registered in the symbol table: ```\(nominalDecl.fileRoot.trimmedDescription)```"
-      )
-    case .failure(.invalidIdentifier(let invalidIdentifier)):
-      // TODO: Decide if this is too granular and we shud have a more general `.invalidContext` instead.
-      return .failure(.other(TypeNameResolutionFailure.invalidIdentifier(invalidIdentifier)))
-    case .failure(TypeNameResolutionFailure.nonTopLevelExtension(let extensionDecl)):
-      // TODO: Messsage
-      fatalError()
+    guard let name = Identifier(validating: nominalDecl.node.name) else {
+      // TODO: Produce actual error
+      struct InvalidIdentifier: Error {}
+      return .failure(Failure.other(InvalidIdentifier()))
     }
 
-    //
-    switch typeNameResolution {
-    case .base(let (qualifiedTypeName, mainDecl, scope)):
-      var typeDecls = [Attached<TypeDeclSyntax>]()
-      scope.node._visitDirectMembers(
-        configuredRegions: symbolTable.configuredRegions,
-        visit: { valueDecl in
-          // Scan for other type decls in the scope
-          guard let typeDecl = Attached(valueDecl)?.as(TypeDeclSyntax.self) else {
-            return
-          }
-          typeDecls.append(typeDecl)
-        }
+    switch declContext {
+    case .declGroup(let declGroupParent):
+      // Find the base type
+      let baseResult: Result<ResolvedNominalTypeReference, Failure> = resolveDeclGroup(
+        declGroup: declGroupParent,
+        originatingSyntax: originatingSyntax,
+        memberDependencies: &memberDependencies,
+        visitedTypeSyntax: visitedTypeSyntax
       )
-      // Throw an error if the base is ambiguous
-      guard typeDecls == [Attached<TypeDeclSyntax>(mainDecl)] else {
-        return .failure(.invalidBaseType(.ambiguousTypeDecl(typeDecls.map(\.node))))
-      }
-      // Register nominal
-      let nominalReferenceResult =
-        symbolTable.registerNominalTypeReference(
-          qualifiedName: qualifiedTypeName,
-          mainDecl: nominalDecl,
-          originatingSyntax: originatingSyntax
-        ) as Result<ResolvedNominalTypeReference, TypeDependencyGraph.NominalRegistrationFailure>
-
-      // Extract name, or handle failure
-      let nominalReference: ResolvedNominalTypeReference
-      switch nominalReferenceResult {
-      case .success(let success):
-        nominalReference = success
-      case .failure(let failure):
-        // TODO: Messages
-        switch failure {
-        case .cannotRegisterUnderRedeclaration, .noDeclGroupParent, .parentExtensionUnbound(extensionDecl: _),
-          .parentNotRegistered(parentTypeName: _):
-          fatalError("Failure: \(failure)")
-        }
-      // switch failure {
-      // case .cannotRegisterUnderRedeclaration:
-      //   // TODO: Throw ambiguousTypeDecl error
-      // case .parentNotRegistered(parentTypeName: GlobalTypeName):
-      //
-      // case .parentNotRegistered(parentTypeName: _):
-      //   // TODO: We should be registering in `nominalDecl.resolveTypeName`
-      // case .parentExtensionUnbound(extensionDecl: _):
-      //   fatalError(
-      //     "[SwiftLexicalLookup] Internal error: Unexpectedly got .parentExtensionUnbound error despite type-name resolution successfully resolving."
-      //   )
-      // }
-      }
-      return Result.success(nominalReference)
-    case .nested(let partiallyResolvedName):
-      // Get the base type or return failure
+      // Extract the type, or throw
       let baseType: ResolvedNominalTypeReference
-      if let typeDecl = partiallyResolvedName.base.as(TypeDeclSyntax.self) {
-        // I.e., if a nominal type
-        resolveTypeDecl(
-          typeDecl: typeDecl,
-          originatingSyntax: originatingSyntax,
+      switch baseResult {
+      case .success(let success):
+        baseType = success
+      case .failure(let failure):
+        return .failure(Failure.invalidBaseType(failure))
+      }
+      let mappedBaseResult =
+        baseResult.map({ MemberLookupResult.memberResults([$0]) })
+        as Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
+
+      // Find this nominal declaration through qualified lookup
+      let typeResult =
+        resolveMember(
+          baseType: mappedBaseResult,
+          typeMember: ImplicitTypeReferenceComponent(name: name, introducingSyntax: originatingSyntax),
           memberDependencies: &memberDependencies,
           visitedTypeSyntax: visitedTypeSyntax
-        )
-        return Result.failure(Failure.invalidBaseType(failure))
-      } else if let extensionDecl = partiallyResolvedName.base.as(ExtensionDeclSyntax.self) {
-        let extensionResult = bindExtension(extensionDecl)
-        return Result.failure(Failure.invalidBaseType(failure))
-      }
+        ) as Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
 
-      return
-      // TODO: Remove following
-
-      // Resolve the base extension and resolve the type chain
-      let qualifiedBaseResult = bindExtension(partiallyResolvedName.base)
-      // Get the module
-      let originatingModule = extractModule(syntax: originatingSyntax)
-
-      // Handle result
-      switch qualifiedBaseResult {
-      case .success(let resolvedExtendedBaseNominal):
-        let resolvedBaseNominal = partiallyResolvedName.resolve(
-          resolvedBase: resolvedExtendedBaseNominal,
-          originatingSyntax: originatingSyntax,
-          originatingModule: originatingModule,
-          symbolTable: symbolTable
-        )
-        return Result.success(resolvedBaseNominal)
+      // Extract the type, or throw
+      let resolvedType: MemberLookupResult<ResolvedNominalTypeReference>
+      switch typeResult {
+      case .success(let success):
+        resolvedType = success
       case .failure(let failure):
-        return Result.failure(Failure.invalidBaseType(failure))
+        return .failure(failure)
       }
+
+      // Ensure the resolve type is the nominal decl we want to resolve
+      guard
+        case .memberResults(let resolvedReferences) = resolvedType,
+        let resolvedReference = resolvedReferences.first,
+        resolvedReferences.count == 1,
+        resolvedReference.mainDecl == nominalDecl
+      else {
+        fatalError(
+          "[SwiftLexicalLookup] Internal error: Member lookup on '\(baseType._succinctDescription)' succeeded to '\(resolvedType)', which doesn't match child `\(nominalDecl._memberlessDescription)`."
+        )
+      }
+
+      // TODO: Do we need to register in `SymbolTable`?
+      return .success(resolvedReference)
+
+    case .codeBlock(let codeBlockScope):
+      let file = codeBlockScope.fileRoot
+      let module = extractModule(syntax: codeBlockScope)
+      let isTopLevel: Bool = codeBlockScope.node == file.statements
+
+      // Gather type decls with the same name
+      var scopeTypeDecls = [TypeDeclSyntax]()
+      codeBlockScope.node._visitDirectMembers(
+        configuredRegions: symbolTable.configuredRegions,
+        visit: { valueDecl in
+          guard
+            let typeDecl = valueDecl.as(TypeDeclSyntax.self),
+            typeDecl.name.identifier == name
+          else {
+            return
+          }
+          scopeTypeDecls.append(typeDecl)
+        }
+      )
+      // If we're at top-level, consider other internal declarations
+      if isTopLevel {
+        // TODO: Look in the module, and add those decls
+      }
+
+      // Diagnose redeclarations
+      guard scopeTypeDecls == [TypeDeclSyntax(nominalDecl.node)] else {
+        return .failure(Failure.ambiguousTypeDecl(scopeTypeDecls))
+      }
+
+      // Get the type name
+      let typeName: TypeName
+      if isTopLevel {
+        typeName = .global(
+          GlobalTypeName(
+            component: GlobalTypeName.Component(name: name, file: file, module: module, symbolTable: symbolTable)
+          )
+        )
+        typeName = .local(LocalTypeName(scope: codeBlockScope, base: name))
+      }
+
+      let resolvedReferenceResult = symbolTable.registerNominalTypeReference(
+        qualifiedName: typeName,
+        mainDecl: nominalDecl,
+        originatingSyntax: originatingSyntax
+      )
+
+      // Extract reference, or throw
+      let resolvedReference: ResolvedNominalTypeReference
+      switch resolvedReferenceResult {
+      case .success(let success):
+        resolvedReference = success
+      case .failure(let registrationFailure):
+        switch registrationFailure {
+        // TODO: Explain why these invariants hold
+        case .cannotRegisterUnderRedeclaration, .noDeclGroupParent, .parentNotRegistered, .parentExtensionUnbound:
+          fatalError(
+            "[ewiftLexicalLookup] Internal error: Unexpected nominal-registration error: \(registrationFailure)"
+          )
+        }
+      }
+
+      return .success(resolvedReference)
     }
   }
 
@@ -1304,7 +1312,14 @@ extension TypeResolutionFailure {
 
       // Bind extensions and construct a nominal type.
       // We ignore failures since they're from non-matching extensions and diagnosed separately
-      let nominalBaseType = resolveNominalType(typeReference: baseType)
+      let nominalBaseType: NominalTypeRef
+      switch resolveNominalType(typeReference: baseType) {
+      case .success(let success):
+        nominalBaseType = success
+      case .failure(let failure):
+        memberResult = Result.failure(failure)
+        break
+      }
       nominalBaseTypes.append(nominalBaseType)
 
       // Perform direct type lookup and mark dependency
@@ -1366,6 +1381,7 @@ extension TypeResolutionFailure {
       // Resolve this type declaration and add it to the results
       memberResult = resolveTypeDecl(
         typeDecl: memberTypeDecl,
+        declContext: DeclContext.declGroup(Attached<DeclGroupSyntaxType>(baseType.mainDecl)),
         originatingSyntax: typeMember.introducingSyntax,
         memberDependencies: &memberDependencies,
         visitedTypeSyntax: visitedTypeSyntax
@@ -1564,7 +1580,7 @@ extension TypeResolver {
   /// - Precondition: `extensionDecl` must be in `self.requestedExtensions`
   private mutating func _bindRequestedExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<GenericResolvedNominalTypeReference<GlobalTypeName>, Failure> {
+  ) -> Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, Failure> {
     withLogging(
       request: "Binding `\(extensionDecl._memberlessDescription)`",
       describe: \._debugDescription
@@ -1576,6 +1592,7 @@ extension TypeResolver {
   /// Prepends given elements. New elements get added as expected and existing elements
   /// get moved to the front of the list. Despite the current elements of the ordered set,
   /// the new set will always start out with a deduplicated set of `elements`.
+  /// TODO: Remove if we have no references to this
   func prepend<E: Hashable>(to orderedSet: inout OrderedSet<E>, contentsOf elements: [E]) {
     let oldElements = orderedSet
     orderedSet.removeAll(keepingCapacity: true)
@@ -1590,19 +1607,20 @@ extension TypeResolver {
   /// e.g. if we're resolving `extension A.B {}`, we will prob have to fully resolve `A`.
   private mutating func __bindRequestedExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<GenericResolvedNominalTypeReference<GlobalTypeName>, Failure> {
+  ) -> Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, Failure> {
     // Uphold invariant
     assert(
       self.requestedExtensions.contains(extensionDecl),
       "[SwiftLexicalLookup] Internal error: Called `bindRequestedExtension` without first adding to `self.requestedExtensions`."
     )
 
+    // TODO: Remove
     func mapToNominalTypeReference(
-      _ typeInfo: (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>)
-    ) -> GenericResolvedNominalTypeReference<GlobalTypeName> {
-      GenericResolvedNominalTypeReference<GlobalTypeName>(
+      _ typeInfo: (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
+    ) -> GenericResolvedNominalTypeReference<GlobalNominalTypeRef> {
+      GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
+        nominalTypeRef: typeInfo.globalReference,
         mainDecl: typeInfo.mainDecl,
-        name: typeInfo.qualifiedName,
         originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
       )
     }
@@ -1795,10 +1813,10 @@ extension TypeResolver {
   /// extensions bound.
   @_spi(_QualifiedLookupTests) public mutating func resolveNominalType(
     typeReference: ResolvedNominalTypeReference
-  ) -> NominalTypeRef {
+  ) -> Result<NominalTypeRef, Failure> {
     withLogging(
-      request: "Extended nominal`\(typeReference.qualifiedName)`",
-      describe: \.debugDescription,
+      request: "Extended nominal`\(typeReference._succinctDescription)`",
+      describe: \._debugDescription,
       perform: {
         $0._resolveNominalType(typeReference: typeReference)
       }
@@ -1806,6 +1824,7 @@ extension TypeResolver {
   }
 
   /// Implements `resolveNominalType`
+  /// TODO: Do we really need to be throwing??
   fileprivate mutating func _resolveNominalType(
     typeReference: ResolvedNominalTypeReference
   ) -> Result<NominalTypeRef, Failure> {
@@ -1814,7 +1833,7 @@ extension TypeResolver {
     // For instance, there's no way to extend `A` in `func f() { struct A {} }`
     // since extensions may only be declared at the top level.
     guard case .global(let qualifiedGlobalRef) = typeReference.nominalTypeRef.storage else {
-      return typeReference.nominalTypeRef
+      return .success(typeReference.nominalTypeRef)
     }
 
     // TODO: See if we actually need to check for accessible extensions even if
@@ -1921,7 +1940,7 @@ extension TypeResolver {
   fileprivate mutating func _bindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
   ) -> Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, Failure> {
-    if let alreadyBoundResult = symbolTable.getExtensionResolvedType(extensionDecl) {
+    if let alreadyBoundResult = symbolTable.dependencyGraph.getExtensionResolvedType(extensionDecl) {
       return alreadyBoundResult
     }
 
@@ -1944,7 +1963,7 @@ extension TypeResolver {
     return boundTypeResult.map({ (globalReference, mainDecl) in
       GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
         nominalTypeRef: globalReference,
-        declKind: mainDecl.kind,
+        mainDecl: mainDecl,
         originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
       )
     })

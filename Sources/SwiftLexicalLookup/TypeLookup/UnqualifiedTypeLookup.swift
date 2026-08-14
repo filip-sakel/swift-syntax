@@ -37,6 +37,7 @@ import SwiftSyntax
 enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
   /// Resolve the given type decl, collecting redeclarations and
   /// the parent 'with-statements' scope containing these declarations.
+  // TODO: Should I remove `redeclarations`?
   case nonNestedTypeDecl(
     decl: Attached<TypeDeclSyntax>,
     redeclarations: [Attached<TypeDeclSyntax>],

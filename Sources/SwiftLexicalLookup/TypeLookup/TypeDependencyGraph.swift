@@ -106,7 +106,7 @@ extension Array {
 
 @_spi(_QualifiedLookupTests) public typealias BindingResult = (
   resolvedTypeName: Result<
-    (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
+    (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>),
     BindingFailure
   >,
   invalidatedExtensions: InvalidatedExtensions
@@ -514,6 +514,11 @@ public struct TypeDependencyGraph {
 @_spi(_QualifiedLookupTests) public struct GlobalNominalTypeRef: Hashable, Sendable, CustomDebugStringConvertible {
   let name: GlobalTypeName
   let _version: Int
+
+  internal init(name: GlobalTypeName, _version: Int) {
+    self.name = name
+    self._version = _version
+  }
 
   public var debugDescription: String {
     return "\(name.debugDescription) (v\(_version))"
@@ -1936,13 +1941,29 @@ extension TypeDependencyGraph {
 // MARK: Extension Binding
 
 extension TypeDependencyGraph {
+  func getGlobalNominalTypeReference(name: GlobalTypeName) -> GlobalNominalTypeRef? {
+    namesToTypes[name].map({
+      GlobalNominalTypeRef(qualifiedName: name, nominal: $0)
+    })
+  }
+
+  /// Gets the final nominal-type reference with the given qualified name
+  /// using the current graph.
+  ///
+  /// Useful for getting the final version of a nominal type after binding extensions.
+  func getNominalTypeReference(name: GlobalTypeName) -> NominalTypeRef? {
+    getGlobalNominalTypeReference(name: name).map(NominalTypeRef.init(globalReference:))
+  }
+}
+
+extension TypeDependencyGraph {
   @_spi(_QualifiedLookupTests) public enum ExtensionAdmissionFailure: Error {
     case cannotReadmit(existingState: ExtensionState)
     case invalidDependencyExtension(extensionState: ExtensionState?)
   }
   // TODO: Consider if any early error returns break invariants (lead to an
   // invalid graph state)
-  mutating func _admitExtension(
+  mutating func admitExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionDeclModule: ModuleName,
     isUpdatingInvalidating isFixingInvalidating: Bool,
@@ -1968,11 +1989,16 @@ extension TypeDependencyGraph {
     // resolutions into failures if they cause a cycle.
     let result:
       Result<
-        (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
+        (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>),
         TypeResolver.Failure
       >
     switch rawResult {
     case .success(let (extendedTypeName, mainDecl)):
+      // TODO: Try to merge with cycleResult failures
+      guard let extendedTypeRef: GlobalNominalTypeRef = getGlobalNominalTypeReference(name: extendedTypeName) else {
+        return .failure(ExtensionAdmissionFailure.invalidDependencyExtension(extensionState: nil))
+      }
+
       let cycleResult =
         _findFirstCycleWhenBinding(
           extensionDecl: extensionDecl,
@@ -1985,7 +2011,7 @@ extension TypeDependencyGraph {
       switch cycleResult {
       case nil:
         // No cycle, keep success
-        result = .success((extendedTypeName, mainDecl))
+        result = .success((extendedTypeRef, mainDecl))
       case .success(let cycle):
         // Found cycle, turn success into failure
         result = .failure(TypeResolver.Failure.cyclicalExtensionDependency(cycle))
@@ -2015,7 +2041,7 @@ extension TypeDependencyGraph {
         )
       }
     case .failure(let failure):
-      // Failed extensions stay failures (they are unbound => no member
+      // Failed extensions remain failures (they are unbound => no member
       // types that can cause cycles).
       result = .failure(failure)
     }
@@ -2024,7 +2050,8 @@ extension TypeDependencyGraph {
     let invalidatedExtensions: [ExtensionState]
     // If there's no cycle, we may type members so we need to invalidate
     switch result {
-    case .success(let (extendedTypeName, _)):
+    case .success(let (extendedTypeRef, _)):
+      let extendedTypeName: GlobalTypeName = extendedTypeRef.name
       // Get the bound type
       guard let extendedType = namesToTypes[extendedTypeName] else {
         fatalError(
@@ -2110,7 +2137,7 @@ extension TypeDependencyGraph {
       dependencies: dependencyTracker.dependencies,
       extensionDecl: extensionDecl,
       // Only keep the qualified name (we store the main decl in `namesToTypes`)
-      resolvedType: result.map(\.qualifiedName)
+      resolvedType: result.map(\.globalReference.name)
     )
 
     return .success((result, invalidatedExtensions))
