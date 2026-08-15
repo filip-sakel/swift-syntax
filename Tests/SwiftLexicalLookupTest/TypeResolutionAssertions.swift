@@ -45,7 +45,7 @@ struct TypeResolutionMatcher {
   /// A marker and the resolved qualified name of the annotated `NominalTypeDeclSyntax`.
   struct Definition {
     let marker: Character
-    let name: String
+    let name: String?
   }
   /// Annotates `TypeSyntax` with a type-resolution result using markers;
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
@@ -76,7 +76,12 @@ extension TypeResolutionMatcher.Definition: LexicalAnnotation, Identifiable, Cus
 
   var id: Character { marker }
 
-  var description: String { name }
+  // Use the name for a more familiar description,
+  // or the marker (if we don't care about the name
+  // and for local declarations.)
+  var description: String {
+    name ?? marker.description
+  }
 }
 
 // MARK: `Expectation` Conformances
@@ -231,7 +236,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Evaluate the extended type
       var typeQualifier = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
-      let _: Result<GenericResolvedNominalTypeReference<GlobalTypeName>, TypeResolver.Failure> =
+      let _: Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, TypeResolver.Failure> =
         typeQualifier.bindExtension(extensionDecl)
 
       // After binding, we should we have a state
@@ -303,7 +308,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
         guard let targetDefinition = syntaxToDefinitions[nominalType.mainDecl.node] else {
           failures.append(
             ExpectationFailure.resultReferencesUnmarkedSyntax(
-              syntaxDescription: nominalType.qualifiedName.debugDescription
+              syntaxDescription: nominalType.nominalTypeRef.globalName.debugDescription
             )
           )
           return nil
@@ -333,7 +338,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
           failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
           return "_"
         }
-        return nominalDecl.annotation.name
+        return nominalDecl.annotation.description
       }
       let expectedFailureDescription = expectedFailure._describeDebug(
         resolveMininalNominal: markerToQualifiedName,
@@ -342,7 +347,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Describe the lookup failure
       let actualFailureDescription = actualFailure._describeDebug(
-        resolveMininalNominal: \.qualifiedName.debugDescription,
+        resolveMininalNominal: \.nominalTypeRef.globalName.debugDescription,
         resolveExtendedNominal: \.debugDescription
       )
 
@@ -415,7 +420,7 @@ func assertTypeResolution(
 extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatcher {
   mutating func appendInterpolation(
     _ marker: Character,
-    name: String,
+    name: String? = nil,
     file: StaticString = #file,
     line: UInt = #line
   ) {

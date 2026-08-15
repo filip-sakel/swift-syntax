@@ -549,6 +549,14 @@ extension GlobalNominalTypeRef {
   }
 }
 
+extension NominalTypeRef {
+  @_spi(_QualifiedLookupTests) public var globalName: GlobalTypeName? {
+    guard case .global(let globalReference) = storage else { return nil }
+
+    return globalReference.name
+  }
+}
+
 extension TypeDependencyGraph {
   @_spi(_QualifiedLookupTests) public enum QualifiedTypeLookupFailure: Error {
     /// References non-registered base type

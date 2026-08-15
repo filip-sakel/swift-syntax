@@ -517,7 +517,7 @@ final class TypeResolutionTests: XCTestCase {
   func testTopLevelSelf() {
     assertTypeResolution([
       "MyFile.swift": """
-      func f() { let _: \(.invalid)Self }
+      func f() { let _: \(failure: .noTypeInScope)Self }
       """
     ])
   }
@@ -526,7 +526,7 @@ final class TypeResolutionTests: XCTestCase {
     assertTypeResolution([
       "MyFile.swift": """
       func f() {
-        func g() { let _: \(.invalid)Self }
+        func g() { let _: \(failure: .noTypeInScope)Self }
         \("🟩")
         struct A {
           func h() { let _: \(nominal: "🟩")Self }

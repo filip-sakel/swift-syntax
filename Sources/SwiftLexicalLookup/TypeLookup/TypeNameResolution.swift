@@ -184,43 +184,44 @@ extension Attached where Node == NominalTypeDeclSyntax {
 //   }
 // }
 
-extension PartialTypeName {
-  /// Resolve using now-qualified base.
-  ///
-  /// Parameters:
-  /// - originatingSyntax: The syntax which we're resolving with this request.
-  ///
-  /// Returns: The resolved type reference or `nil` if the `originatingSyntax`
-  /// isn't registered in the symbol table.
-  func resolve(
-    resolvedBase: GenericResolvedNominalTypeReference<GlobalTypeName>,
-    originatingSyntax: Attached<TypeLikeSyntax>,
-    originatingModule: ModuleName,
-    symbolTable: borrowing SymbolTable
-  ) -> ResolvedNominalTypeReference {
-    // Get the type's main declaration.
-    //
-    // If ``memberNames`` is empty, we didn't have a resolved main declaration so
-    // ``mainDecl`` is `nil`; if ``memberNames`` isn't an empty, ``mainDecl`` should
-    // have been set.
-    let resolvedMainDecl = mainDecl ?? resolvedBase.mainDecl
-
-    // Resolve the name
-    let memberComponents = memberNames.map({ name in
-      GlobalTypeName.Component(
-        name: name,
-        file: originatingSyntax.fileRoot,
-        module: originatingModule,
-        symbolTable: symbolTable
-      )
-    })
-
-    return ResolvedNominalTypeReference(
-      mainDecl: resolvedMainDecl,
-      name: TypeName.global(
-        resolvedBase.qualifiedName.addingComponents(memberComponents)
-      ),
-      originatingSyntax: originatingSyntax
-    )
-  }
-}
+// TODO: Remove
+// extension PartialTypeName {
+//   /// Resolve using now-qualified base.
+//   ///
+//   /// Parameters:
+//   /// - originatingSyntax: The syntax which we're resolving with this request.
+//   ///
+//   /// Returns: The resolved type reference or `nil` if the `originatingSyntax`
+//   /// isn't registered in the symbol table.
+//   func resolve(
+//     resolvedBase: GenericResolvedNominalTypeReference<GlobalTypeName>,
+//     originatingSyntax: Attached<TypeLikeSyntax>,
+//     originatingModule: ModuleName,
+//     symbolTable: borrowing SymbolTable
+//   ) -> ResolvedNominalTypeReference {
+//     // Get the type's main declaration.
+//     //
+//     // If ``memberNames`` is empty, we didn't have a resolved main declaration so
+//     // ``mainDecl`` is `nil`; if ``memberNames`` isn't an empty, ``mainDecl`` should
+//     // have been set.
+//     let resolvedMainDecl = mainDecl ?? resolvedBase.mainDecl
+//
+//     // Resolve the name
+//     let memberComponents = memberNames.map({ name in
+//       GlobalTypeName.Component(
+//         name: name,
+//         file: originatingSyntax.fileRoot,
+//         module: originatingModule,
+//         symbolTable: symbolTable
+//       )
+//     })
+//
+//     return ResolvedNominalTypeReference(
+//       mainDecl: resolvedMainDecl,
+//       name: TypeName.global(
+//         resolvedBase.qualifiedName.addingComponents(memberComponents)
+//       ),
+//       originatingSyntax: originatingSyntax
+//     )
+//   }
+// }

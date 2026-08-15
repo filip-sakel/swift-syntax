@@ -61,12 +61,19 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
 
   var debugDescription: String {
     switch self {
-    case .lookForExtension(let extensionDecl, let lookForSelectedMember):
+    // TODO: Remove
+    // case .lookForExtension(let extensionDecl, let lookForSelectedMember):
+    //   return
+    //     ".lookForExtension(\(extensionDecl._memberlessDescription), lookForSelectedMember: \(lookForSelectedMember))"
+    // case .lookForType(let type, let lookForSelectedMember, let scope):
+    //   return
+    //     ".lookForType(decls: [\(type.map(\._memberlessDescription).joined(separator: ", "))], lookForSelectedMember: \(lookForSelectedMember)))"
+    case .nonNestedTypeDecl(let decl, let redeclarations, let parentScope):
+      let redeclsDescriptions = redeclarations.map(\._memberlessDescription).joined(separator: ", ")
       return
-        ".lookForExtension(\(extensionDecl._memberlessDescription), lookForSelectedMember: \(lookForSelectedMember))"
-    case .lookForType(let type, let lookForSelectedMember, let scope):
-      return
-        ".lookForType(decls: [\(type.map(\._memberlessDescription).joined(separator: ", "))], lookForSelectedMember: \(lookForSelectedMember)))"
+        ".nonNestedTypeDecl(decl: `\(decl._memberlessDescription)`, redeclarations: [\(redeclsDescriptions)], parentScope: `\(parentScope.trimmedDescription)`"
+    case .lookForMember(let declGroupParent, let lookForSelf):
+      return ".lookForMember(declGroupParent: `\(declGroupParent._memberlessDescription)`, lookForSelf: \(lookForSelf))"
     case .lookForGenericParameters(let extensionDecl):
       return ".lookForGenericParameters(in: \(extensionDecl._memberlessDescription))"
     case .lookInModule:
@@ -78,15 +85,21 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
 
   /// Compact form of `debugDescription` for logging
   func _compactDescription(lookedUpName: Identifier) -> String {
-    let memberSearchDescription = " > '\(lookedUpName.name)'"
     switch self {
-    case .lookForExtension(let extensionDecl, let lookForSelectedMember):
+    // TODO: Remove
+    // case .lookForExtension(let extensionDecl, let lookForSelectedMember):
+    //   // E.g. 'extension A {}' > 'B'
+    //   return
+    //     "'\(extensionDecl._memberlessDescription)'\(lookForSelectedMember ? memberSearchDescription : ""))"
+    // case .lookForType(let type, let lookForSelectedMember):
+    //   return
+    //     "[\(type.map(\._memberlessDescription).joined(separator: ", "))]\(lookForSelectedMember ? memberSearchDescription : "")"
+    case .nonNestedTypeDecl(let decl, redeclarations: _, let parentScope):
+      return "`\(decl._memberlessDescription)` [in <\((parentScope.parent?.kind).debugDescription)>]"
+    case .lookForMember(let declGroupParent, let lookForSelf):
       // E.g. 'extension A {}' > 'B'
-      return
-        "'\(extensionDecl._memberlessDescription)'\(lookForSelectedMember ? memberSearchDescription : ""))"
-    case .lookForType(let type, let lookForSelectedMember):
-      return
-        "[\(type.map(\._memberlessDescription).joined(separator: ", "))]\(lookForSelectedMember ? memberSearchDescription : "")"
+      let memberSearchDescription = " > '\(lookedUpName.name)'"
+      return "`\(declGroupParent._memberlessDescription)`\(lookForSelf ? memberSearchDescription : "")"
     case .lookForGenericParameters(let extensionDecl):
       return "'\(extensionDecl._memberlessDescription)' > generic parameters"
     case .lookInModule:

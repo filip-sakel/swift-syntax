@@ -822,6 +822,7 @@ extension TypeResolutionFailure {
           memberDependencies: &memberDependencies,
           visitedTypeSyntax: visitedTypeSyntax
         )
+        lookForSelectedMember = false
       case .lookForMember(let declGroupParent, let lookForSelf):
         // We might have to look inside an extension
         // For instance:
@@ -966,6 +967,26 @@ extension TypeResolutionFailure {
     memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<Attached<TypeSyntax>>
   ) -> Result<ResolvedNominalTypeReference, Failure> {
+    withLogging(
+      request: "Decl Group `\(declGroup._memberlessDescription)`",
+      describe: \._debugDescription,
+      perform: {
+        $0._resolveDeclGroup(
+          declGroup: declGroup,
+          originatingSyntax: originatingSyntax,
+          memberDependencies: &memberDependencies,
+          visitedTypeSyntax: visitedTypeSyntax
+        )
+      }
+    )
+  }
+
+  fileprivate mutating func _resolveDeclGroup(
+    declGroup: Attached<DeclGroupSyntaxType>,
+    originatingSyntax: Attached<TypeLikeSyntax>,
+    memberDependencies: inout DependencyTracker,
+    visitedTypeSyntax: OrderedSet<Attached<TypeSyntax>>
+  ) -> Result<ResolvedNominalTypeReference, Failure> {
     let declContext: DeclContext = _findDeclContext(ofDeclGroup: declGroup)
 
     if let nominalTypeDecl = declGroup.as(NominalTypeDeclSyntax.self) {
@@ -1077,6 +1098,28 @@ extension TypeResolutionFailure {
     memberDependencies: inout DependencyTracker,
     visitedTypeSyntax: OrderedSet<Attached<TypeSyntax>>
   ) -> Result<ResolvedNominalTypeReference, Failure> {
+    withLogging(
+      request: "Nominal \(nominalDecl._memberlessDescription)",
+      describe: \._debugDescription,
+      perform: {
+        $0._resolveNominalTypeDecl(
+          nominalDecl: nominalDecl,
+          declContext: declContext,
+          originatingSyntax: originatingSyntax,
+          memberDependencies: &memberDependencies,
+          visitedTypeSyntax: visitedTypeSyntax
+        )
+      }
+    )
+  }
+
+  fileprivate mutating func _resolveNominalTypeDecl(
+    nominalDecl: Attached<NominalTypeDeclSyntax>,
+    declContext: DeclContext,
+    originatingSyntax: Attached<TypeLikeSyntax>,
+    memberDependencies: inout DependencyTracker,
+    visitedTypeSyntax: OrderedSet<Attached<TypeSyntax>>
+  ) -> Result<ResolvedNominalTypeReference, Failure> {
     guard let name = Identifier(validating: nominalDecl.node.name) else {
       // TODO: Produce actual error
       struct InvalidIdentifier: Error {}
@@ -1174,6 +1217,7 @@ extension TypeResolutionFailure {
             component: GlobalTypeName.Component(name: name, file: file, module: module, symbolTable: symbolTable)
           )
         )
+      } else {
         typeName = .local(LocalTypeName(scope: codeBlockScope, base: name))
       }
 
@@ -1318,7 +1362,7 @@ extension TypeResolutionFailure {
         nominalBaseType = success
       case .failure(let failure):
         memberResult = Result.failure(failure)
-        break
+        continue
       }
       nominalBaseTypes.append(nominalBaseType)
 
@@ -1660,12 +1704,12 @@ extension TypeResolver {
         //          func f(_: Self) {} // <- Lookup up here
         //        }
         //      }
-        guard case .global(let extendedGlobalName) = extendedTypeReference.qualifiedName else {
+        guard case .global(let extendedGlobalRef) = extendedTypeReference.nominalTypeRef.storage else {
           fatalError(
-            "[SwiftLexicalLookup] Internal error: Unexpectedly resolved extension to local type \(extendedTypeReference.qualifiedName)"
+            "[SwiftLexicalLookup] Internal error: Unexpectedly resolved extension to local type \(extendedTypeReference.nominalTypeRef)"
           )
         }
-        return (extendedGlobalName, extendedTypeReference.mainDecl)
+        return (extendedGlobalRef.name, extendedTypeReference.mainDecl)
       }),
       dependencies: extensionDependencies,
       verbose: _verbose
@@ -1940,7 +1984,7 @@ extension TypeResolver {
   fileprivate mutating func _bindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
   ) -> Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, Failure> {
-    if let alreadyBoundResult = symbolTable.dependencyGraph.getExtensionResolvedType(extensionDecl) {
+    if let alreadyBoundResult = symbolTable.getExtensionResolvedType(extensionDecl) {
       return alreadyBoundResult
     }
 

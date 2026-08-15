@@ -124,20 +124,20 @@ extension SymbolTable {
     )
   }
 
-  // func getExtensionResolvedType(
-  //   _ extensionDecl: Attached<ExtensionDeclSyntax>
-  // ) -> Result<
-  //   GenericResolvedNominalTypeReference<GlobalNominalTypeRef>,
-  //   BindingFailure
-  // >? {
-  //   dependencyGraph.getExtensionResolvedType(extensionDecl)?.map({ (globalReference, mainDecl) in
-  //     GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
-  //       nominalTypeRef: globalReference,
-  //       mainDecl: mainDecl,
-  //       originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
-  //     )
-  //   })
-  // }
+  func getExtensionResolvedType(
+    _ extensionDecl: Attached<ExtensionDeclSyntax>
+  ) -> Result<
+    GenericResolvedNominalTypeReference<GlobalNominalTypeRef>,
+    BindingFailure
+  >? {
+    dependencyGraph.getExtensionResolvedType(extensionDecl)?.map({ (globalReference, mainDecl) in
+      GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
+        nominalTypeRef: globalReference,
+        mainDecl: mainDecl,
+        originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
+      )
+    })
+  }
 
   /// Similar to `bindExtension` but for the extensions that were invalidated.
   /// All invalidated extensions should be fixed before calling `bindExtension`
