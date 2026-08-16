@@ -247,7 +247,7 @@ final class TypeResolutionTests: XCTestCase {
   func testSimpleFunction() {
     assertTypeResolution([
       "MyFile.swift": """
-      typealias A = \(type: .function(argumentCount: 2))(_ a: Int, _ b: Int) -> Int
+      typealias A = \(failure: .other(PartialTypeResolutionFailure.functionType))(_ a: Int, _ b: Int) -> Int
       """ as LexicalLookupSource
     ])
   }
@@ -299,7 +299,7 @@ final class TypeResolutionTests: XCTestCase {
       func g(_: \(nominal: "🟥")any A)
 
       // Attributed types (and modifiers)
-      func h(_: @escaping \(type: .function(argumentCount: 0))() -> Void)
+      func h(_: @escaping \(failure: .other(PartialTypeResolutionFailure.functionType))() -> Void)
       func i(_: sending \(nominal: "🟥")A)
 
       // Pack elements & expansions
@@ -462,7 +462,7 @@ final class TypeResolutionTests: XCTestCase {
         struct B {}
 
         typealias C = \(failure: .invalidComposition([
-          ("((A, B) -> Int)", .cannotComposeNonClassOrProtocol(resolved: .function(argumentCount: 2))),
+          ("((A, B) -> Int)", .other(PartialTypeResolutionFailure.functionType)),
           ("A", .cannotComposeNonClassOrProtocol(resolved: .memberResults(["🟥"]))),
         ]))
         ((A, B) -> Int) & A
@@ -528,7 +528,7 @@ final class TypeResolutionTests: XCTestCase {
       // Tuples, functions, and metatypes don't have type members
       var x: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.tuple(labels: [nil, nil])))
              (A, B).MyType
-      var y: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.function(argumentCount: 1)))
+      var y: \(failure: .other(PartialTypeResolutionFailure.functionType))
              ((A) -> B).MyType
       var z: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.memberResults([])))
              A.Type.MyType

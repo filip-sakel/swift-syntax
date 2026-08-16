@@ -108,9 +108,7 @@ final class PartialTypeResolutionTests: XCTestCase {
     // Function
     assertPartialResolutionResult(
       typeSyntax: "(_ a: A, B) -> C",
-      result: .success(
-        .function(argumentCount: 2)
-      )
+      result: .failure(.functionType)
     )
 
     // Missing Type
@@ -314,8 +312,12 @@ final class PartialTypeResolutionTests: XCTestCase {
 
     // Attributed type
     assertPartialResolutionResult(
+      typeSyntax: "sending (A, B)",
+      result: .success(.tuple(labels: [nil, nil]))
+    )
+    assertPartialResolutionResult(
       typeSyntax: "@escapable @Sendable () -> Int",
-      result: .success(.function(argumentCount: 0))
+      result: .failure(.functionType)
     )
 
     // Opaque/any types

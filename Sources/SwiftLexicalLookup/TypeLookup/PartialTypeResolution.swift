@@ -26,14 +26,21 @@ import SwiftSyntax
 /// ```
 @_spi(_QualifiedLookupTests)
 public enum PartiallyResolvedType {
+  /// `Any`, a suppressed type like `~Escapable`, or a composition thereof.
   case anyType
+  /// A bare type identifier, such as 'A', 'Self', '`Self`', '`Any`',
+  /// 'Module::A', or 'Module::Any'.
   case typeIdentifier(Result<TypeReference, InvalidTypeIdentifierFailure>)
-  case function(argumentCount: Int)
   case tuple(labels: [Identifier?])
   case member(
     base: Attached<TypeSyntax>,
     memberComponent: Result<TypeReference, InvalidTypeIdentifierFailure>
   )
+  /// A composition of type syntax.
+  ///
+  /// Each
+  ///
+  /// E.g. A & B & (Int) -> Void
   case composition([Attached<TypeSyntax>])
 }
 
@@ -68,6 +75,9 @@ public struct TypeReference: Sendable, CustomDebugStringConvertible {
 
 @_spi(_QualifiedLookupTests)
 public enum PartialTypeResolutionFailure: Error {
+  /// Function types aren't interesting for lookup; we defer to SEMA.
+  case functionType
+
   /// Missing types produce errors
   case missingType
 
@@ -157,8 +167,8 @@ extension Attached where Node: TypeSyntaxProtocol {
     // Non-nominal base cases
     //
     // Functions
-    case .functionType(let functionType):
-      return Result.success(PartiallyResolvedType.function(argumentCount: functionType.parameters.count))
+    case .functionType:
+      return Result.failure(PartialTypeResolutionFailure.functionType)
     // Valid tuples (we treat single-element tuples as their only contained type below)
     case .tupleType(let tupleType):
       // Single-element tuples are just the type, e.g., the tuple type syntax
@@ -396,6 +406,7 @@ extension InvalidTypeIdentifierFailure: CustomDebugStringConvertible {
 extension PartialTypeResolutionFailure: CustomDebugStringConvertible {
   public var debugDescription: String {
     switch self {
+    case .functionType: return ".functionType"
     case .missingType: return ".missingType"
     case .unknownSuppressedType: return ".unknownSuppressedType"
     case .wildcardType: return ".wildcardType"
@@ -410,8 +421,6 @@ extension PartiallyResolvedType: CustomDebugStringConvertible {
       return ".anyType"
     case .typeIdentifier(let typeIdentifierResult):
       return ".typeIdentifier(\(typeIdentifierResult._debugDescription))"
-    case .function(let argumentCount):
-      return ".function(argumentCount: \(argumentCount))"
     case .tuple(let labels):
       return ".tuple([\(labels.map({ $0?.name ?? "nil" }).joined(separator: ", "))])"
     case .member(let base, let memberComponent):

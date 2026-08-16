@@ -595,8 +595,6 @@ extension TypeResolutionFailure {
     switch partialType {
     case .success(.anyType):
       return Result.success(MemberLookupResult.anyType)
-    case .success(.function(let argumentCount)):
-      return Result.success(.function(argumentCount: argumentCount))
     case .success(.tuple(let labels)):
       return Result.success(.tuple(labels: labels))
     case .success(.typeIdentifier(.success(let component))):
