@@ -392,10 +392,12 @@ public struct TypeDependencyGraph {
     }
 
     /// Adds the given type as a redeclaration if not already added.
-    func addingRedeclaration(_ mainDecl: MappedDeclGroup<NominalTypeDeclSyntax>) -> NominalType {
+    /// Returns `nil` if the main declaration is in a different file.
+    func addingRedeclaration(_ mainDecl: MappedDeclGroup<NominalTypeDeclSyntax>) -> NominalType? {
       // This check takes linear time w.r.t. `_mainDecls`; however, we don't
       // expect to have many redeclarations for the same type.
       guard !_mainDecls.contains(mainDecl) else { return self }
+      guard self.mainDecl.fileRoot == mainDecl.fileRoot else { return nil }
 
       var copy = self
       copy.version &+= 1
@@ -716,6 +718,8 @@ extension TypeDependencyGraph {
     case cannotRegisterUnderRedeclaration
     /// Cannot register type nested in extension that hasn't been registered yet.
     case parentExtensionUnbound(extensionDecl: Attached<ExtensionDeclSyntax>)
+    /// Main declaration isn't in the same file as the purported redeclaration
+    case differentRedeclarationFile
   }
 
   /// Registers the given nominal-type reference or return the
@@ -798,7 +802,10 @@ extension TypeDependencyGraph {
     }
 
     // Add the redeclaration (or ignore if the decl is already added)
-    let typeWithRedeclaration = existingType.addingRedeclaration(mappedMainDecl)
+    guard let typeWithRedeclaration = existingType.addingRedeclaration(mappedMainDecl) else {
+      // This means the main declaration is in a different file
+      return .failure(NominalRegistrationFailure.differentRedeclarationFile)
+    }
     namesToTypes[qualifiedName] = typeWithRedeclaration
 
     return .success(
@@ -810,6 +817,7 @@ extension TypeDependencyGraph {
 
   enum NominalTypeRefUpdateFailure: Error {
     /// This type now has ambiguous redeclarations
+    /// Invariant: `declarations` are in the same file and sorted by position.
     case redeclared(declarations: [Attached<NominalTypeDeclSyntax>])
     /// This type is no longer in the symbol table
     case removed
@@ -831,6 +839,8 @@ extension TypeDependencyGraph {
 
     // Ensure no redeclarations
     guard typeState.redeclarations.isEmpty else {
+      // `typeState._mainDecls` are in the same file and sorted by position,
+      // satisfying the `.redeclared` invariant.
       return .failure(NominalTypeRefUpdateFailure.redeclared(declarations: typeState._mainDecls.map(\.declGroup)))
     }
 

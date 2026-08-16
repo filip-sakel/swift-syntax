@@ -241,8 +241,6 @@ public indirect enum TypeResolutionFailure<TypeName: Sendable, MinimalNominal: S
   /// type name are ambiguous; not necessarily an error, we just defer to
   /// the type checker for disambiguation.
   ///
-  /// Important: Results must be ordered by `SymbolTable.sortDeclarations`
-  ///
   /// For example:
   ///   typealias A = Bool
   ///   typealias A = Int
@@ -1289,7 +1287,8 @@ extension TypeResolutionFailure {
       case .failure(let registrationFailure):
         switch registrationFailure {
         // TODO: Explain why these invariants hold
-        case .cannotRegisterUnderRedeclaration, .noDeclGroupParent, .parentNotRegistered, .parentExtensionUnbound:
+        case .cannotRegisterUnderRedeclaration, .noDeclGroupParent, .parentNotRegistered, .parentExtensionUnbound,
+          .differentRedeclarationFile:
           fatalError(
             "[ewiftLexicalLookup] Internal error: Unexpected nominal-registration error: \(registrationFailure)"
           )
@@ -1354,7 +1353,8 @@ extension TypeResolutionFailure {
       case .failure(let registrationFailure):
         switch registrationFailure {
         // TODO: Explain why these invariants hold
-        case .cannotRegisterUnderRedeclaration, .noDeclGroupParent, .parentNotRegistered, .parentExtensionUnbound:
+        case .cannotRegisterUnderRedeclaration, .noDeclGroupParent, .parentNotRegistered, .parentExtensionUnbound,
+          .differentRedeclarationFile:
           fatalError(
             "[ewiftLexicalLookup] Internal error: Unexpected nominal-registration error: \(registrationFailure)"
           )
@@ -1560,7 +1560,6 @@ extension TypeResolutionFailure {
     }
     // TODO: Ensure we're properly shadowing and not giving false-positive errors
     guard declsAndResults.count == 1 else {
-      // TODO: We should sort properly here, or figure out different specs for `ambiguousTypeDecl`
       return Result.failure(
         Failure.ambiguousTypeDecl(declsAndResults.map(\.decl.node))
       )
