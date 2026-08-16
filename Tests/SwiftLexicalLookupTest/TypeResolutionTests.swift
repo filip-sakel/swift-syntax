@@ -324,6 +324,38 @@ final class TypeResolutionTests: XCTestCase {
 
   }
 
+  // MARK: Local Types
+  func testSimpleLocalTypes() {
+    assertTypeResolution([
+      "MyFile.swift": """
+      func f() {
+        let a: \(nominal: "🟩")A
+        let b: \(nominal: "🟥")A.B
+        let invalidB: \(failure: .noTypeInScope)B
+
+        \("🟩")
+        struct A {
+          let a: \(nominal: "🟩")A
+          let b: \(nominal: "🟥")B
+
+          \("🟥")
+          struct B {
+            let a: \(nominal: "🟩")A
+            let b: \(nominal: "🟥")B
+          }
+
+          let a: \(nominal: "🟩")A
+          let b: \(nominal: "🟥")B
+        }
+
+        let a: \(nominal: "🟩")A
+        let b: \(nominal: "🟥")A.B
+        let invalidB: \(failure: .noTypeInScope)B
+      }
+      """
+    ])
+  }
+
   // MARK: Aliases
 
   func testSimpleAlias() {
@@ -502,13 +534,6 @@ final class TypeResolutionTests: XCTestCase {
       """ as LexicalLookupSource
     ])
   }
-  // func testTupleComposition() {
-  //   assertQualifiedTypeName([
-  //     "MyFile.swift": """
-  //     func f(_: \(result: .tuple(labels: [Identifier(canonicalName: "a"), nil]))(a: Int, Bool))
-  //     """ as LexicalLookupSource
-  //   ])
-  // }
 
   // MARK: Non-Nominal Members
   func testNonNominalMembers() {
@@ -557,7 +582,7 @@ final class TypeResolutionTests: XCTestCase {
       }
       """
     ])
-    // TODO: Add the following lookup expectation inside the body of function `f`.
+    // TODO: Add the following lookup expectation inside `struct A`.
     // Currently fails because unqualified lookup emits implicit `Self`
     // only inside protocols/extensions to match ASTScope behavior.
     // ```

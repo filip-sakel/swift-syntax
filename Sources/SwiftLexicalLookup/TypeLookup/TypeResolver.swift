@@ -772,7 +772,7 @@ extension TypeResolutionFailure {
     case .codeBlock(let codeBlock):
       guard let sourceFileScope = codeBlock.parent?.as(SourceFileSyntax.self) else {
         // `codeBlock.parent` shouldn't be `nil` in a valid program because of `Attached<_>`
-        return "<\((codeBlock.parent?.kind).debugDescription)>"
+        return "<\(codeBlock.parent?.parent?.kind ?? .missing)>"
       }
       return symbolTable.debugFileMap.describeFileID(sourceFileScope.node.id)
     }
@@ -816,7 +816,7 @@ extension TypeResolutionFailure {
       )
     }
 
-    log("Lookup results: \(lookupResults)")
+    log("Lookup results: \(lookupResults.map(\.debugDescription))")
 
     // Find first matching type declaration
     for lookupResult: UnqualifiedTypeLookupResult in lookupResults {
@@ -1462,7 +1462,9 @@ extension TypeResolutionFailure {
           (typeDecl: Attached<TypeDeclSyntax>, result: MemberLookupResult<ResolvedNominalTypeReference>)?,
           Failure
         >
+      logPrefix.append("Base `\(baseType._succinctDescription)`")
       defer {
+        logPrefix.removeLast()
         switch memberResult {
         case Result.success((let memberTypeDecl, let memberResult)?):
           // Add if not already added
@@ -1495,6 +1497,7 @@ extension TypeResolutionFailure {
         memberIntroducingSyntax: typeMember.introducingSyntax,
         dependencyTracker: &memberDependencies
       )
+      log("Type members matching '\(typeMember.name.name)': \(memberTypeDeclResult._debugDescription)")
       // Collect; skip if it doesn't exist; throw on failure
       let memberTypeDecl: Attached<TypeDeclSyntax>
       switch memberTypeDeclResult {

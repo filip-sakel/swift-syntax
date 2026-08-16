@@ -385,10 +385,6 @@ enum LexicalAssertionUtilities {
     let expectedMarkers = Set(expected.map(\.annotation.id))
     let actualMarkers = Set(actual.map(\.annotation.id))
 
-    if expected.map(\.annotation.id) != actual.map(\.annotation.id) {
-      print("Comparing \(expected) vs \(actual)")
-    }
-
     // Calculate differences
     let missingDefinitions = expected.filter({ !actualMarkers.contains($0.annotation.id) })
     if !missingDefinitions.isEmpty {

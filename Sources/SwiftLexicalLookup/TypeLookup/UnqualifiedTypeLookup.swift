@@ -71,7 +71,7 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
     case .nonNestedTypeDecl(let decl, let redeclarations, let parentScope):
       let redeclsDescriptions = redeclarations.map(\._memberlessDescription).joined(separator: ", ")
       return
-        ".nonNestedTypeDecl(decl: `\(decl._memberlessDescription)`, redeclarations: [\(redeclsDescriptions)], parentScope: `\(parentScope.trimmedDescription)`"
+        ".nonNestedTypeDecl(decl: `\(decl._memberlessDescription)`, redeclarations: [\(redeclsDescriptions)], parentScope: <\(parentScope.parent?.parent?.kind ?? SyntaxKind.missing)>)"
     case .lookForMember(let declGroupParent, let lookForSelf):
       return ".lookForMember(declGroupParent: `\(declGroupParent._memberlessDescription)`, lookForSelf: \(lookForSelf))"
     case .lookForGenericParameters(let extensionDecl):
@@ -95,7 +95,7 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
     //   return
     //     "[\(type.map(\._memberlessDescription).joined(separator: ", "))]\(lookForSelectedMember ? memberSearchDescription : "")"
     case .nonNestedTypeDecl(let decl, redeclarations: _, let parentScope):
-      return "`\(decl._memberlessDescription)` [in <\((parentScope.parent?.kind).debugDescription)>]"
+      return "`\(decl._memberlessDescription)` [in <\(parentScope.parent?.parent?.kind ?? SyntaxKind.missing)>]"
     case .lookForMember(let declGroupParent, let lookForSelf):
       // E.g. 'extension A {}' > 'B'
       let memberSearchDescription = " > '\(lookedUpName.name)'"

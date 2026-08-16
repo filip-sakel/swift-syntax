@@ -580,7 +580,8 @@ extension TypeDependencyGraph {
     case .local(let nominalTypeDecl):
       // Local decls don't have extensions (=> no dependencies generated); just
       // look into the main declaration.
-      let typeMembers = nominalTypeDecl._groupTypeMembers(configuredRegions: configuredRegions).flatMap(\.value)
+      let groupedTypeMembers = nominalTypeDecl._groupTypeMembers(configuredRegions: configuredRegions)
+      let typeMembers = groupedTypeMembers[memberTypeName, default: []]
       return .success(typeMembers)
     }
 
@@ -643,7 +644,6 @@ extension TypeDependencyGraph {
             (declGroup.declGroup.as(ExtensionDeclSyntax.self), $0.typeDeclSyntax)
           }) ?? []
         typeDecls.append(contentsOf: introducedDecls)
-
       }
       return QualifiedLookupDependency(extendedTypeName: baseTypeName, member: memberTypeName, typeDecls: typeDecls)
     }
@@ -654,6 +654,7 @@ extension TypeDependencyGraph {
       memberTypeName: memberTypeName,
       performLookup: directLookup(baseTypeName:memberTypeName:)
     )
+    fatalError("Meow")
 
     // Distill to type declarations (throw away declaration groups)
     return .success(result.typeDecls.map(\.1))

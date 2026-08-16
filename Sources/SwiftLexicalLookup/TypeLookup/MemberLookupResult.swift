@@ -43,7 +43,7 @@ extension MemberLookupResult: Hashable where Result: Hashable {}
 // MARK: Debug Description
 
 extension MemberLookupResult {
-  internal func _describe(describeMembers: ([Result]) -> String) -> String {
+  @_spi(_QualifiedLookupTests) public func _describe(describeMembers: ([Result]) -> String) -> String {
     switch self {
     case .function(let argumentCount):
       return ".function(argumentCount: \(argumentCount))"

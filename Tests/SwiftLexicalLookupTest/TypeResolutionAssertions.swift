@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+@preconcurrency import Glibc
 import SwiftIfConfig
 @_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) @_spi(Experimental) import SwiftLexicalLookup
 import SwiftParser
@@ -316,18 +317,30 @@ extension TypeResolutionMatcher: LexicalMatcher {
         return targetDefinition
       })
 
-      // Don't continue if markers are undefined
-      guard !failures.isEmpty else { break }
+      // TODO: Remove
+      // print(
+      //   "Expected: \(expectations.map(\.syntax._memberlessDescription)); Actual: \(results.map(\.syntax._memberlessDescription)) [hasFailures: \(!failures.isEmpty)]"
+      // )
+      // fflush(stdout)
+
+      // Give up if markers are undefined (i.e. we already have failures)
+      //
+      // Continuing with undefined markers might give us confusing errors.
+      guard failures.isEmpty else { break }
 
       // Diff if markers check out
       LexicalAssertionUtilities.diffLexicalResults(expected: expectations, actual: results, failures: &failures)
     case (.success(let expectedLookupResult), .success(let actualLookupResult)):
-      // We handled members above, so map to `Bool` to facilitate the comparison.
-      if expectedLookupResult.mapMembers({ _ in false }) != actualLookupResult.mapMembers({ _ in false }) {
+      // We handled markers more nicely above. Here, `\.description` is a
+      // simple fallback in the uncommon case that one result produces markers
+      // and the other doesn't.
+      let expectedLookupDescription = expectedLookupResult._describe(describeMembers: \.description)
+      let actualLookupDescription = actualLookupResult._describe(describeMembers: \.description)
+      if expectedLookupDescription != actualLookupDescription {
         failures.append(
           ExpectationFailure.other(
             failure:
-              "Resolved-type mismatch. Expected: \(expectedLookupResult)\nBut got:  \(actualLookupResult)"
+              "Resolved-type mismatch. Expected: \(expectedLookupDescription)\nBut got:  \(actualLookupDescription)"
           )
         )
       }
@@ -356,7 +369,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
         failures.append(
           ExpectationFailure.other(
             failure:
-              "Failure mismatch.\nExpected: '\(expectedFailureDescription)'.\nGot     : '\(actualFailureDescription)'"
+              "Failure mismatch.\nExpected: '\(expectedFailureDescription)'.\nBut got:  '\(actualFailureDescription)'"
           )
         )
       }
