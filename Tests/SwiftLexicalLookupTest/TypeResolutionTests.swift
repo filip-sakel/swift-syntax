@@ -471,14 +471,21 @@ final class TypeResolutionTests: XCTestCase {
   }
 
   func testAnyTypeComposition() {
+    // assertTypeResolution([
+    //   "MyFile.swift": """
+    //   \("🟥", name: "_(MyFile.swift)::ProtoA")
+    //   protocol ProtoA {}
+    //   func f(_: \(nominal: "🟥")(Any & ProtoA) & Any)
+    //   """ as LexicalLookupSource
+    // ], verbose: true)
     assertTypeResolution([
       "MyFile.swift": """
       \("🟥", name: "_(MyFile.swift)::ProtoA")
       protocol ProtoA {}
       \("🟩", name: "_(MyFile.swift)::ProtoB")
       protocol ProtoB {}
-      func f(_: \(nominal: "🟥")(Any & ProtoA) & Any)
-      func g(_: \(nominals: ["🟥", "🟩"])((ProtoB & Any) & Any) & ProtoB)
+      func f(_: \(nominal: "🟥")(Any & ProtoA) & Any & ProtoA)
+      func g(_: \(nominals: ["🟥", "🟩"])((ProtoA & Any) & Any) & ProtoB)
       """ as LexicalLookupSource
     ])
   }

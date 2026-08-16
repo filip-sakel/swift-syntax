@@ -73,7 +73,7 @@ extension Result where Success == [TypeDeclSyntax], Failure: CustomDebugStringCo
 /// TODO: Make into `NominalTypeRef` + `TypeLikeSyntax`
 @_spi(_QualifiedLookup)
 public struct GenericResolvedNominalTypeReference<TypeRef: Sendable & Hashable & CustomDebugStringConvertible>:
-  Sendable, Hashable, CustomDebugStringConvertible
+  Sendable, CustomDebugStringConvertible
 {
   // public let mainDecl: Attached<NominalTypeDeclSyntax>
   // public let qualifiedName: TypeName
@@ -653,7 +653,6 @@ extension TypeResolutionFailure {
     for (childTypeSyntax, childTypeResult) in syntaxToTypes {
       switch childTypeResult {
       // Only nominals are valid in compositions
-      // TODO: Diagnose composing metatype but distinguish from `& Any`
       case .success(.memberResults(let nominals)):
         if _checkNominalInCompositionIsClassOrProtocol {
           switch (nominals.count, nominals.first?.mainDecl.kind) {
@@ -674,7 +673,13 @@ extension TypeResolutionFailure {
             )
           }
         }
-        types.append(contentsOf: nominals)
+        // Append types we don't already have
+        for nominal in nominals {
+          // This search takes linear time but we don't expect compositions to
+          // reference a large number of nominal types.
+          guard !types.contains(where: { $0.mainDecl == nominal.mainDecl }) else { continue }
+          types.append(nominal)
+        }
       // Tuples/function
       case .success(.function(let argumentCount)):
         failures.append(
@@ -1182,9 +1187,6 @@ extension TypeResolutionFailure {
       case .failure(let failure):
         return .failure(Failure.invalidBaseType(failure))
       }
-      let mappedBaseResult =
-        baseResult.map({ MemberLookupResult.memberResults([$0]) })
-        as Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
 
       // Find this nominal declaration through qualified lookup
       let resolvedBase: NominalTypeRef
@@ -1197,7 +1199,7 @@ extension TypeResolutionFailure {
       // Don't track dependencies (nominals don't currently have dependencies)
       var dependencies = DependencyTracker()
       let memberResult: Result<Attached<TypeDeclSyntax>?, Failure> = findNominalTypeMemberDecl(
-        nominalBaseType: baseType.nominalTypeRef,
+        resolvedNominalBaseType: resolvedBase,
         memberName: name,
         memberIntroducingSyntax: Attached<TypeLikeSyntax>(nominalDecl),
         dependencyTracker: &dependencies
@@ -1253,7 +1255,7 @@ extension TypeResolutionFailure {
         globalTypeName = globalReference.name.addingComponents([
           GlobalTypeName.Component(name: name, file: file, module: module, symbolTable: symbolTable)
         ])
-      case .local(let localReference):
+      case .local(localReference: _):
         // TODO: Either call into `TypeDependencyGraph.registerNominalTypeReference`, or simplify
         // it so it doesn't handle the local case (accepts `GlobalTypeName` instead)
         return .success(
@@ -1409,17 +1411,12 @@ extension TypeResolutionFailure {
     // Extract nominal type or composition thereof
     let baseTypes: [ResolvedNominalTypeReference]
     switch rawBaseType {
-    // Accept nominals (count 1) or compositions (> 1)
-    case .memberResults(let types) /* where types.count >= 1 */:
-      baseTypes = types
-    // Nonnominals don't have type members
+    // Accept nominals (count == 1) or compositions (count > 1).
     //
-    // For instance, the following are invalid:
-    //   let x: (a: Int, b: Int).a // ❌ 'a' is not a member type of '(a: Swift.Int, b: Swift.Int)'
-    //   let y: Int.Type.MyType    // ❌ 'MyType' is not a member type of 'Swift.Int.Type'
-    // TODO: Think about a helper for mapping non-member types
-    case MemberLookupResult.memberResults([]):
-      return Result.failure(Failure.noTypeMember(member: typeMember, in: MemberLookupResult.memberResults([])))
+    // 'Compositions' of count == 0 (e.g. `Int.Type`) have no nominal types
+    // and are automatically diagnosed at the end of the function.
+    case .memberResults(let types):
+      baseTypes = types
     case MemberLookupResult.anyType:
       return Result.failure(Failure.noTypeMember(member: typeMember, in: MemberLookupResult.anyType))
     case MemberLookupResult.function(let argumentCount):
@@ -1492,7 +1489,7 @@ extension TypeResolutionFailure {
 
       // Get the member decl
       let memberTypeDeclResult = findNominalTypeMemberDecl(
-        nominalBaseType: nominalBaseType,
+        resolvedNominalBaseType: nominalBaseType,
         memberName: typeMember.name,
         memberIntroducingSyntax: typeMember.introducingSyntax,
         dependencyTracker: &memberDependencies
@@ -1566,7 +1563,7 @@ extension TypeResolutionFailure {
   ///
   /// A helper for `resolveMember` and `resolveNominalTypeDecl`.
   func findNominalTypeMemberDecl(
-    nominalBaseType: NominalTypeRef,
+    resolvedNominalBaseType: NominalTypeRef,
     memberName: Identifier,
     memberIntroducingSyntax: Attached<TypeLikeSyntax>,
     dependencyTracker memberDependencies: inout DependencyTracker
@@ -1578,7 +1575,7 @@ extension TypeResolutionFailure {
     // Look up
     let memberTypeDeclsResult: Result<[Attached<TypeDeclSyntax>], SymbolTable.QualifiedTypeLookupFailure> =
       symbolTable.findMemberType(
-        baseType: nominalBaseType,
+        baseType: resolvedNominalBaseType,
         memberTypeName: memberName,
         introducingTypeSyntax: memberIntroducingSyntax,
         introducingModule: introducingModule,
@@ -1598,7 +1595,7 @@ extension TypeResolutionFailure {
       )
     case .failure(.lookupFailure(.invalidBase)):
       fatalError(
-        "[SwiftLexicalLookup] Internal error: Base type \(nominalBaseType) was unexpectedly invalid."
+        "[SwiftLexicalLookup] Internal error: Base type \(resolvedNominalBaseType) was unexpectedly invalid."
       )
     }
 

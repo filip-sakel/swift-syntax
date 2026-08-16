@@ -654,7 +654,6 @@ extension TypeDependencyGraph {
       memberTypeName: memberTypeName,
       performLookup: directLookup(baseTypeName:memberTypeName:)
     )
-    fatalError("Meow")
 
     // Distill to type declarations (throw away declaration groups)
     return .success(result.typeDecls.map(\.1))
