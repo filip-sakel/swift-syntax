@@ -60,7 +60,7 @@ extension MemberLookupResult {
 extension MemberLookupResult: CustomDebugStringConvertible where Result: CustomDebugStringConvertible {
   public var debugDescription: String {
     _describe(describeMembers: { members in
-      members.map({ "```\($0.debugDescription)```" }).joined(separator: "\n")
+      members.map({ "`\($0.debugDescription)`" }).joined(separator: "\n")
     })
   }
 }
