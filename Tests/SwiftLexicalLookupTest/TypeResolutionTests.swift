@@ -288,28 +288,24 @@ final class TypeResolutionTests: XCTestCase {
   /// some/any types, attributed types (e.g. `inout Int`), and pack
   /// element/expansion syntax.
   func testSimpleForwardingTypes() {
-    // FIXME: Must handle genericParameterClause context in UnqualifiedTypeLookup.swift:264
-    assertTypeResolution(
-      [
-        "MyFile.swift": """
-        // Any/some types forward to the underlying protocol (but we
-        // don't actually check that the base type is a protocol)
-        \("🟥", name: "_(MyFile.swift)::A")
-        protocol A {}
+    assertTypeResolution([
+      "MyFile.swift": """
+      // Any/some types forward to the underlying protocol (but we
+      // don't actually check that the base type is a protocol)
+      \("🟥", name: "_(MyFile.swift)::A")
+      protocol A {}
 
-        func f(_: \(nominal: "🟥")some A)
-        func g(_: \(nominal: "🟥")any A)
+      func f(_: \(nominal: "🟥")some A)
+      func g(_: \(nominal: "🟥")any A)
 
-        // Attributed types (and modifiers)
-        func h(_: @escaping \(type: .function(argumentCount: 0))() -> Void)
-        func i(_: sending \(nominal: "🟥")A)
+      // Attributed types (and modifiers)
+      func h(_: @escaping \(type: .function(argumentCount: 0))() -> Void)
+      func i(_: sending \(nominal: "🟥")A)
 
-        // Pack elements & expansions
-        func f<each T>(_: \(failure: .genericParameterOrAssociatedType)(repeat each T)) {}
-        """ as LexicalLookupSource
-      ],
-      verbose: true
-    )
+      // Pack elements & expansions
+      func f<each T>(_: \(failure: .genericParameterOrAssociatedType)(repeat each T)) {}
+      """ as LexicalLookupSource
+    ])
   }
 
   // MARK: Generic Parameters & Associated Types
@@ -367,12 +363,16 @@ final class TypeResolutionTests: XCTestCase {
 
   // MARK: Alias Cycles
 
-  func testSimpleCycle() {
+  func testSimpleCycles() {
     assertTypeResolution([
       "MyFile.swift": """
       typealias A = \(failure: .cyclicalTypeReference(cycle: ["B", "A"]))B
       typealias B = A
       func f(_: \(failure: .cyclicalTypeReference(cycle: ["B", "A"]))A)
+
+      // Self referencing alias
+      typealias C = \(failure: .cyclicalTypeReference(cycle: ["C"]))C
+      func g(_: \(failure: .cyclicalTypeReference(cycle: ["C"]))C)
       """ as LexicalLookupSource
     ])
   }
@@ -461,11 +461,30 @@ final class TypeResolutionTests: XCTestCase {
 
         struct B {}
 
-        typealias A = \(failure: .invalidComposition([
+        typealias C = \(failure: .invalidComposition([
           ("((A, B) -> Int)", .cannotComposeNonClassOrProtocol(resolved: .function(argumentCount: 2))),
           ("A", .cannotComposeNonClassOrProtocol(resolved: .memberResults(["🟥"]))),
         ]))
         ((A, B) -> Int) & A
+        """ as LexicalLookupSource
+      ]
+    )
+  }
+
+  func testSelfReferencingAlias() {
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        struct A {}
+
+        \("🟥", name: "_(MyFile.swift)::A")
+        // Cannot compose non nominal types
+        struct B {}
+
+        // type alias 'A' references 'A' in its initializer
+        typealias A = \(failure: .invalidComposition([
+          ("A", .ambiguousTypeDecl(["struct A {}", "typealias A = A & ~Escapable"])),
+        ]))A & ~Escapable
         """ as LexicalLookupSource
       ]
     )

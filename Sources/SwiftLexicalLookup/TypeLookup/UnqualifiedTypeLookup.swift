@@ -204,8 +204,9 @@ extension Attached {
         // by a `WithStatementsSyntax` scope. The only non-`WithStatementsSyntax`
         // scopes are:
         // 1. implicit `Self` inside an `AccessorDeclSyntax` or an `ExtensionDeclSyntax`,
-        // 2. `guard` statements (which can't introduce types), and
-        // 3. associated types inside protocol declarations
+        // 2. `associatedtype`s inside `protocol` declarations
+        // 3. generic parameters inside a generic-parameter clause
+        // 4. (`guard` statements -- which can't introduce types)
         //
         // Rationale: We surface regular type decls introduced in a declaration
         // group with `.lookForMembers`, since qualified lookup needs to handle
@@ -258,6 +259,15 @@ extension Attached {
           return UnqualifiedTypeLookupResult.lookForMember(
             declGroupParent: castChild(DeclGroupSyntaxType(protocolParent)),
             lookForSelf: false
+          )
+        } else if scope.is(GenericParameterClauseSyntax.self) {
+          // Use file scope for generic parameters. The parent scope
+          // doesn't matter because we ultimately give up on generic parameters.
+          // TODO: Should we create another enum case or maybe return the decl group?
+          return UnqualifiedTypeLookupResult.nonNestedTypeDecl(
+            decl: firstTypeDecl,
+            redeclarations: redeclarations,
+            parentScope: castChild(self.fileRoot.statements)
           )
         } else {
           // Shouldn't happen; TODO: Make sure

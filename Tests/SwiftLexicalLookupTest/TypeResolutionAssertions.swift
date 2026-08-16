@@ -347,7 +347,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Describe the lookup failure
       let actualFailureDescription = actualFailure._describeDebug(
-        resolveMininalNominal: \.nominalTypeRef.globalName.debugDescription,
+        resolveMininalNominal: { $0.nominalTypeRef.globalName?.debugDescription ?? "" },
         resolveExtendedNominal: \.debugDescription
       )
 
@@ -355,7 +355,8 @@ extension TypeResolutionMatcher: LexicalMatcher {
       if expectedFailureDescription != actualFailureDescription {
         failures.append(
           ExpectationFailure.other(
-            failure: "Failure mismatch. Expected: '\(expectedFailureDescription)'. Got: '\(actualFailureDescription)'"
+            failure:
+              "Failure mismatch.\nExpected: '\(expectedFailureDescription)'.\nGot     : '\(actualFailureDescription)'"
           )
         )
       }
