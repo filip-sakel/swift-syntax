@@ -241,6 +241,8 @@ public indirect enum TypeResolutionFailure<TypeName: Sendable, MinimalNominal: S
   /// type name are ambiguous; not necessarily an error, we just defer to
   /// the type checker for disambiguation.
   ///
+  /// Important: Results must be ordered by `SymbolTable.sortDeclarations`
+  ///
   /// For example:
   ///   typealias A = Bool
   ///   typealias A = Int
@@ -545,6 +547,8 @@ extension TypeResolutionFailure {
     }
     return module
   }
+
+  /// Sorts
 
   public mutating func _resolveSyntax(
     typeSyntax: Attached<TypeSyntax>,
@@ -1315,10 +1319,12 @@ extension TypeResolutionFailure {
       // If we're at top-level, consider other internal declarations
       if isTopLevel {
         // TODO: Look in the module, and add those decls
+        // IMPORTANT: Make sure results are correctly sorted
       }
 
       // Diagnose redeclarations
       guard scopeTypeDecls == [TypeDeclSyntax(nominalDecl.node)] else {
+        // Results are already sorted from lookup
         return .failure(Failure.ambiguousTypeDecl(scopeTypeDecls))
       }
 
@@ -1554,6 +1560,7 @@ extension TypeResolutionFailure {
     }
     // TODO: Ensure we're properly shadowing and not giving false-positive errors
     guard declsAndResults.count == 1 else {
+      // TODO: We should sort properly here, or figure out different specs for `ambiguousTypeDecl`
       return Result.failure(
         Failure.ambiguousTypeDecl(declsAndResults.map(\.decl.node))
       )
@@ -1617,7 +1624,8 @@ extension TypeResolutionFailure {
     //    }
     // TODO: Add ability to disambiguite shadowing/fileprivate
     guard memberTypeDecls.count == 1 else {
-      return Result.failure(Failure.ambiguousTypeDecl(memberTypeDecls.map(\.node)))
+      // TODO: Find more efficient solution (perhaps force `symbolTable.findMembers` to sort for us).
+      return Result.failure(Failure.ambiguousTypeDecl(symbolTable.sortDeclarations(memberTypeDecls).map(\.node)))
     }
     // There's just one member; return that
     return Result.success(firstTypeDecl)

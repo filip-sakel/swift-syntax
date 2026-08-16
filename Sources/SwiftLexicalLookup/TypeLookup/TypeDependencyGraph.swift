@@ -401,6 +401,11 @@ public struct TypeDependencyGraph {
       copy.version &+= 1
       // We add and sort, maintaining `_mainDecls` invariants
       copy._mainDecls.append(mainDecl)
+      // Sort the main declarations by their position in the file.
+      //
+      // Sorting works because nominal types are tracked by file (so if we have
+      // two structs `B` nested under a struct `A` in FileA.swift and FileB.swift,
+      // we diagnose the ambiguity elsewhere but can have two independent nominals).
       copy._mainDecls.sort(by: { $0.declGroup.position < $1.declGroup.position })
       return copy
     }

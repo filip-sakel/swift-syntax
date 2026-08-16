@@ -22,8 +22,13 @@ import SwiftSyntax
   public let moduleToSources: [ModuleName: [String: SourceFileSyntax]]
   let configuredRegions: ConfiguredRegions?
 
+  /// TODO: Consider merging maps below
+  //
   /// Useful map for finding the module of a file in constant time.
   private(set) lazy var moduleMap: [SourceFileSyntax: ModuleName] = _generateModuleMap()
+  /// Useful map for finding file identifiers in constant time.
+  /// E.g. `File.swift`, `Helpers/File.swift`
+  private(set) lazy var fileMap: [SourceFileSyntax: String] = _generateFileMap()
 
   /// `DebugFileMap` only has a runtime impact in DEBUG builds.
   internal lazy var debugFileMap: DebugFileMap = _generateDebugFileMap()
@@ -57,6 +62,44 @@ extension SymbolTable {
       }
     }
     return result
+  }
+
+  /// Initializes `fileMap`
+  private func _generateFileMap() -> [SourceFileSyntax: String] {
+    var result = [SourceFileSyntax: String]()
+    for (_, sources) in moduleToSources {
+      for (fileName, source) in sources {
+        result[source] = fileName
+      }
+    }
+    return result
+  }
+}
+
+extension SymbolTable {
+  /// Sorts results in increasing order by
+  /// (a) Module name (alphabetically), (b) File id (alphabetically), and (c) File position (offset).
+  ///
+  /// Helps maintain deterministic outputs.
+  func sortDeclarations(_ typeDecls: [Attached<TypeDeclSyntax>]) -> [Attached<TypeDeclSyntax>] {
+    typeDecls.sorted(by: { a, b in
+      // Compare modules
+      let moduleA = moduleMap[a.fileRoot]!.name
+      let moduleB = moduleMap[b.fileRoot]!.name
+      guard moduleA == moduleB else {
+        return moduleA < moduleB
+      }
+
+      // If modules are equal, compare file names
+      let fileA = fileMap[a.fileRoot]!
+      let fileB = fileMap[b.fileRoot]!
+      guard fileA == fileB else {
+        return fileA < fileB
+      }
+
+      // If file names are equal, compare positions
+      return a.position < b.position
+    })
   }
 }
 
