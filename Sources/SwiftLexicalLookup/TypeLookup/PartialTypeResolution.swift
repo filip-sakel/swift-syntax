@@ -125,29 +125,17 @@ extension TypeReference {
 /// Otherwise, returns the appropriate failures.
 private func _parseModuleAndIdentifier(
   moduleNameToken: TokenSyntax?,
-  nameToken: TokenSyntax,
+  name: Identifier?,
   typeSyntax: Attached<TypeSyntax>
 ) -> Result<TypeReference, InvalidTypeIdentifierFailure> {
-  switch (moduleNameToken.map({ Identifier(validating: $0) }), Identifier(validating: nameToken)) {
+  switch (moduleNameToken.map({ Identifier(validating: $0) }), name) {
   // Valid cases are:
   // (a) no module, valid name
   case (nil, let name?):
-    return .success(
-      TypeReference(
-        module: nil,
-        name: name,
-        introducingSyntax: typeSyntax
-      )
-    )
+    return .success(TypeReference(module: nil, name: name, introducingSyntax: typeSyntax))
   // (b) valid module, valid name
   case (let moduleName??, let name?):
-    return .success(
-      TypeReference(
-        module: moduleName,
-        name: name,
-        introducingSyntax: typeSyntax
-      )
-    )
+    return .success(TypeReference(module: moduleName, name: name, introducingSyntax: typeSyntax))
   // Invalid cases
   // (c) invalid name/module
   case (_, nil), (nil?, _):
@@ -202,7 +190,7 @@ extension Attached where Node: TypeSyntaxProtocol {
       // According to the docs, `moduleSelector.moduleName` should be an identifier
       // and `name` is an identifier, `Self`, `Any` or `_`. Here's how we handle each:
       let moduleNameToken = identifierType.moduleSelector?.moduleName
-      let nameToken: TokenSyntax
+      let name: Identifier?
       switch (identifierType.moduleSelector, identifierType.name.tokenKind) {
       // === Wildcard `_` ===
       // We can't do anything smart, so we defer to the type checker.
@@ -232,7 +220,7 @@ extension Attached where Node: TypeSyntaxProtocol {
       case (nil, .keyword(.Any)):
         return Result.success(PartiallyResolvedType.anyType)
       case (_?, .keyword(.Any)):
-        nameToken = identifierType.name.with(\.tokenKind, .identifier("Any"))
+        name = Identifier(canonicalName: "Any")
       // === `Self` ===
       // Basically the opposite of `Any`: Whether with or without a module
       // selector, we treat "Self" like the backtick-escaped identifier
@@ -263,15 +251,15 @@ extension Attached where Node: TypeSyntaxProtocol {
       //   struct A { struct B {}; func f(_: MyModule::B) }
       //  fails because `B` is nested within `A`.
       case (_, .keyword(.Self)):
-        nameToken = identifierType.name.with(\.tokenKind, .identifier("Self"))
+        name = Identifier(canonicalName: "Self")
       default:
-        nameToken = identifierType.name
+        name = Identifier(validating: identifierType.name)
       }
 
       // Parse the module name (if provided), and the type name
       let parsedResult = _parseModuleAndIdentifier(
         moduleNameToken: moduleNameToken,
-        nameToken: nameToken,
+        name: name,
         typeSyntax: _castChild(TypeSyntax(identifierType))
       )
       return Result.success(PartiallyResolvedType.typeIdentifier(parsedResult))
@@ -302,20 +290,19 @@ extension Attached where Node: TypeSyntaxProtocol {
       // type lookup fails:
       //   let _: Int.`self` // ❌ error: 'self' is not a member type of struct 'output.A'
       //   let _: Int.self   // ❌ error: (same exact error)
-      // TODO: Handle implicit `.self` lookup. E.g. 'Int.self' vs 'Int.`self`' are different.
       let moduleNameToken = memberType.moduleSelector?.moduleName
-      let nameToken: TokenSyntax
+      let name: Identifier?
       if memberType.name.tokenKind == .keyword(.`self`) {
-        nameToken = memberType.name.with(\.tokenKind, .identifier("self"))
+        name = Identifier(canonicalName: "self")
       } else {
-        nameToken = memberType.name
+        name = Identifier(validating: memberType.name)
       }
 
       // Parse the module name (if provided), and member-type name; then,
       // append to base types
       let parsedResult = _parseModuleAndIdentifier(
         moduleNameToken: moduleNameToken,
-        nameToken: nameToken,
+        name: name,
         typeSyntax: _castChild(TypeSyntax(memberType))
       )
       return Result.success(

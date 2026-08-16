@@ -545,18 +545,31 @@ final class TypeResolutionTests: XCTestCase {
     ])
   }
   func testLocalTopLevelSelf() {
-    // TODO: Test second occurance of `Self` succeeds
-    assertTypeResolution([
-      "MyFile.swift": """
-      func f() {
-        func g() { let _: \(failure: .noTypeInScope)Self }
-        \("🟩")
-        struct A {
-          func h() { let _: \(nominal: "🟩")Self }
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        func f() {
+          func g() { let _: \(failure: .noTypeInScope)Self }
+          \("🟩")
+          struct A {
+            func h() { let _: \(nominal: "🟩")Self }
+          }
         }
-      }
-      """
-    ])
+        """
+      ],
+      verbose: true
+    )
+    // assertTypeResolution([
+    //   "MyFile.swift": """
+    //   func f() {
+    //     func g() { let _: \(failure: .noTypeInScope)Self }
+    //     \("🟩")
+    //     struct A {
+    //       func h() { let _: \(nominal: "🟩")Self }
+    //     }
+    //   }
+    //   """
+    // ])
   }
 
   // MARK: Extensions

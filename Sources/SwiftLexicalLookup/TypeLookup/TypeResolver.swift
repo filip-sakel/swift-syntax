@@ -599,13 +599,6 @@ extension TypeResolutionFailure {
       return Result.success(.function(argumentCount: argumentCount))
     case .success(.tuple(let labels)):
       return Result.success(.tuple(labels: labels))
-    // case .metatype(of: _):
-    //   // // Empty type case
-    //   // guard let firstTypeReferenceResult = typeReferenceResults.first else {
-    //   //   log("Resolved \(typeSyntax.trimmedDescription) to empty type")
-    //   //   return Result.success(.memberResults([]))
-    //   // }
-    //   return Result.success(MemberLookupResult.memberResults([]))
     case .success(.typeIdentifier(.success(let component))):
       return resolveTypeReference(
         typeComponent: ImplicitTypeReferenceComponent(from: component),

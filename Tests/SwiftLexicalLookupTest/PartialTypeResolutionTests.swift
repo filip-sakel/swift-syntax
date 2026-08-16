@@ -82,6 +82,7 @@ final class PartialTypeResolutionTests: XCTestCase {
       typeSyntax: "Any",
       result: .success(.anyType)
     )
+
     // Suppressed
     assertPartialResolutionResult(
       typeSyntax: "~Copyable",
@@ -166,13 +167,6 @@ final class PartialTypeResolutionTests: XCTestCase {
         .typeIdentifier(.failure(InvalidTypeIdentifierFailure()))
       )
     )
-    // Escaped `Any`
-    assertPartialResolutionResult(
-      typeSyntax: "`Any`",
-      result: .success(
-        .typeIdentifier(.success(TypeReference(name: "Any")))
-      )
-    )
 
     // Members
     assertPartialResolutionResult(
@@ -198,7 +192,7 @@ final class PartialTypeResolutionTests: XCTestCase {
         )
       )
     )
-    // Test 'Self' and '`Self`'
+    // Test 'Self' and '`Self`' members (not special)
     assertPartialResolutionResult(
       typeSyntax: "(() -> Int).Self",
       result: .success(
@@ -219,6 +213,49 @@ final class PartialTypeResolutionTests: XCTestCase {
             TypeReference(name: "Self")
           )
         )
+      )
+    )
+
+    // Keywords that turns into identifiers
+    //
+    // Escaped `Any`
+    assertPartialResolutionResult(
+      typeSyntax: "`Any`",
+      result: .success(
+        .typeIdentifier(.success(TypeReference(name: "Any")))
+      )
+    )
+    // Module+Any keyword -> type identifier
+    assertPartialResolutionResult(
+      typeSyntax: "MyModule::Any",
+      result: .success(.typeIdentifier(.success(TypeReference(module: "MyModule", name: "Any"))))
+    )
+    // Self -> type identifier
+    assertPartialResolutionResult(
+      typeSyntax: "Self",
+      result: .success(.typeIdentifier(.success(TypeReference(name: "Self"))))
+    )
+    assertPartialResolutionResult(
+      typeSyntax: "MyModule::Self",
+      result: .success(.typeIdentifier(.success(TypeReference(module: "MyModule", name: "Self"))))
+    )
+    // .self -> type identifier
+    assertPartialResolutionResult(
+      typeSyntax: "A.`self`",
+      result: .success(
+        .member(base: "A", memberComponent: .success(TypeReference(name: "self")))
+      )
+    )
+    assertPartialResolutionResult(
+      typeSyntax: "A.self",
+      result: .success(
+        .member(base: "A", memberComponent: .success(TypeReference(name: "self")))
+      )
+    )
+    assertPartialResolutionResult(
+      typeSyntax: "A.Module::self",
+      result: .success(
+        .member(base: "A", memberComponent: .success(TypeReference(module: "Module", name: "self")))
       )
     )
   }
