@@ -288,24 +288,28 @@ final class TypeResolutionTests: XCTestCase {
   /// some/any types, attributed types (e.g. `inout Int`), and pack
   /// element/expansion syntax.
   func testSimpleForwardingTypes() {
-    assertTypeResolution([
-      "MyFile.swift": """
-      // Any/some types forward to the underlying protocol (but we
-      // don't actually check that the base type is a protocol)
-      \("🟥", name: "_(MyFile.swift)::A")
-      protocol A {}
+    // FIXME: Must handle genericParameterClause context in UnqualifiedTypeLookup.swift:264
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        // Any/some types forward to the underlying protocol (but we
+        // don't actually check that the base type is a protocol)
+        \("🟥", name: "_(MyFile.swift)::A")
+        protocol A {}
 
-      func f(_: \(nominal: "🟥")some A)
-      func g(_: \(nominal: "🟥")any A)
+        func f(_: \(nominal: "🟥")some A)
+        func g(_: \(nominal: "🟥")any A)
 
-      // Attributed types (and modifiers)
-      func h(_: @escaping \(type: .function(argumentCount: 0))() -> Void)
-      func i(_: sending \(nominal: "🟥")A)
+        // Attributed types (and modifiers)
+        func h(_: @escaping \(type: .function(argumentCount: 0))() -> Void)
+        func i(_: sending \(nominal: "🟥")A)
 
-      // Pack elements & expansions
-      func f<each T>(_: \(failure: .genericParameterOrAssociatedType)(repeat each T)) {}
-      """ as LexicalLookupSource
-    ])
+        // Pack elements & expansions
+        func f<each T>(_: \(failure: .genericParameterOrAssociatedType)(repeat each T)) {}
+        """ as LexicalLookupSource
+      ],
+      verbose: true
+    )
   }
 
   // MARK: Generic Parameters & Associated Types

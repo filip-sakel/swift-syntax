@@ -549,14 +549,6 @@ extension GlobalNominalTypeRef {
   }
 }
 
-extension NominalTypeRef {
-  @_spi(_QualifiedLookupTests) public var globalName: GlobalTypeName? {
-    guard case .global(let globalReference) = storage else { return nil }
-
-    return globalReference.name
-  }
-}
-
 extension TypeDependencyGraph {
   @_spi(_QualifiedLookupTests) public enum QualifiedTypeLookupFailure: Error {
     /// References non-registered base type
@@ -2163,6 +2155,21 @@ extension NominalTypeRef: CustomDebugStringConvertible {
     case .local(let nominalDecl):
       return "\(nominalDecl.node._memberlessDescription) (local)"
     }
+  }
+
+  public var _succinctDescription: String {
+    switch storage {
+    case .global(let globalReference):
+      return globalReference.name.debugDescription
+    case .local(let nominalDecl):
+      return "\(nominalDecl.node._memberlessDescription)"
+    }
+  }
+
+  public var globalName: GlobalTypeName? {
+    guard case .global(let globalReference) = storage else { return nil }
+
+    return globalReference.name
   }
 }
 
