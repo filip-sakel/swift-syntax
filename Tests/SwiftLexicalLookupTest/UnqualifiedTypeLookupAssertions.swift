@@ -44,6 +44,7 @@ extension UnqualifiedTypeLookupMatcher.Definition: LexicalAnnotation, Identifiab
     file: StaticString,
     line: UInt
   ) -> CodeBlockItemListSyntax? {
+    // Get the code block, then the statements
     LexicalAssertionUtilities.findDirectParent(
       from: token,
       ofType: CodeBlockSyntax.self,

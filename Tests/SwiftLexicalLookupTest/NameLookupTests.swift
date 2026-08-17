@@ -570,26 +570,6 @@ final class NameLookupTests: XCTestCase {
     )
   }
 
-  func testStatic() {
-    // FIXME
-    assertLexicalNameLookup(
-      source: """
-        struct A {
-          1️⃣func a() {}
-          func b() {
-            2️⃣a()
-          }
-        }
-        """,
-      references: [
-        "2️⃣": [
-          .lookForMembers(StructDeclSyntax.self)
-        ]
-      ],
-      expectedResultTypes: .all(IdentifierPatternSyntax.self)
-    )
-  }
-
   func testImplicitSelf() {
     assertLexicalNameLookup(
       source: """
@@ -607,7 +587,6 @@ final class NameLookupTests: XCTestCase {
         """,
       references: [
         "3️⃣": [
-          // TODO: Shouldn't we also return a `.fromScope(StructDeclSyntax.self, expectedNames: .implicit(.Self(...))`
           .lookForMembers(StructDeclSyntax.self),
           .fromScope(ExtensionDeclSyntax.self, expectedNames: [NameExpectation.implicit(.Self("7️⃣"))]),
           .lookForGenericParameters,
@@ -810,6 +789,7 @@ final class NameLookupTests: XCTestCase {
       ]
     )
   }
+
   func testTypeDeclAvailabilityInTopLevel() {
     let declExpectation: [ResultExpectation] = [
       .fromScope(

@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+@_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) import SwiftLexicalLookup
 import SwiftParser
 import SwiftSyntax
 import XCTest
@@ -401,5 +402,61 @@ enum LexicalAssertionUtilities {
     {
       failures.append(.invalidResultOrder(expected: expected, actual: actual))
     }
+  }
+}
+
+// MARK: Attached + String Literal
+
+public protocol ParsableByAttached: SyntaxProtocol {
+  static func fileContents(syntaxString: String) -> String
+}
+
+extension TypeSyntax: ParsableByAttached {
+  public static func fileContents(syntaxString: String) -> String {
+    "typealias = \(syntaxString)"
+  }
+}
+extension TypeDeclSyntax: ParsableByAttached {
+  public static func fileContents(syntaxString: String) -> String {
+    // Type declarations parse as declarations
+    syntaxString
+  }
+}
+extension GenericParameterSyntax: ParsableByAttached {
+  public static func fileContents(syntaxString: String) -> String {
+    // Create a fake function to parse `< ... >` as a GenericParameterClauseSyntax
+    "func <\(syntaxString)>"
+  }
+}
+extension GenericParameterClauseSyntax: ParsableByAttached {
+  public static func fileContents(syntaxString: String) -> String {
+    // Create a fake function to parse the given `<T1, ..., TN>`
+    // as a GenericParameterClauseSyntax
+    "func \(syntaxString)"
+  }
+}
+extension ExtensionDeclSyntax: ParsableByAttached {
+  public static func fileContents(syntaxString: String) -> String { syntaxString }
+}
+extension DeclGroupSyntaxType: ParsableByAttached {
+  public static func fileContents(syntaxString: String) -> String { syntaxString }
+}
+
+// TODO: Merge with Attached.typeSyntax(_)
+extension Attached: ExpressibleByStringLiteral
+    & ExpressibleByExtendedGraphemeClusterLiteral
+    & ExpressibleByUnicodeScalarLiteral
+where
+  Node: ParsableByAttached
+{
+  public init(stringLiteral: String) {
+    // Wrap the type syntax in a file
+    var parser = Parser(Node.fileContents(syntaxString: stringLiteral))
+    let sourceFile = SourceFileSyntax.parse(from: &parser)
+    guard let castSyntax = sourceFile.children(ofType: Node.self).first else {
+      fatalError("Couldn't parse `\(stringLiteral)` as \(Node.self).")
+    }
+    // We should now be able to cast to SourceFileRoot
+    self = Attached(castSyntax)!
   }
 }
