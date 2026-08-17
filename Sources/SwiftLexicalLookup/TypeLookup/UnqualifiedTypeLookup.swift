@@ -24,6 +24,13 @@ public enum GenericUnqualifiedTypeLookupResult<Scope: Sendable> {
     parentScope: Scope
   )
 
+  /// Parameters are guaranteed to be nonempty.
+  case genericParameters(
+    firstMatch: Attached<GenericParameterSyntax>,
+    redeclarations: [Attached<GenericParameterSyntax>],
+    genericClause: Attached<GenericParameterClauseSyntax>
+  )
+
   /// Search for the given type declaration as a member of `declGroupParent`.
   /// If `lookForSelf==true`, then we're not looking for the identifier `Self`,
   /// but for implicit `Self` instead.
@@ -67,6 +74,32 @@ extension Attached /* <SyntaxNode> */ {
     let filteredResults = results.compactMap({ result -> UnqualifiedTypeLookupResult? in
       switch result {
       case .fromScope(let scope, let names):
+        // Handle generic parameters separately
+        if let genericParameterClause = scope.as(GenericParameterClauseSyntax.self) {
+          // Cast parameters to `GenericParameterSyntax`
+          let parameters = names.map({ name in
+            guard
+              case .identifier(let rawParameter, _) = name,
+              let parameter = rawParameter.as(GenericParameterSyntax.self)
+            else {
+              fatalError(
+                "[SwiftLexicalLookup] Internal error: Got unexpected name '\(name)' from a `GenericParameterClauseSyntax` scope."
+              )
+            }
+            return castChild(parameter)
+          })
+          guard let firstParameter = parameters.first else {
+            fatalError(
+              "[SwiftLexicalLookup] Internal error: Unqualified lookup unexpectedly returned empty names in `.fromScope`."
+            )
+          }
+          return UnqualifiedTypeLookupResult.genericParameters(
+            firstMatch: firstParameter,
+            redeclarations: Array(parameters[1...]),
+            genericClause: castChild(genericParameterClause)
+          )
+        }
+
         // Note that we skip non-type declarations, even if they have the same name.
         // For instance:
         //   struct A {
@@ -138,7 +171,7 @@ extension Attached /* <SyntaxNode> */ {
         // scopes are:
         // 1. implicit `Self` inside an `AccessorDeclSyntax` or an `ExtensionDeclSyntax`,
         // 2. `associatedtype`s inside `protocol` declarations
-        // 3. generic parameters inside a generic-parameter clause
+        // 3. (generic parameters inside a generic-parameter clause -- handled above)
         // 4. (`guard` statements -- which can't introduce types)
         //
         // Rationale: We surface regular type decls introduced in a declaration
@@ -193,15 +226,6 @@ extension Attached /* <SyntaxNode> */ {
             declGroupParent: castChild(DeclGroupSyntaxType(protocolParent)),
             lookForSelf: false
           )
-        } else if scope.is(GenericParameterClauseSyntax.self) {
-          // Use file scope for generic parameters. The parent scope
-          // doesn't matter because we ultimately give up on generic parameters.
-          // TODO: Should we create another enum case or maybe return the decl group?
-          return UnqualifiedTypeLookupResult.nonNestedTypeDecl(
-            decl: firstTypeDecl,
-            redeclarations: redeclarations,
-            parentScope: castChild(self.fileRoot.statements)
-          )
         } else {
           // Shouldn't happen; TODO: Make sure
           fatalError(
@@ -238,13 +262,18 @@ extension GenericUnqualifiedTypeLookupResult {
   public func _describe(describeScope: (Scope) -> String) -> String {
     switch self {
     case .nonNestedTypeDecl(let decl, let redeclarations, let parentScope):
-      let redeclsDescriptions = redeclarations.map(\._memberlessDescription).joined(separator: ", ")
+      let declsDescription = ([decl] + redeclarations).map({ "`\($0._memberlessDescription)`" }).joined(separator: ", ")
       return
-        ".nonNestedTypeDecl(decl: `\(decl._memberlessDescription)`, redeclarations: [\(redeclsDescriptions)], parentScope: '\(describeScope(parentScope))')"
+        ".nonNestedTypeDecl(decls: \(declsDescription), parentScope: '\(describeScope(parentScope))')"
+    case .genericParameters(let firstMatch, let redeclarations, let genericClause):
+      let params = [firstMatch] + redeclarations
+      let paramsDescription = params.map(\.node.name.trimmedDescription).joined(separator: ", ")
+      return
+        ".genericParameters(parameters: \(paramsDescription), genericClause: \(genericClause.trimmedDescription))"
     case .lookForMember(let declGroupParent, let lookForSelf):
       return ".lookForMember(declGroupParent: `\(declGroupParent._memberlessDescription)`, lookForSelf: \(lookForSelf))"
     case .lookForGenericParameters(let extensionDecl):
-      return ".lookForGenericParameters(in: \(extensionDecl._memberlessDescription))"
+      return ".lookForGenericParameters(in: `\(extensionDecl._memberlessDescription)`)"
     case .lookInModule:
       return ".lookInModule"
     case .lookInImports(let imports):
@@ -257,6 +286,11 @@ extension GenericUnqualifiedTypeLookupResult {
     switch self {
     case .nonNestedTypeDecl(let decl, redeclarations: _, let parentScope):
       return "`\(decl._memberlessDescription)` [in '\(describeScope(parentScope))']"
+    case .genericParameters(let firstMatch, let redeclarations, let genericClause):
+      let params = [firstMatch] + redeclarations
+      let paramsDescription = params.map(\.node.name.trimmedDescription).joined(separator: ", ")
+      return
+        ".genericParameters(parameters: \(paramsDescription), genericClause: \(genericClause.trimmedDescription))"
     case .lookForMember(let declGroupParent, let lookForSelf):
       // E.g. 'extension A {}' > 'B'
       let memberSearchDescription = " > '\(lookedUpName.name)'"

@@ -871,6 +871,12 @@ extension TypeResolutionFailure {
         ).map({ MemberLookupResult.memberResults([$0]) })
         // To find the member
         lookForSelectedMember = !lookForSelf
+
+      case .genericParameters(firstMatch: _, redeclarations: _, genericClause: _):
+        // TODO: Should we throw if we get redeclarations?
+        // (do the same in `.lookForGenericParameters`)
+        return .failure(.genericParameterOrAssociatedType)
+
       case .lookForGenericParameters(let extensionDecl):
         // TODO: Implement logging for all unqualified lookup results
         let matchingGenericParameterResult: Result<GenericParameterSyntax?, Failure> = withLogging(

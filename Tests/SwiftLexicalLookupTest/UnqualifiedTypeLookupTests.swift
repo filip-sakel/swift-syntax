@@ -65,37 +65,39 @@ final class UnqualifiedTypeLookupTests: XCTestCase {
       """
       // Test simple member type at top level
       struct A {
-        let _: B\(results: [
+        let _: \(results: [
           .lookForMember(declGroupParent: "struct A {}", lookForSelf: false),
           .lookInModule
-        ])
+        ])B
 
         struct B {
-          let _: B\(results: [
+          let _: \(results: [
             .lookForMember(declGroupParent: "struct B {}", lookForSelf: false),
             .lookForMember(declGroupParent: "struct A {}", lookForSelf: false),
             .lookInModule
-          ])
+          ])B
         }
       }
 
       // Test nested member types in local scopes
-      func f() {
+      func f() \("🟩"){
         struct C {
-          let _: C \(results: [
+          let _: \(results: [
             .lookForMember(declGroupParent: "struct C {}", lookForSelf: false),
+            .decls(["struct C {}"], inScope: "🟩"),
             .lookInModule
-          ])
+          ])C
 
           func g() {
             struct D {
               struct C {
-                let _: C\(results: [
+                let _: \(results: [
                   .lookForMember(declGroupParent: "struct C {}", lookForSelf: false),
                   .lookForMember(declGroupParent: "struct D {}", lookForSelf: false),
                   .lookForMember(declGroupParent: "struct C {}", lookForSelf: false),
+                  .decls(["struct C {}"], inScope: "🟩"),
                   .lookInModule
-                ])
+                ])C
               }
             }
           }
@@ -105,19 +107,21 @@ final class UnqualifiedTypeLookupTests: XCTestCase {
       // Test nested member types in an extension
       extension T {
         struct C {
-          let _: D\(results: [
+          let _: \(results: [
             .lookForMember(declGroupParent: "struct C {}", lookForSelf: false),
+            .lookForGenericParameters(extensionDecl: "extension T {}"),
             .lookForMember(declGroupParent: "extension T {}", lookForSelf: false),
             .lookInModule
-          ])
+          ])D
 
           struct D {
-            let _: D\(results: [
+            let _: \(results: [
               .lookForMember(declGroupParent: "struct D {}", lookForSelf: false),
               .lookForMember(declGroupParent: "struct C {}", lookForSelf: false),
+              .lookForGenericParameters(extensionDecl: "extension T {}"),
               .lookForMember(declGroupParent: "extension T {}", lookForSelf: false),
               .lookInModule
-            ])
+            ])D
           }
         }
       }
@@ -128,33 +132,40 @@ final class UnqualifiedTypeLookupTests: XCTestCase {
   func testGenericParameters() {
     assertUnqualifiedTypeLookup(
       """
-      extension MyType \("🟩"){
-        let _: A\(results: [
+      extension MyType {
+        let _: \(results: [
           .lookForGenericParameters(extensionDecl: "extension MyType {}"),
+          .lookForMember(declGroupParent: "extension MyType {}", lookForSelf: false),
           .lookInModule,
-        ])
+        ])A
 
-        struct Nested<A> \("🟨"){
-          let _: A\(results: [
-            .decls([.genericParameter("A")], inScope: "🟨"),
+        struct Nested<A, Random1> {
+          let _: \(results: [
+            .genericParameters(["A"], inClause: "<A, Random1>"),
+            .lookForMember(declGroupParent: "struct Nested<A, Random1> {}", lookForSelf: false),
             .lookForGenericParameters(extensionDecl: "extension MyType {}"),
+            .lookForMember(declGroupParent: "extension MyType {}", lookForSelf: false),
             .lookInModule,
-          ])
+          ])A
 
-          func f<A, B>() \("🟪"){
-            let _: A\(results: [
-              .decls([.genericParameter("A")], inScope: "🟪"),
-              .decls([.genericParameter("A")], inScope: "🟨"),
+          func f<A, B, Random2>() {
+            let _: \(results: [
+              .genericParameters(["A"], inClause: "<A, B, Random2>"),
+              .genericParameters(["A"], inClause: "<A, Random1>"),
+              .lookForMember(declGroupParent: "struct Nested<A, Random1> {}", lookForSelf: false),
               .lookForGenericParameters(extensionDecl: "extension MyType {}"),
+              .lookForMember(declGroupParent: "extension MyType {}", lookForSelf: false),
               .lookInModule,
-            ])
+            ])A
 
             do { // nested sequential scope
-              let _: B\(results: [
-                .decls([.genericParameter("A")], inScope: "🟪"),
+              let _: \(results: [
+                .genericParameters(["B"], inClause: "<A, B, Random2>"),
+                .lookForMember(declGroupParent: "struct Nested<A, Random1> {}", lookForSelf: false),
                 .lookForGenericParameters(extensionDecl: "extension MyType {}"),
+                .lookForMember(declGroupParent: "extension MyType {}", lookForSelf: false),
                 .lookInModule,
-              ])
+              ])B
             }
           }
         }
@@ -162,87 +173,100 @@ final class UnqualifiedTypeLookupTests: XCTestCase {
       """
     )
   }
-  func testAssociatedTypes() {
+  func testNestedProtocol() {
     assertUnqualifiedTypeLookup(
       """
       // Simple case
-      protocol ProtoA \("🟩"){
+      protocol ProtoA {
         associatedtype A
         associatedtype B
 
-        func f() -> A\(results: [
-          .decls(["associatedtype A"], inScope: "🟩"),
+        func f() -> \(results: [
           .lookForMember(declGroupParent: "protocol ProtoA {}", lookForSelf: false),
           .lookInModule,
-        ])
+        ])A
       }
 
       // Protocol inside a struct
-      struct B<B> \("🟨"){
+      struct B<B> {
         typealias B
-        associatedtype B // Structs can't have associated types
+        associatedtype B
 
         // Protocols can only be declared in non generic structs, but
         // we don't diagnose here
-        protocol B \("🟪"){
+        protocol B {
           associatedtype B
 
-          func f() -> B\(results: [
-            .decls(["associatedtype B"], inScope: "🟪"),
+          func f() -> \(results: [
             .lookForMember(declGroupParent: "protocol B {}", lookForSelf: false),
-            .decls(["typealias B"], inScope: "🟨"),
+            .genericParameters(["B"], inClause: "<B>"),
             .lookForMember(declGroupParent: "struct B<B> {}", lookForSelf: false),
             .decls(["struct B<B> {}"], inScope: nil),
             .lookInModule,
-          ])
+          ])B
 
         }
-      }
-
-      // Extensions also can't have associated types
-      extension A {
-        associatedtype A
-
-        func f() -> A\(results: [
-          .lookForMember(declGroupParent: "extension A {}", lookForSelf: false),
-          .lookInModule
-        ])
       }
       """
     )
   }
+
   func testImplicitSelf() {
     // Protocols, extensions; note limitation (link to issue?)
 
     // Implicit `Self` only appears in extensions and protocols
     // https://github.com/swiftlang/swift-syntax/pull/2852#discussion_r1775049671
+    //
+    // Note: In the protocol case, implicit `Self` trumps other `Self` declarations, e.g.:
+    // ```swift
+    // protocol P {
+    //     typealias `Self` = Int
+    //     func f() -> Self
+    // }
+    //
+    // func g(x: some P) -> some P { x.f() } // ✅
+    // ```
+    //
+    // However, extension exhibit a different behavior:
+    // ```swift
+    // struct A {
+    //     typealias `Self` = Int
+    // }
+    // extension A {
+    //     func f() -> `Self` { Int() }
+    // }
+    // ```
+    // The difference with extensions might be explained by the aforementioned
+    // GitHub issue.
     assertUnqualifiedTypeLookup(
       """
       // Protocol
       protocol P {
-        func f() -> Self\(results: [
-          .lookForMember(declGroupParent: "protocol P", lookForSelf: false),
+        func f() -> \(results: [
           // Implicit `Self`
-          .lookForMember(declGroupParent: "protocol P", lookForSelf: true),
+          .lookForMember(declGroupParent: "protocol P {}", lookForSelf: true),
+          .lookForMember(declGroupParent: "protocol P {}", lookForSelf: false),
           .lookInModule
-        ])
+        ])Self
       }
 
       // Extension
       extension A {
         func f() {
-          let _: Self\(results: [
-            .lookForMember(declGroupParent: "extension A", lookForSelf: false),
-            .lookForMember(declGroupParent: "extension A", lookForSelf: true),
+          let _: \(results: [
+            .lookForMember(declGroupParent: "extension A {}", lookForSelf: true),
+            .lookForGenericParameters(extensionDecl: "extension A {}"),
+            .lookForMember(declGroupParent: "extension A {}", lookForSelf: false),
             .lookInModule
-          ])
+          ])Self
 
           func g() {
-            let _: Self\(results: [
-              .lookForMember(declGroupParent: "extension A", lookForSelf: false),
-              .lookForMember(declGroupParent: "extension A", lookForSelf: true),
+            let _: \(results: [
+              .lookForMember(declGroupParent: "extension A {}", lookForSelf: true),
+              .lookForGenericParameters(extensionDecl: "extension A {}"),
+              .lookForMember(declGroupParent: "extension A {}", lookForSelf: false),
               .lookInModule
-            ])
+            ])Self
           }
         }
       }

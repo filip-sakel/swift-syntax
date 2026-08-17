@@ -63,8 +63,6 @@ extension UnqualifiedTypeLookupMatcher.Definition: LexicalAnnotation, Identifiab
 
 // MARK: `Expectation` Conformances
 
-// Invariant: A correctly parsed `IdentifierTypeSyntax` will have a
-// non-nil `Identifier(validating: name)`.
 extension UnqualifiedTypeLookupMatcher.Expectation: LexicalAnnotation {
   typealias SyntaxReference = IdentifierTypeSyntax
 
@@ -74,34 +72,12 @@ extension UnqualifiedTypeLookupMatcher.Expectation: LexicalAnnotation {
     file: StaticString,
     line: UInt
   ) -> IdentifierTypeSyntax? {
-    // Get the identifier syntax
-    let identifierTypeSyntax = LexicalAssertionUtilities.findDirectParent(
+    LexicalAssertionUtilities.findDirectParent(
       from: token,
       ofType: IdentifierTypeSyntax.self,
       file: file,
       line: line
     )
-    guard let identifierTypeSyntax else { return nil }
-
-    // Ensure name is valid to uphold invariant above
-    guard Identifier(validating: identifierTypeSyntax.name) != nil else {
-      XCTFail(
-        "Invalid identifier type syntax expectation: The name isn't a valid identifier in type syntax `\(identifierTypeSyntax.trimmedDescription)`.",
-        file: file,
-        line: line
-      )
-      return nil
-    }
-
-    return identifierTypeSyntax
-  }
-}
-
-extension ContextualizedAnnotation where Annotation == UnqualifiedTypeLookupMatcher.Expectation {
-  var typeName: Identifier {
-    // Force unwrap because of  the `UnqualifiedTypeLookupMatcher.Expectation`
-    // invariant above
-    Identifier(validating: syntax.name)!
   }
 }
 
@@ -109,7 +85,7 @@ extension ContextualizedAnnotation where Annotation == UnqualifiedTypeLookupMatc
 
 extension UnqualifiedTypeLookupMatcher: LexicalMatcher {
   func describeContextualizedExpectation(_ expectation: ContextualizedAnnotation<Expectation>) -> String {
-    expectation.typeName.name
+    expectation.syntax.trimmedDescription
   }
 
   func assertExpectation(
@@ -128,8 +104,9 @@ extension UnqualifiedTypeLookupMatcher: LexicalMatcher {
     // Force unwrap because the syntax was parsed from a source file, so it
     // should be 'Attached'.
     let expectationSyntax = Attached(expectation.syntax)!
+    let typeNameToken = TokenSyntax.identifier(expectation.syntax.trimmedDescription)
     let actualResults: [String] = expectationSyntax.findUnqualifiedType(
-      expectation.typeName,
+      Identifier(validating: typeNameToken)!,
       configuredRegions: configuredRegions
     )
     .compactMap({ lookupResult -> String? in
@@ -141,9 +118,21 @@ extension UnqualifiedTypeLookupMatcher: LexicalMatcher {
 
         // Get the scope's marker, or report the error
         guard let definition = syntaxToDefinitions[scopeSyntax.node] else {
+          // Most CodeBlockItemListSyntax are part of an actual `With[Optional]CodeBlockSyntax`
+          // scope; we get the latter for nicer diagnostics.
+          let actualScope = scopeSyntax.node.parent?.parent
+          let scopeDescription: String
+          if let withCodeBlock = actualScope?.asProtocol((any WithCodeBlockSyntax).self) {
+            scopeDescription = withCodeBlock.with(\.body, CodeBlockSyntax(statements: [])).trimmedDescription
+          } else if let withCodeBlock = actualScope?.asProtocol((any WithOptionalCodeBlockSyntax).self) {
+            scopeDescription = withCodeBlock.with(\.body, CodeBlockSyntax(statements: [])).trimmedDescription
+          } else {
+            // Fallback descriptions
+            scopeDescription = actualScope?.trimmedDescription ?? "<no CodeBlockItemListSyntax grandparent>"
+          }
           failures.append(
             ExpectationFailure.resultReferencesUnmarkedSyntax(
-              syntaxDescription: "'\(lookupResult)' references `\(scopeSyntax.node.trimmedDescription)`"
+              syntaxDescription: "'\(lookupResult)' references `\(scopeDescription)`"
             )
           )
           return ""
@@ -174,12 +163,12 @@ extension UnqualifiedTypeLookupMatcher: LexicalMatcher {
 
     // Diff results
     if actualResults != expectedResults {
-      let expectedDescription = expectedResults.map({ "\t\($0),\n" }).joined(separator: "")
-      let actualDescription = actualResults.map({ "\t\($0),\n" }).joined(separator: "")
+      let expectedDescription = expectedResults.map({ "    \($0),\n" }).joined(separator: "")
+      let actualDescription = actualResults.map({ "    \($0),\n" }).joined(separator: "")
       failures.append(
         .other(
           failure:
-            "Invalid unqualified type-lookup results. Expected:[\n\(expectedDescription)]. But got: [\n\(actualDescription)]"
+            "Invalid unqualified type-lookup results. Expected: [\n\(expectedDescription)]\nBut got:  [\n\(actualDescription)]"
         )
       )
     }
@@ -251,7 +240,10 @@ extension LexicalLookupSource.Interpolation where Matcher == UnqualifiedTypeLook
   }
 }
 
+// MARK: Convenience Constructors
+
 extension GenericUnqualifiedTypeLookupResult where Scope == Character? {
+  /// Creates a `GenericUnqualifiedTypeLookupResult.nonNestedTypeDecl`
   /// Parameters:
   /// - parent: The parent scope's marker, or `nil` for top-level (file scope).
   static func decls(
@@ -262,6 +254,17 @@ extension GenericUnqualifiedTypeLookupResult where Scope == Character? {
       decl: decls[0],
       redeclarations: Array(decls[1...]),
       parentScope: parentScope
+    )
+  }
+
+  static func genericParameters(
+    _ params: [Attached<GenericParameterSyntax>],
+    inClause genericClause: Attached<GenericParameterClauseSyntax>
+  ) -> GenericUnqualifiedTypeLookupResult<Character?> {
+    GenericUnqualifiedTypeLookupResult.genericParameters(
+      firstMatch: params[0],
+      redeclarations: Array(params[1...]),
+      genericClause: genericClause
     )
   }
 }

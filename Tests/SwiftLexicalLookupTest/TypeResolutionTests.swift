@@ -44,6 +44,13 @@ extension GenericParameterSyntax: ParsableByAttached {
     "func <\(syntaxString)>"
   }
 }
+extension GenericParameterClauseSyntax: ParsableByAttached {
+  public static func fileContents(syntaxString: String) -> String {
+    // Create a fake function to parse the given `<T1, ..., TN>`
+    // as a GenericParameterClauseSyntax
+    "func \(syntaxString)"
+  }
+}
 extension ExtensionDeclSyntax: ParsableByAttached {
   public static func fileContents(syntaxString: String) -> String { syntaxString }
 }
@@ -51,18 +58,19 @@ extension DeclGroupSyntaxType: ParsableByAttached {
   public static func fileContents(syntaxString: String) -> String { syntaxString }
 }
 
-extension Attached where Node == TypeDeclSyntax {
-  /// Helper for creating `Attached<TypeDeclSyntax>` from `GenericParameterClauseSyntax`.
-  ///
-  /// `Attached<TypeDeclSyntax>`'s main string-literal initializer only parses
-  /// actual declarations (can't parse generic parameters)
-  public static func genericParameter(_ name: String) -> Attached<TypeDeclSyntax> {
-    // Parse as a generic-parameter clause, then cast to `TypeDeclSyntax`
-    Attached<GenericParameterSyntax>(stringLiteral: name).as(TypeDeclSyntax.self)!
-    // TODO: Implement as follows
-    // Attached<TypeDeclSyntax>(Attached<GenericParameterSyntax>(stringLiteral: name))
-  }
-}
+// TODO: Remove
+// extension Attached where Node == TypeDeclSyntax {
+//   /// Helper for creating `Attached<TypeDeclSyntax>` from `GenericParameterClauseSyntax`.
+//   ///
+//   /// `Attached<TypeDeclSyntax>`'s main string-literal initializer only parses
+//   /// actual declarations (can't parse generic parameters)
+//   public static func genericParameter(_ name: String) -> Attached<TypeDeclSyntax> {
+//     // Parse as a generic-parameter clause, then cast to `TypeDeclSyntax`
+//     Attached<GenericParameterSyntax>(stringLiteral: name).as(TypeDeclSyntax.self)!
+//     // TODO: Implement as follows
+//     // Attached<TypeDeclSyntax>(Attached<GenericParameterSyntax>(stringLiteral: name))
+//   }
+// }
 
 // TODO: Merge with Attached.typeSyntax(_)
 extension Attached: ExpressibleByStringLiteral
