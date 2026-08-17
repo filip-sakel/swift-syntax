@@ -38,7 +38,7 @@ struct DirectLookupMatcher {
 
 // Vacuous conformances (`Reference` is unihabited)
 extension DirectLookupMatcher.Definition: LexicalAnnotation, Identifiable, CustomStringConvertible {
-  typealias SyntaxReference = ValueDeclSyntax  //TypeMemberSyntax<ValueDeclSyntax>
+  typealias SyntaxReference = ValueDeclSyntax
   func findSyntaxFromToken(
     _ token: SwiftSyntax.TokenSyntax,
     verbose: Bool,

@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-@preconcurrency import Glibc
 import SwiftIfConfig
 @_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) @_spi(Experimental) import SwiftLexicalLookup
 import SwiftParser
@@ -316,12 +315,6 @@ extension TypeResolutionMatcher: LexicalMatcher {
         }
         return targetDefinition
       })
-
-      // TODO: Remove
-      // print(
-      //   "Expected: \(expectations.map(\.syntax._memberlessDescription)); Actual: \(results.map(\.syntax._memberlessDescription)) [hasFailures: \(!failures.isEmpty)]"
-      // )
-      // fflush(stdout)
 
       // Give up if markers are undefined (i.e. we already have failures)
       //

@@ -834,7 +834,7 @@ extension TypeResolutionFailure {
       let lookForSelectedMember: Bool
 
       // TODO: Use withLogging
-      logPrefix.append("Trying \(lookupResult._compactDescription(lookedUpName: typeComponent.name))")
+      logPrefix.append("Trying \(lookupResult._describeSuccinctly(lookedUpName: typeComponent.name))")
       defer { logPrefix.removeLast() }
 
       switch lookupResult {

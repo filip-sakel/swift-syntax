@@ -13,35 +13,15 @@
 import SwiftIfConfig
 import SwiftSyntax
 
-@_spi(_QualifiedLookup) public struct UnqualifiedTypeLookupComponent: Sendable, CustomDebugStringConvertible {
-  let module: Identifier?
-  let name: Identifier
-
-  public var debugDescription: String {
-    let modulePrefix: String
-    if let module {
-      modulePrefix = "\(module.name)::"
-    } else {
-      modulePrefix = ""
-    }
-    return "\(modulePrefix)\(name.name)"
-  }
-}
-
-// TODO: Every parent type needs to be resolved because even if we look for `A`
-// in `extension String.UTF8View { struct A { func f(_: A) } }` and find `struct A`,
-// we still need to bind extensions so we need to resolve `String.UTF8View`.
-// I.e. Even if we find a matching type decl (and we know we can exit early),
-//      qualifying the type means qualifying all parent scopes, which necessitates
-//      resolving parent scopes.
-enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
+@_spi(_QualifiedLookupTests)
+public enum GenericUnqualifiedTypeLookupResult<Scope: Sendable> {
   /// Resolve the given type decl, collecting redeclarations and
   /// the parent 'with-statements' scope containing these declarations.
   // TODO: Should I remove `redeclarations`?
   case nonNestedTypeDecl(
     decl: Attached<TypeDeclSyntax>,
     redeclarations: [Attached<TypeDeclSyntax>],
-    parentScope: Attached<CodeBlockItemListSyntax>
+    parentScope: Scope
   )
 
   /// Search for the given type declaration as a member of `declGroupParent`.
@@ -58,60 +38,14 @@ enum UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
   case lookForGenericParameters(extensionDecl: Attached<ExtensionDeclSyntax>)
   case lookInModule
   case lookInImports([Identifier])
-
-  var debugDescription: String {
-    switch self {
-    // TODO: Remove
-    // case .lookForExtension(let extensionDecl, let lookForSelectedMember):
-    //   return
-    //     ".lookForExtension(\(extensionDecl._memberlessDescription), lookForSelectedMember: \(lookForSelectedMember))"
-    // case .lookForType(let type, let lookForSelectedMember, let scope):
-    //   return
-    //     ".lookForType(decls: [\(type.map(\._memberlessDescription).joined(separator: ", "))], lookForSelectedMember: \(lookForSelectedMember)))"
-    case .nonNestedTypeDecl(let decl, let redeclarations, let parentScope):
-      let redeclsDescriptions = redeclarations.map(\._memberlessDescription).joined(separator: ", ")
-      return
-        ".nonNestedTypeDecl(decl: `\(decl._memberlessDescription)`, redeclarations: [\(redeclsDescriptions)], parentScope: <\(parentScope.parent?.parent?.kind ?? SyntaxKind.missing)>)"
-    case .lookForMember(let declGroupParent, let lookForSelf):
-      return ".lookForMember(declGroupParent: `\(declGroupParent._memberlessDescription)`, lookForSelf: \(lookForSelf))"
-    case .lookForGenericParameters(let extensionDecl):
-      return ".lookForGenericParameters(in: \(extensionDecl._memberlessDescription))"
-    case .lookInModule:
-      return ".lookInModule"
-    case .lookInImports(let imports):
-      return ".lookInImports(\(imports.map(\.name)))"
-    }
-  }
-
-  /// Compact form of `debugDescription` for logging
-  func _compactDescription(lookedUpName: Identifier) -> String {
-    switch self {
-    // TODO: Remove
-    // case .lookForExtension(let extensionDecl, let lookForSelectedMember):
-    //   // E.g. 'extension A {}' > 'B'
-    //   return
-    //     "'\(extensionDecl._memberlessDescription)'\(lookForSelectedMember ? memberSearchDescription : ""))"
-    // case .lookForType(let type, let lookForSelectedMember):
-    //   return
-    //     "[\(type.map(\._memberlessDescription).joined(separator: ", "))]\(lookForSelectedMember ? memberSearchDescription : "")"
-    case .nonNestedTypeDecl(let decl, redeclarations: _, let parentScope):
-      return "`\(decl._memberlessDescription)` [in <\(parentScope.parent?.parent?.kind ?? SyntaxKind.missing)>]"
-    case .lookForMember(let declGroupParent, let lookForSelf):
-      // E.g. 'extension A {}' > 'B'
-      let memberSearchDescription = " > '\(lookedUpName.name)'"
-      return "`\(declGroupParent._memberlessDescription)`\(lookForSelf ? memberSearchDescription : "")"
-    case .lookForGenericParameters(let extensionDecl):
-      return "'\(extensionDecl._memberlessDescription)' > generic parameters"
-    case .lookInModule:
-      return ".lookInModule"
-    case .lookInImports(let imports):
-      return ".lookInImports(\(imports.map(\.name)))"
-    }
-  }
 }
 
-extension Attached {
-  func findUnqualifiedType(
+@_spi(_QualifiedLookupTests)
+public typealias UnqualifiedTypeLookupResult = GenericUnqualifiedTypeLookupResult<Attached<CodeBlockItemListSyntax>>
+
+extension Attached /* <SyntaxNode> */ {
+  @_spi(_QualifiedLookupTests)
+  public func findUnqualifiedType(
     _ typeName: Identifier,
     configuredRegions: ConfiguredRegions?
   ) -> [UnqualifiedTypeLookupResult] {
@@ -152,7 +86,6 @@ extension Attached {
             //
             // TODO: How do we handle top-level `Self` or `Self` in a method, e.g.:
             // // File.swift
-            // func f() { let _: Self } // What error?
             // struct A {
             //   func g() { let _: Self } // Refers to `A`
             // }
@@ -282,7 +215,6 @@ extension Attached {
             "[SwiftLexicalLookup] Internal error; Expected .lookForMembers to have a DeclGroupSyntax but found \(parentSyntax.kind)."
           )
         }
-        // TODO: Should still return redecls of `decl` if they exist?? (or will symbol table handle that?)
         return UnqualifiedTypeLookupResult.lookForMember(
           declGroupParent: castChild(declGroupParent),
           lookForSelf: false
@@ -295,6 +227,63 @@ extension Attached {
       }
     })
     // TODO: Expose imports
-    return filteredResults + [.lookInModule, .lookInImports([])]
+    return filteredResults + [.lookInModule]
+  }
+}
+
+// MARK: Debug
+
+extension GenericUnqualifiedTypeLookupResult {
+  @_spi(_QualifiedLookupTests)
+  public func _describe(describeScope: (Scope) -> String) -> String {
+    switch self {
+    case .nonNestedTypeDecl(let decl, let redeclarations, let parentScope):
+      let redeclsDescriptions = redeclarations.map(\._memberlessDescription).joined(separator: ", ")
+      return
+        ".nonNestedTypeDecl(decl: `\(decl._memberlessDescription)`, redeclarations: [\(redeclsDescriptions)], parentScope: '\(describeScope(parentScope))')"
+    case .lookForMember(let declGroupParent, let lookForSelf):
+      return ".lookForMember(declGroupParent: `\(declGroupParent._memberlessDescription)`, lookForSelf: \(lookForSelf))"
+    case .lookForGenericParameters(let extensionDecl):
+      return ".lookForGenericParameters(in: \(extensionDecl._memberlessDescription))"
+    case .lookInModule:
+      return ".lookInModule"
+    case .lookInImports(let imports):
+      return ".lookInImports(\(imports.map(\.name)))"
+    }
+  }
+
+  /// Compact form of `debugDescription` for logging
+  private func _describeSuccinctly(lookedUpName: Identifier, describeScope: (Scope) -> String) -> String {
+    switch self {
+    case .nonNestedTypeDecl(let decl, redeclarations: _, let parentScope):
+      return "`\(decl._memberlessDescription)` [in '\(describeScope(parentScope))']"
+    case .lookForMember(let declGroupParent, let lookForSelf):
+      // E.g. 'extension A {}' > 'B'
+      let memberSearchDescription = " > '\(lookedUpName.name)'"
+      return "`\(declGroupParent._memberlessDescription)`\(lookForSelf ? memberSearchDescription : "")"
+    case .lookForGenericParameters(let extensionDecl):
+      return "'\(extensionDecl._memberlessDescription)' > generic parameters"
+    case .lookInModule:
+      return ".lookInModule"
+    case .lookInImports(let imports):
+      return ".lookInImports(\(imports.map(\.name)))"
+    }
+  }
+}
+
+@_spi(_QualifiedLookupTests)
+extension UnqualifiedTypeLookupResult: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    _describe(describeScope: { scope in
+      String(reflecting: scope.parent?.parent?.kind)
+    })
+  }
+  func _describeSuccinctly(lookedUpName: Identifier) -> String {
+    _describeSuccinctly(
+      lookedUpName: lookedUpName,
+      describeScope: { scope in
+        String(reflecting: scope.parent?.parent?.kind)
+      }
+    )
   }
 }

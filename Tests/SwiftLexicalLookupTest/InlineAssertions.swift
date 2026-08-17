@@ -366,7 +366,7 @@ enum LexicalAssertionUtilities {
       }
 
       XCTFail(
-        "Invalid annotation placement: Token '\(introducerToken.trimmedDescription)' should have a \(Parent.self) parent\(messageQualifier).",
+        "Invalid annotation placement: Token '\(introducerToken.trimmedDescription)' should have a \(Parent.self) parent (not '\(rawParent.kind)')\(messageQualifier).",
         file: file,
         line: line
       )
