@@ -983,7 +983,6 @@ final class TypeResolutionTests: XCTestCase {
   }
 
   func testRedeclarationInExtension() {
-    // TODO: Fix determinism problem
     assertTypeResolution(
       [
         "File.swift": """
@@ -992,15 +991,14 @@ final class TypeResolutionTests: XCTestCase {
         }
 
         extension A.B {
-          struct C {}
+          struct C {} // First declaration of `A.B` > `C`
         }
 
-        extension A.B.C { struct D {} }
+        extension A.B.C { struct D {} } // `A.B.C` > `D`
 
-        // After `A` gains a member type `A`, `struct C` above
-        // resolves to `_::A._::A._::C`
         extension A.B {
-          typealias C = A // Redeclaration of member `C`
+          typealias C = A // Redeclaration of `A.B` > `C`,
+                          // so we evict `A.B.C` > `D`
         }
 
         let _: \(failure: .invalidMembers([
@@ -1008,8 +1006,7 @@ final class TypeResolutionTests: XCTestCase {
              ]))
                A.B.C.D
         """
-      ],
-      verbose: true
+      ]
     )
   }
 
@@ -1030,8 +1027,6 @@ final class TypeResolutionTests: XCTestCase {
   //     """ as LexicalLookupSource,
   //   ])
   // }
-
-  // TODO: Test cycles
 
   // func testCodeBlockSimpleCase() {
   //   assertQualifiedTypeName([
@@ -1153,8 +1148,6 @@ final class TypeResolutionTests: XCTestCase {
   //   )
   // }
 
-  // TODO: Add `AnyObject` test
-
   // TODO: Test lookup of an associated type and how it interacts with MyProto.Type, etc.
 
   // TODO: Test multiple variables/patterns and finding those, e.g., var a, b, c: Int {}, etc.
@@ -1165,8 +1158,6 @@ final class TypeResolutionTests: XCTestCase {
   // TODO: Test macro and non-`macro` attributes, e.g., actors, result builders, property wrappers
 
   // TODO: Test supertype cycles protocol A: B {}; protocol B: A {}
-
-  // TODO: Handle lookup in struct nested inside function, e.g. func hi() { struct Hello { var a }; Hello().a }
 
   // TODO: Macro test, e.g. @freestanding macro noargsButCallable() = ...; #closure(args)
 
