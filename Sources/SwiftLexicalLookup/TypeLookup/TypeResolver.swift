@@ -44,28 +44,6 @@ extension Result where Success == [TypeDeclSyntax], Failure: CustomDebugStringCo
     }
   }
 }
-// extension Result where Success == ResolvedNominalTypeReference, Failure: CustomDebugStringConvertible {
-//   fileprivate func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
-//     switch self {
-//     case .success(let success):
-//       return ".success(\(success._describe(describeTypeName: describeTypeName))"
-//     case .failure(let error):
-//       return ".error(\(error.debugDescription))"
-//     }
-//   }
-// }
-// extension Result
-// where Success == MemberLookupResult<ResolvedNominalTypeReference>, Failure: CustomDebugStringConvertible {
-//   fileprivate func _describe(describeTypeName: (QualifiedTypeName) -> String) -> String {
-//     switch self {
-//     case .success(let success):
-//       return
-//         ".success(\(success._describe(describeMembers: { $0.map({ $0._describe(describeTypeName: describeTypeName) }).joined(separator: ", ") }))"
-//     case .failure(let error):
-//       return ".error(\(error.debugDescription))"
-//     }
-//   }
-// }
 
 /// The minimal defining components of a nominal type: the main declaration and the qualified name.
 /// Unlike ``NominalType``, doesn't include extensions.
@@ -133,29 +111,6 @@ extension ResolvedNominalTypeReference {
   }
 }
 
-// TODO: Remove
-// extension ResolvedNominalTypeReference {
-//   @_spi(_QualifiedLookupTests) public static func _mockMarkerType(
-//     mainDecl: SourceFileRoot<NominalTypeDeclSyntax>,
-//     originatingSyntax: TypeSyntax
-//   ) -> ResolvedNominalTypeReference {
-//     ResolvedNominalTypeReference(
-//       mainDecl: mainDecl,
-//       name: QualifiedTypeName.topLevel(
-//         QualifiedTypeNameGlobalType(
-//           components: [
-//             QualifiedTypeNameGlobalType.Component(
-//               name: Identifier(canonicalName: "_")
-//               qualifier: .external(moduleName: Identifier(canonicalName: "_")),
-//             )
-//           ]
-//         )!
-//       ),
-//       originatingSyntax: TypeLikeSyntax(originatingSyntax)
-//     )
-//   }
-// }
-
 @_spi(_QualifiedLookup)
 public indirect enum TypeResolutionFailure<TypeName: Sendable, MinimalNominal: Sendable, ExtendedNominal: Sendable>:
   Error
@@ -173,9 +128,6 @@ public indirect enum TypeResolutionFailure<TypeName: Sendable, MinimalNominal: S
   /// I.e. We don't allow structs/enums/actors, functions, tuples.
   case cannotComposeNonClassOrProtocol(resolved: MemberLookupResult<MinimalNominal>)
   case noTypeMember(member: ImplicitTypeReferenceComponent, in: MemberLookupResult<ExtendedNominal>)
-
-  // // TODO: Can we simplify to a single failure?
-  // case invalidChildren([TypeSyntax: [Failure]])
 
   /// We can only extend structs/enums/classes/actors/protocols
   ///
@@ -778,7 +730,6 @@ extension TypeResolutionFailure {
   enum DeclContext {
     case declGroup(Attached<DeclGroupSyntaxType>)
     case codeBlock(Attached<CodeBlockItemListSyntax>)
-
   }
   func _describeDeclContext(_ declContext: DeclContext) -> String {
     switch declContext {
@@ -1206,7 +1157,7 @@ extension TypeResolutionFailure {
 
       // Find this nominal declaration through qualified lookup
       let resolvedBase: NominalTypeRef
-      switch resolveNominalType(typeReference: baseType) {
+      switch resolveType(typeReference: baseType) {
       case .success(let success):
         resolvedBase = success
       case .failure(let failure):
@@ -1233,36 +1184,6 @@ extension TypeResolutionFailure {
       case .failure(let failure):
         return .failure(failure)
       }
-
-      // TODO: Remove
-      // let typeResult =
-      //   resolveMember(
-      //     baseType: mappedBaseResult,
-      //     typeMember: ImplicitTypeReferenceComponent(name: name, introducingSyntax: originatingSyntax),
-      //     memberDependencies: &memberDependencies,
-      //     visitedTypeSyntax: visitedTypeSyntax
-      //   ) as Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure>
-      //
-      // // Extract the type, or throw
-      // let resolvedType: MemberLookupResult<ResolvedNominalTypeReference>
-      // switch typeResult {
-      // case .success(let success):
-      //   resolvedType = success
-      // case .failure(let failure):
-      //   return .failure(failure)
-      // }
-      //
-      // // Ensure the resolve type is the nominal decl we want to resolve
-      // guard
-      //   case .memberResults(let resolvedReferences) = resolvedType,
-      //   let resolvedReference = resolvedReferences.first,
-      //   resolvedReferences.count == 1,
-      //   resolvedReference.mainDecl == nominalDecl
-      // else {
-      //   fatalError(
-      //     "[SwiftLexicalLookup] Internal error: Member lookup on '\(baseType._succinctDescription)' succeeded to '\(resolvedType)', which doesn't match child `\(nominalDecl._memberlessDescription)`."
-      //   )
-      // }
 
       // FIXME: Register type here and return
       let globalTypeName: GlobalTypeName
@@ -1494,7 +1415,7 @@ extension TypeResolutionFailure {
       // Bind extensions and construct a nominal type.
       // We ignore failures since they're from non-matching extensions and diagnosed separately
       let nominalBaseType: NominalTypeRef
-      switch resolveNominalType(typeReference: baseType) {
+      switch resolveType(typeReference: baseType) {
       case .success(let success):
         nominalBaseType = success
       case .failure(let failure):
@@ -1578,7 +1499,27 @@ extension TypeResolutionFailure {
   /// Finds the member type-decl of a nominal base type.
   ///
   /// A helper for `resolveMember` and `resolveNominalTypeDecl`.
-  func findNominalTypeMemberDecl(
+  fileprivate mutating func findNominalTypeMemberDecl(
+    resolvedNominalBaseType: NominalTypeRef,
+    memberName: Identifier,
+    memberIntroducingSyntax: Attached<TypeLikeSyntax>,
+    dependencyTracker memberDependencies: inout DependencyTracker
+  ) -> Result<Attached<TypeDeclSyntax>?, Failure> {
+    return withLogging(
+      request:
+        "Nominal type member `\(resolvedNominalBaseType._succinctDescription)` > `\(memberName.name)`",
+      describe: \._debugDescription
+    ) {
+      $0._findNominalTypeMemberDecl(
+        resolvedNominalBaseType: resolvedNominalBaseType,
+        memberName: memberName,
+        memberIntroducingSyntax: memberIntroducingSyntax,
+        dependencyTracker: &memberDependencies
+      )
+    }
+  }
+
+  fileprivate func _findNominalTypeMemberDecl(
     resolvedNominalBaseType: NominalTypeRef,
     memberName: Identifier,
     memberIntroducingSyntax: Attached<TypeLikeSyntax>,
@@ -1736,20 +1677,20 @@ extension TypeResolver {
 extension TypeResolver {
   /// Resolve a qualified-type name to a nominal type with all accessible
   /// extensions bound.
-  @_spi(_QualifiedLookupTests) public mutating func resolveNominalType(
+  @_spi(_QualifiedLookupTests) public mutating func resolveType(
     typeReference: ResolvedNominalTypeReference
   ) -> Result<NominalTypeRef, Failure> {
     withLogging(
       request: "Extended nominal`\(typeReference._succinctDescription)`",
       describe: \._debugDescription,
       perform: {
-        $0._resolveNominalType(typeReference: typeReference)
+        $0._resolveType(typeReference: typeReference)
       }
     )
   }
 
   /// Implements `resolveNominalType`
-  fileprivate mutating func _resolveNominalType(
+  fileprivate mutating func _resolveType(
     typeReference: ResolvedNominalTypeReference
   ) -> Result<NominalTypeRef, Failure> {
     // Skip extension binding for local declarations.
