@@ -56,7 +56,7 @@ extension SymbolTable {
     return dependencyGraph.registerNominalTypeReference(
       rawQualifiedName: qualifiedName,
       mainDecl: mainDecl,
-      configuredRegions: configuredRegions
+      symbolTable: self
     ).map({ nominalRef in
       ResolvedNominalTypeReference(
         nominalTypeRef: nominalRef,

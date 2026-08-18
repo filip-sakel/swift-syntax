@@ -602,6 +602,7 @@ extension TypeDependencyGraph {
     //   )
     // }
 
+    // TODO: Consider pre-sorting extensions to make lookup faster
     func directLookup(
       baseTypeName: GlobalTypeName,
       memberTypeName: Identifier
@@ -733,7 +734,7 @@ extension TypeDependencyGraph {
   mutating func registerNominalTypeReference(
     rawQualifiedName: TypeName,
     mainDecl: Attached<NominalTypeDeclSyntax>,
-    configuredRegions: ConfiguredRegions?
+    symbolTable: borrowing SymbolTable
   ) -> Result<NominalTypeRef, NominalRegistrationFailure> {
     // Get the global name
     let qualifiedName: GlobalTypeName
@@ -744,10 +745,6 @@ extension TypeDependencyGraph {
       return .success(NominalTypeRef(localNominalType: mainDecl))
     }
 
-    // FIXME: Invalidate extensions if we're introducing a redecl to an existing type
-
-    // FIXME: Enable this check.
-    //
     // Check parent is registered, if nested
     if let (qualifiedBaseName, member: _) = qualifiedName.baseAndMember {
       guard let baseType = namesToTypes[qualifiedBaseName] else {
@@ -789,7 +786,7 @@ extension TypeDependencyGraph {
     //       the extension is registered
 
     // Map out the type
-    let mappedMainDecl = MappedDeclGroup.from(declGroup: mainDecl, configuredRegions: configuredRegions)
+    let mappedMainDecl = MappedDeclGroup.from(declGroup: mainDecl, configuredRegions: symbolTable.configuredRegions)
 
     // If this type is new, just register and return
     // TODO: Test following, e.g. struct A { struct B {} }; extension A { struct B {} }
@@ -800,6 +797,50 @@ extension TypeDependencyGraph {
         NominalTypeRef(globalReference: GlobalNominalTypeRef(qualifiedName: qualifiedName, nominal: freshNominal))
       )
     }
+
+    // TODO: Justify this or restructure code to maintain invariants
+    // // Ensure no dependents exist
+    // guard existingType.dependents.isEmpty else {
+    //   fatalError("TODO")
+    // }
+
+    // FIXME: Invalidate extensions if we're introducing a redecl to an existing type
+    //
+    // But why would this be necessary? When we admit an extension, we should have made
+    // sure there are no top-level redeclarations, and the only possible redeclarations
+    // are by binding more extensions; instead consider banning registering redecls,
+    // or assert there are no dependents.
+    //
+    // Let's try removing the type
+    //
+    // if !existingType.dependents.isEmpty {
+    //   // Global types should have had the ambiguity diagnosed
+    //   guard let (qualifiedBaseName, member: _) = qualifiedName.baseAndMember else {
+    //     // TODO: Find message
+    //     fatalError("TODO")
+    //   }
+    //   _unbindMemberType(
+    //     baseTypeName: qualifiedBaseName,
+    //     baseTypeDecl: ,
+    //     baseTypeModule:,
+    //     baseType: NominalType,
+    //     member: TypeMember,
+    //     invalidatedExtensions: &[ExtensionState], symbolTable: SymbolTable)
+    //
+    //   let result: Result<NominalType?, NominalRemovalFailure> = __removeNominalTypeDeclaration(
+    //     existingType.mainDecl.declGroup,
+    //     nominalDeclModule: symbolTable.moduleMap[existingType.mainDecl.declGroup.fileRoot]!,
+    //     typeName: qualifiedName,
+    //     symbolTable: symbolTable
+    //   )
+    //   self._unbindMemberType(baseTypeName: GlobalTypeName, baseTypeDecl: Attached<DeclGroupSyntaxType>, baseTypeModule: Identifier, baseType: NominalType, member: TypeMember, invalidatedExtensions: &[ExtensionState], symbolTable: SymbolTable)
+    //   switch result {
+    //   case .success: break
+    //   case .failure(let failure):
+    //     // TODO: Justify
+    //     fatalError("[SwiftLexicalLookup] Internal error: Unexpected nominal-registration failure: \(failure)")
+    //   }
+    // }
 
     // Add the redeclaration (or ignore if the decl is already added)
     guard let typeWithRedeclaration = existingType.addingRedeclaration(mappedMainDecl) else {

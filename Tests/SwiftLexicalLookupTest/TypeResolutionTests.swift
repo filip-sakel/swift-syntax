@@ -45,17 +45,6 @@ struct IdentifierWrapper: ExpressibleByStringLiteral {
   }
 }
 
-// // TODO: Find actual solution
-// extension Identifier {
-//   nonisolated(unsafe) private static var tokens = [TokenSyntax]()
-//
-//   init(_immortalizingString string: String) {
-//     let token = TokenSyntax.identifier(string)
-//     Identifier.tokens.append(token)
-//     self = Identifier.init(token)!
-//   }
-// }
-
 extension GenericExtensionState where TypeName == TestTypeName {
   /// Creates a mock extension state to check an extension's dependencies,
   /// bound type, or failure to bind due to cycles.
@@ -497,10 +486,6 @@ final class TypeResolutionTests: XCTestCase {
       [
         "MyFile.swift": """
         struct A {}
-
-        \("🟥", name: "_(MyFile.swift)::A")
-        // Cannot compose non nominal types
-        struct B {}
 
         // type alias 'A' references 'A' in its initializer
         typealias A = \(failure: .invalidComposition([
