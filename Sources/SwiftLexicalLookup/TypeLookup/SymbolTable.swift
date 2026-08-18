@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+// TODO: Remove Glibc import
+@preconcurrency import Glibc
 import SwiftIfConfig
 import SwiftSyntax
 
@@ -21,6 +23,13 @@ import SwiftSyntax
   @_spi(_QualifiedLookupTests)
   public let moduleToSources: [ModuleName: [String: SourceFileSyntax]]
   let configuredRegions: ConfiguredRegions?
+
+  let _verbose: Bool = false
+  let _logNestingLimit: Int? = nil
+  var logPrefix = [String]()
+
+  // Tracks requested extensions for extension binding
+  var requestedExtensions: OrderedSet<Attached<ExtensionDeclSyntax>> = []
 
   /// TODO: Consider merging maps below
   //
@@ -100,6 +109,42 @@ extension SymbolTable {
       // If file names are equal, compare positions
       return a.position < b.position
     })
+  }
+}
+
+// MARK: Logging
+
+extension SymbolTable {
+  func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
+    guard _verbose else { return }
+    // Keep log text separately
+    let newLine = "\(logPrefix.map({ "[\($0)]" }).joined()) \(component)\n"
+    // logText += newLine + "\n"
+    // Print new line
+    print(newLine)
+    // TODO: Remove
+    fflush(stdout)
+  }
+
+  func withLogging<T>(
+    request: String,
+    describe: (T) -> String,
+    perform action: (_ mutableSelf: borrowing SymbolTable) -> T,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) -> T {
+    if let nestingLimit = self._logNestingLimit, logPrefix.count >= nestingLimit {
+      fflush(stdout)
+      fatalError(
+        "Exceeded log nesting limit of \(nestingLimit), suggesting there's an infinite loop. If you think this is a mistake, you may change the limit in `TypeQualifier`."
+      )
+    }
+    logPrefix.append(request)
+    log("Resolving...", file: file, line: line)
+    let result = action(self)
+    log("Resolved \(describe(result))", file: file, line: line)
+    logPrefix.removeLast()
+    return result
   }
 }
 

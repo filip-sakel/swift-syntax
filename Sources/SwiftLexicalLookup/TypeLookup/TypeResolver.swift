@@ -181,6 +181,14 @@ public indirect enum TypeResolutionFailure<TypeName: Sendable, MinimalNominal: S
   ///
   /// I.e. We can't extend tuples, functions, protocol compositions, metatypes, etc.
   case cannotExtendNonNominal(nonnominal: MemberLookupResult<MinimalNominal>)
+  /// Extensions may only appear at file scope (top-level).
+  /// ```swift
+  /// func f() {
+  ///   struct A {}
+  ///   extension A {} // ❌
+  /// }
+  /// ```
+  case extensionNotAtFileScope(extensionDecl: ExtensionDeclSyntax)
   /// Child has error, so we can't qualify this type but we can't offer a useful diagnostic either.
   ///
   /// E.g.
@@ -321,6 +329,8 @@ extension TypeResolutionFailure where TypeName: CustomDebugStringConvertible {
         ".noTypeMember(member: \(member.debugDescription), in: \(describeType(type, describe: resolveExtendedNominal)))"
     case .cannotExtendNonNominal(let nonnominal):
       return ".cannotExtendNonNominal(nonnominal: \(describeType(nonnominal, describe: resolveMininalNominal)))"
+    case .extensionNotAtFileScope(let extensionDecl):
+      return ".extensionNotAtFileScope(extensionDecl: `\(extensionDecl._memberlessDescription)`)"
     case .invalidAliasedType(let nestedFailure):
       return """
         .invalidAliasedType(
@@ -424,8 +434,9 @@ extension TypeResolutionFailure {
 
     // No nested ``TypeQualifierFailure`` => nil
     case .noTypeInScope, .cannotComposeNonClassOrProtocol(_), .noTypeMember(member: _, in: _),
-      .cannotExtendNonNominal(nonnominal: _), .other(_), .genericParameterOrAssociatedType,
-      .ambiguousTypeDecl(_), .syntaxNotInSymbolTable, .syntaxInDisabledRegion, .extensionNotBoundYet,
+      .cannotExtendNonNominal(nonnominal: _), .extensionNotAtFileScope(extensionDecl: _),
+      .other(_), .genericParameterOrAssociatedType, .ambiguousTypeDecl(_), .syntaxNotInSymbolTable,
+      .syntaxInDisabledRegion, .extensionNotBoundYet,
       // Extension cycles are distinct
       .cyclicalExtensionDependency(_),
       // If the above case don't directly contain a cycle
@@ -492,7 +503,6 @@ extension TypeResolutionFailure {
   >
 
   let symbolTable: SymbolTable
-  var requestedExtensions: OrderedSet<Attached<ExtensionDeclSyntax>> = []
   // var visitedTypeSyntax: OrderedSet<SourceFileRoot<TypeSyntax>> = []
 
   let _verbose: Bool
@@ -1628,7 +1638,7 @@ extension TypeResolutionFailure {
   }
 }
 
-// MARK: Extension Binding
+// MARK: Extended-Type Syntax
 
 extension TypeResolver {
   /// Resolve the given type syntax from an extension declaration
@@ -1637,24 +1647,33 @@ extension TypeResolver {
   /// Note that we only diagnose extending tuples/functions and compositions
   /// (e.g. `Codable = Encodable & Decodable`). However, we don't diagnose
   /// things like extending an existential (e.g. `extension any Collection`).
-  fileprivate mutating func _resolveExtendedTypeSyntax(
+  mutating func resolveExtendedTypeSyntax(
     extensionDecl: Attached<ExtensionDeclSyntax>,
     memberDependencies: inout DependencyTracker
-  ) -> Result<ResolvedNominalTypeReference, Failure> {
+  ) -> Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, Failure> {
     withLogging(
       request: "Extended type syntax `\(extensionDecl.extendedType.trimmedDescription)`",
       describe: \._debugDescription,
       perform: {
-        $0.__resolveExtendedTypeSyntax(extensionDecl: extensionDecl, memberDependencies: &memberDependencies)
+        $0._resolveExtendedTypeSyntax(extensionDecl: extensionDecl, memberDependencies: &memberDependencies)
       }
     )
   }
 
   /// Implements `resolveExtendedTypeSyntax`
-  fileprivate mutating func __resolveExtendedTypeSyntax(
+  mutating func _resolveExtendedTypeSyntax(
     extensionDecl: Attached<ExtensionDeclSyntax>,
     memberDependencies: inout DependencyTracker
-  ) -> Result<ResolvedNominalTypeReference, Failure> {
+  ) -> Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, Failure> {
+    // Ensure extension is at file scope
+    let declContext = _findDeclContext(ofDeclGroup: Attached<DeclGroupSyntaxType>(extensionDecl))
+    guard
+      case DeclContext.codeBlock(let scope) = declContext,
+      scope.node == extensionDecl.fileRoot.statements
+    else {
+      return .failure(Failure.extensionNotAtFileScope(extensionDecl: extensionDecl.node))
+    }
+
     // TODO: Make comment more concise
     //
     // Note: We pass `visitedTypeSyntax==[]` because extended type syntax can't
@@ -1687,322 +1706,28 @@ extension TypeResolver {
       // We're expecting exactly one nominal type.
       // No types means non-nominal, e.g., `Int.Type` and compositions are
       // also not extensible, e.g., `Encodable & Decodable`.
-      guard let firstNominalType = results.first, results.count == 1 else {
-        return .failure(.cannotExtendNonNominal(nonnominal: resolvedType))
+      guard let nominalType = results.first, results.count == 1 else {
+        return .failure(Failure.cannotExtendNonNominal(nonnominal: resolvedType))
       }
-      return .success(firstNominalType)
+      // That types needs to be global (can't extended local types)
+      let nominalRef = nominalType.nominalTypeRef
+      guard case .global(let globalNominalRef) = nominalRef.storage else {
+        fatalError(
+          "[SwiftLexicalLookup] Internal error: Extended type of top-level extension `\(extensionDecl._memberlessDescription)` unexpectedly evaluated to local type `\(nominalRef._succinctDescription)`."
+        )
+      }
+      // Return global reference
+      return .success(
+        GenericResolvedNominalTypeReference(
+          nominalTypeRef: globalNominalRef,
+          mainDecl: nominalType.mainDecl,
+          originatingSyntax: nominalType.originatingSyntax
+        )
+      )
     // Functions/tuples/`Any` aren't nominal
     case .function, .tuple, .anyType:
       return .failure(.cannotExtendNonNominal(nonnominal: resolvedType))
     }
-  }
-
-  /// Tries to bind the given extension; returns `nil` or failure.
-  ///
-  /// If no binding request is already underway, the given extensions
-  /// should be admitted to the graph after this call. Otherwise, the provided
-  /// extensions are queued up for the existing request to handle.
-  @_spi(_QualifiedLookupTests) public mutating func admitExtensions(
-    _ extensionDecls: [Attached<ExtensionDeclSyntax>]
-  ) {
-    withLogging(
-      request: "Admitting extensions: \(extensionDecls.map(\._memberlessDescription))",
-      describe: { _ in "" },
-      perform: {
-        $0._admitExtensions(extensionDecls)
-      }
-    )
-  }
-
-  /// Implements `admitExtensions`
-  fileprivate mutating func _admitExtensions(
-    _ extensionDecls: [Attached<ExtensionDeclSyntax>]
-  ) {
-    // Whether we will bind the requested extensions or we'll delegate to an
-    // ongoing request
-    let willBindRequests = self.requestedExtensions.isEmpty
-
-    // Register the extensions to be processed.
-    //
-    // Note: `requestedExtensions` is an `OrderedSet` so we don't introduce
-    // duplicates.
-    self.requestedExtensions.append(contentsOf: extensionDecls)
-
-    // Ensure there's no binding request underway
-    guard willBindRequests else {
-      // This request will be handled after the current binding (see
-      // `admitExtensions` docstring).
-      // TODO: Is this the right failure type?
-      return
-    }
-
-    // Handle all binding requests
-    //
-    // We use a while loop since a single binding request may generate more
-    // binding requests. E.g., Say we want to resolve:
-    // ```swift
-    // struct A {}
-    // extension A.B {
-    //   func f(_: Self) {} // <- Look up here
-    // }
-    // extension A { struct B {} }
-    // ```
-    // Then, `Self` will only try to bind `extension A.B` but to resolve `A.B`, we
-    // need to fully resolve `A` so we also have to bind `extension A`.
-    while let extensionDecl = self.requestedExtensions.first {
-      // We remove at the end of the iteration because we want nested syntax-resolution
-      // requests to see that we're actively trying to bind this extension.
-      defer {
-        // TODO: Ensure .last and .removeLast are ok (or if we should do a queue-like approach.
-        let poppedExtension = self.requestedExtensions.removeFirst()
-        assert(
-          poppedExtension == extensionDecl,
-          "[SwiftLexicalLookup] Internal error: Unexpectedly found different requested extension when popping."
-        )
-      }
-
-      // The result can change after binding more extensions; ignore for now.
-      _ = _bindRequestedExtension(extensionDecl)
-    }
-
-    assert(
-      self.requestedExtensions.isEmpty,
-      "[SwiftLexicalLookup] Internal error: Requested extensions still not admitted after `bindExtensions`."
-    )
-  }
-
-  /// Admits the given extension added to `self.requestedExtensions`. Only
-  /// `bindExtensions` should call this method.
-  ///
-  /// Handles extensions already admitted to the graph, and fixes
-  /// invalidated extensions.
-  ///
-  /// - Precondition: `extensionDecl` must be in `self.requestedExtensions`
-  private mutating func _bindRequestedExtension(
-    _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, Failure> {
-    withLogging(
-      request: "Binding `\(extensionDecl._memberlessDescription)`",
-      describe: \._debugDescription
-    ) {
-      $0.__bindRequestedExtension(extensionDecl)
-    }
-  }
-
-  /// Prepends given elements. New elements get added as expected and existing elements
-  /// get moved to the front of the list. Despite the current elements of the ordered set,
-  /// the new set will always start out with a deduplicated set of `elements`.
-  /// TODO: Remove if we have no references to this
-  func prepend<E: Hashable>(to orderedSet: inout OrderedSet<E>, contentsOf elements: [E]) {
-    let oldElements = orderedSet
-    orderedSet.removeAll(keepingCapacity: true)
-    orderedSet.append(contentsOf: elements)
-    orderedSet.append(contentsOf: oldElements)
-  }
-
-  /// Implements `bindRequestedExtension`
-  ///
-  /// - Precondition: `extensionDecl` must be in `self.requestedExtensions`
-  /// FIXME: Make _bindExtension handle other generated requests;
-  /// e.g. if we're resolving `extension A.B {}`, we will prob have to fully resolve `A`.
-  private mutating func __bindRequestedExtension(
-    _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, Failure> {
-    // Uphold invariant
-    assert(
-      self.requestedExtensions.contains(extensionDecl),
-      "[SwiftLexicalLookup] Internal error: Called `bindRequestedExtension` without first adding to `self.requestedExtensions`."
-    )
-
-    // TODO: Remove
-    func mapToNominalTypeReference(
-      _ typeInfo: (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
-    ) -> GenericResolvedNominalTypeReference<GlobalNominalTypeRef> {
-      GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
-        nominalTypeRef: typeInfo.globalReference,
-        mainDecl: typeInfo.mainDecl,
-        originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
-      )
-    }
-
-    // Return saved result if the extension was already admitted to the graph
-    // TODO: Should this ever happen?
-    if let existingResolution = symbolTable.dependencyGraph.getExtensionResolvedType(extensionDecl) {
-      return existingResolution.map(mapToNominalTypeReference(_:))
-    }
-
-    // TODO: Extension binding uses its own visitedTypeSyntax; also pass `visitedTypeSyntax` to every function.
-
-    // === Resolve Extension ===
-
-    // Resolve the extended type, tracking dependencies
-    //
-    // Note: We don't add these dependencies to our dependencies since
-    // this is considered a completely separate type resolution. We
-    // track these dependencies in the symbol table's corresponding
-    // extension state.
-    var extensionDependencies = DependencyTracker()
-    let extendedTypeResult = _resolveExtendedTypeSyntax(
-      extensionDecl: extensionDecl,
-      memberDependencies: &extensionDependencies
-    )
-
-    // Register in the symbol table to get invalidated extensions
-    let bindingResult: Result<BindingResult, SymbolTable.ExtensionBindingFailure>
-    bindingResult = symbolTable.bindExtension(
-      extensionDecl,
-      // Only get the name
-      to: extendedTypeResult.map({ extendedTypeReference in
-        // FIXME: We should actually make this into a TypeQualifier error, i.e., at `resolveExtendedTypeSyntax`
-        // check the extension's scope is SourceFileSyntax or throw `nonGlobalExtension`
-        // e.g. func f() {
-        //        extension A {
-        //          func f(_: Self) {} // <- Lookup up here
-        //        }
-        //      }
-        guard case .global(let extendedGlobalRef) = extendedTypeReference.nominalTypeRef.storage else {
-          fatalError(
-            "[SwiftLexicalLookup] Internal error: Unexpectedly resolved extension to local type \(extendedTypeReference.nominalTypeRef)"
-          )
-        }
-        return (extendedGlobalRef.name, extendedTypeReference.mainDecl)
-      }),
-      dependencies: extensionDependencies,
-      verbose: _verbose
-    )
-
-    // Extract the invalidated extensions or handle failures
-    let (resolvedType, invalidatedExtensions): BindingResult
-    switch bindingResult {
-    case .success(let success):
-      (resolvedType, invalidatedExtensions) = success
-    case .failure(let failure):
-      // Ensure we handle future failure types
-      switch failure {
-      case .nonRegisteredSyntaxRoot:
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly not in symbol table"
-        )
-      case .admissionFailure(.cannotReadmit(let existingState)):
-        // We check there's no state at the start of the function
-
-        // TODO: Remove
-        // print(
-        //   "[SwiftLexicalLookup] Internal error: Tried to readmit `\(extensionDecl._memberlessDescription)`; old state \(existingState)."
-        // )
-        // return symbolTable.dependencyGraph.getExtensionResolvedType(extensionDecl)!.map(mapToNominalTypeReference(_:))
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Tried to readmit `\(extensionDecl._memberlessDescription)`; old state \(existingState)."
-        )
-      case .admissionFailure(.invalidDependencyExtension(let extensionState)):
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly has wrong dependency; state \(extensionState.debugDescription)."
-        )
-      }
-    }
-    log(
-      "Resolved to \(extendedTypeResult); Dependencies: \(extensionDependencies.dependencies.map(\.debugDescription)); Invalidated: \(invalidatedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
-    )
-
-    // TODO: Does this even work?
-    // prepend(to: &self.requestedExtensions, contentsOf: invalidatedExtensions.map(\.extensionDecl))
-    self.requestedExtensions.append(contentsOf: invalidatedExtensions.map(\.extensionDecl))
-    return resolvedType.map(mapToNominalTypeReference(_:))
-
-    // FIXME: Get rid of below code or sm.
-    //
-    // // === Fix Invalidated Extensions ===
-    // //
-    // // We use a for loop because fixing one invalidated extension may invalidate
-    // // other extensions.
-    // var invalidatedExtensionsStack = invalidatedExtensions
-    // // TODO: Pull out invalidateExtension into its own function
-    // while let invalidatedExtension = invalidatedExtensionsStack.first {
-    //   //  TODO: Could we straight-up pop during the while let loop-condition.
-    //   defer {
-    //     let poppedExtension = invalidatedExtensionsStack.removeFirst()
-    //     assert(
-    //       poppedExtension.extensionDecl == invalidatedExtension.extensionDecl,
-    //       "[SwiftLexicalLookup] Internal error: Unexpectedly found different invalidated extension when popping."
-    //     )
-    //   }
-    //
-    //   self.requestedExtensions.append(invalidatedExtension.extensionDecl)
-    //   _ = _bindExtension(invalidatedExtension.extensionDecl)
-    //   let removed = self.requestedExtensions.removeLast()
-    //   assert(
-    //     removed == invalidatedExtension.extensionDecl,
-    //     "[SwiftLexicalLookup] Internal error: Unexpectedly found different invalidated extension when popping."
-    //   )
-    //   continue
-    //
-    //   // TODO: Remove following
-    //
-    //   // Re-resolve with dependency tracking
-    //   log("Recomputing invalidated `\(invalidatedExtension.extensionDecl._memberlessDescription)`")
-    //   let (_, _, nestedInvalidatedExtensions) = withLogging(
-    //     request: "Fixing invalidated `\(invalidatedExtension.extensionDecl._memberlessDescription)`",
-    //     describe: {
-    //       (
-    //         extendedTypeResult: Result<ResolvedNominalTypeReference, Failure>,
-    //         extensionDependencies: DependencyTracker,
-    //         invalidatedExtensions: InvalidatedExtensions
-    //       ) in
-    //       "\(extendedTypeResult._debugDescription); Dependencies: \(extensionDependencies.dependencies.map(\.debugDescription))"
-    //     },
-    //     perform: {
-    //       var extensionDependencies = DependencyTracker()
-    //       let extendedTypeResult: Result<ResolvedNominalTypeReference, Failure> = $0._resolveExtendedTypeSyntax(
-    //         extensionDecl: invalidatedExtension.extensionDecl,
-    //         memberDependencies: &extensionDependencies
-    //       )
-    //
-    //       // Register in the symbol table
-    //       let nestedBindingResult =
-    //         $0.symbolTable.fixInvalidatedExtension(
-    //           invalidatedExtension.extensionDecl,
-    //           // Only get the name
-    //           to: extendedTypeResult.map({ (typeReference: ResolvedNominalTypeReference) in
-    //             // FIXME: This assert shouldn't exist; extension decl should just give us a global type.
-    //             guard case .topLevel(let extendedGlobalName) = typeReference.qualifiedName else {
-    //               fatalError(
-    //                 "[SwiftLexicalLookup] Internal error: Unexpectedly resolved extension to local type \(typeReference.qualifiedName)"
-    //               )
-    //             }
-    //             return (extendedGlobalName, typeReference.mainDecl)
-    //           }),
-    //           dependencies: extensionDependencies
-    //         ) as Result<BindingResult, SymbolTable3.ExtensionBindingFailure>
-    //
-    //       // Return results or handle failures
-    //       switch nestedBindingResult {
-    //       case .success(let success):
-    //         return (extendedTypeResult, extensionDependencies, success.invalidatedExtensions)
-    //       case .failure(let failure):
-    //         // Ensure we handle future failure types
-    //         switch failure {
-    //         case .nonRegisteredSyntaxRoot:
-    //           fatalError(
-    //             "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly not in symbol table"
-    //           )
-    //         case .admissionFailure(.cannotReadmit(let existingState)):
-    //           fatalError(
-    //             "[SwiftLexicalLookup] Internal error: Tried to fix admitted extension `\(extensionDecl._memberlessDescription)`; old state \(existingState)."
-    //           )
-    //         case .admissionFailure(.invalidDependencyExtension(let extensionState)):
-    //           fatalError(
-    //             "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly has wrong dependency; state \(extensionState.debugDescription)."
-    //           )
-    //         }
-    //       }
-    //     }
-    //   )
-    //
-    //   // Enqueue invalidated extensions
-    //   invalidatedExtensionsStack.append(contentsOf: nestedInvalidatedExtensions)
-    // }
-    //
-    // return resolvedType.map(mapToNominalTypeReference(_:))
   }
 }
 
@@ -2024,7 +1749,6 @@ extension TypeResolver {
   }
 
   /// Implements `resolveNominalType`
-  /// TODO: Do we really need to be throwing??
   fileprivate mutating func _resolveNominalType(
     typeReference: ResolvedNominalTypeReference
   ) -> Result<NominalTypeRef, Failure> {
@@ -2035,17 +1759,6 @@ extension TypeResolver {
     guard case .global(let qualifiedGlobalRef) = typeReference.nominalTypeRef.storage else {
       return .success(typeReference.nominalTypeRef)
     }
-
-    // TODO: See if we actually need to check for accessible extensions even if
-    // there's an ongoing request.
-    // TODO: At least find a way to cache available extensions. (E.g. don't
-    // recalculate accessible extensions if ongoing request targetted the same file)
-
-    // There are three paths:
-    // 1. The symbol table hasn't resolved the extensions accessibles from this source file
-    //    We need to bind all said extensions
-    // 2. We're already binding extensions by servicing another request
-    // 3. The symbol table has a cached/resolved version
 
     // Get the nominal type from the symbol table (or register accordingly)
     let currentNominalResult: Result<NominalTypeRef, TypeDependencyGraph.NominalTypeRefUpdateFailure> =
@@ -2075,17 +1788,6 @@ extension TypeResolver {
     //   )
     }
 
-    // TODO: Remove
-    //
-    // // If there's an existing request, it will take care of the rest
-    // guard self.requestedExtensions.isEmpty else {
-    //   log("Binding request already underway; returning")
-    //
-    //   // Even if not all extensions are loaded, we queued up all extensions that
-    //   // need to be processed, so we'll get invalidated appropriately.
-    //   return currentNominal
-    // }
-
     // Find all the extensions we need to bind
     let accessibleExtensions = symbolTable.findAllExtensions(
       accessibleFrom: typeReference.originatingSyntax.fileRoot,
@@ -2105,7 +1807,7 @@ extension TypeResolver {
       return .success(currentNominal)
     }
 
-    admitExtensions(unadmittedExtensions)
+    symbolTable.admitExtensions(unadmittedExtensions)
 
     // After binding all extensions, get the new nominal type
     guard
@@ -2144,16 +1846,11 @@ extension TypeResolver {
       return alreadyBoundResult
     }
 
-    admitExtensions([extensionDecl])
+    symbolTable.admitExtensions([extensionDecl])
 
     // If there's not an existing extension-binding request, the extension
     // should be admitted. Otherwise, return a failure for now.
     guard let boundTypeResult = symbolTable.dependencyGraph.getExtensionResolvedType(extensionDecl) else {
-      // TODO: Remove
-      // fatalError(
-      //   "[SwiftLexicalLookup] Internal error: Nominal type unexpectedly removed from symbol table after binding extensions."
-      // )
-
       // The extension graph tracks dependencies so this result should be
       // invalidated and fixed after the primary extension-binding request
       // completes.
