@@ -280,15 +280,10 @@ extension TypeResolutionMatcher: LexicalMatcher {
     }
 
     // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
-    var typeQualifier = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
     let actualResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeResolver.Failure>
     do {
-      var memberDependencies = DependencyTracker()
-      actualResult = typeQualifier.resolveSyntax(
-        typeSyntax: typeSyntax,
-        memberDependencies: &memberDependencies,
-        visitedTypeSyntax: []
-      )
+      var typeResolver = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
+      actualResult = typeResolver.resolveSyntax(typeSyntax: typeSyntax)
     }
 
     // Assert output

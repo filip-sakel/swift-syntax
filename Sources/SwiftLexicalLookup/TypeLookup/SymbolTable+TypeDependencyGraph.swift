@@ -373,12 +373,8 @@ extension SymbolTable {
     // this is considered a completely separate type resolution. We
     // track these dependencies in the symbol table's corresponding
     // extension state.
-    var extensionDependencies = DependencyTracker()
     var resolver = TypeResolver(symbolTable: self, _verbose: _verbose)
-    let extendedTypeResult = resolver._resolveExtendedTypeSyntax(
-      extensionDecl: extensionDecl,
-      memberDependencies: &extensionDependencies
-    )
+    let extendedTypeResult = resolver._resolveExtendedTypeSyntax(extensionDecl: extensionDecl)
 
     // Register in the symbol table to get invalidated extensions
     let bindingResult: Result<BindingResult, SymbolTable.ExtensionBindingFailure>
@@ -388,7 +384,7 @@ extension SymbolTable {
       to: extendedTypeResult.map({ extendedTypeReference in
         return (extendedTypeReference.nominalTypeRef.name, extendedTypeReference.mainDecl)
       }),
-      dependencies: extensionDependencies,
+      dependencies: resolver.dependencyTracker,
       verbose: _verbose
     )
 
@@ -422,7 +418,7 @@ extension SymbolTable {
       }
     }
     log(
-      "Resolved to \(extendedTypeResult); Dependencies: \(extensionDependencies.dependencies.map(\.debugDescription)); Invalidated: \(invalidatedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
+      "Resolved to \(extendedTypeResult); Dependencies: \(resolver.dependencyTracker.dependencies.map(\.debugDescription)); Invalidated: \(invalidatedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
     )
 
     // TODO: Does this even work?
