@@ -822,9 +822,6 @@ extension TypeResolver {
       case .lookInModule:
         // TODO: Handle
         continue
-      case .lookInImports:
-        // TODO: Handle
-        continue
       }
 
       // Whether we have to look for a member or not, we can't succeed without

@@ -17,7 +17,6 @@ import SwiftSyntax
 public enum GenericUnqualifiedTypeLookupResult<Scope: Sendable> {
   /// Resolve the given type decl, collecting redeclarations and
   /// the parent 'with-statements' scope containing these declarations.
-  // TODO: Should I remove `redeclarations`?
   case nonNestedTypeDecl(
     decl: Attached<TypeDeclSyntax>,
     redeclarations: [Attached<TypeDeclSyntax>],
@@ -44,7 +43,6 @@ public enum GenericUnqualifiedTypeLookupResult<Scope: Sendable> {
   /// ```
   case lookForGenericParameters(extensionDecl: Attached<ExtensionDeclSyntax>)
   case lookInModule
-  case lookInImports([Identifier])
 }
 
 @_spi(_QualifiedLookupTests)
@@ -114,14 +112,6 @@ extension Attached /* <SyntaxNode> */ {
           switch name {
           case .implicit(.`Self`(let decl)):
             // According to the docs, `decl` is either a protocol or extension decl.
-            //
-            // TODO: Should probably be DeclGroupSyntax to begin with
-            //
-            // TODO: How do we handle top-level `Self` or `Self` in a method, e.g.:
-            // // File.swift
-            // struct A {
-            //   func g() { let _: Self } // Refers to `A`
-            // }
             guard let declGroup = decl.as(DeclGroupSyntaxType.self) else {
               fatalError(
                 "[SwiftLexicalLookup] Internal error: Expected syntax in .implicit(.Self) to be a declaration group but got \(decl.kind) instead."
@@ -136,8 +126,6 @@ extension Attached /* <SyntaxNode> */ {
               lookForSelf: true
             )
           case .declaration(let decl):
-            // TODO: Should this be a ValueDeclSyntax?
-
             // Skip non-type declarations
             //
             // Note: We handle extensions above
@@ -196,11 +184,10 @@ extension Attached /* <SyntaxNode> */ {
         } else if let protocolParent = scope.as(ProtocolDeclSyntax.self) {
           // As described above, this happens only for associated types.
           // We'll find all types, not just the associated types.
-          // TODO: Check what the compiler does; might need to change behaviors
           //
-          // Note `typealias`es of associated types in protocol extensions are peculiar;
-          // they don't participate in lookup; the just act like default values
-          //   (TODO: find precise rules).
+          // Note `typealias`es of associated types in protocol extensions are peculiar.
+          // They don't participate in lookup; they just act like defaults for associated
+          // types, e.g.:
           // ```swift
           // protocol P {
           //     associatedtype T
@@ -227,13 +214,11 @@ extension Attached /* <SyntaxNode> */ {
             lookForSelf: false
           )
         } else {
-          // Shouldn't happen; TODO: Make sure
           fatalError(
             "[SwiftLexicalLookup] Internal error: Expected a `WithStatementsSyntax` or `protocol` scope but got `\(scope.kind)` for names: \(names)"
           )
         }
       case .lookForMembers(let parentSyntax):
-        // TODO: Should probably already be a `DeclGroupSyntaxType`
         guard let declGroupParent = DeclGroupSyntaxType(parentSyntax) else {
           fatalError(
             "[SwiftLexicalLookup] Internal error; Expected .lookForMembers to have a DeclGroupSyntax but found \(parentSyntax.kind)."
@@ -250,7 +235,7 @@ extension Attached /* <SyntaxNode> */ {
         return nil
       }
     })
-    // TODO: Expose imports
+    // TODO: Generate `lookInImports` using the file's import declarations
     return filteredResults + [.lookInModule]
   }
 }
@@ -276,8 +261,6 @@ extension GenericUnqualifiedTypeLookupResult {
       return ".lookForGenericParameters(in: `\(extensionDecl._memberlessDescription)`)"
     case .lookInModule:
       return ".lookInModule"
-    case .lookInImports(let imports):
-      return ".lookInImports(\(imports.map(\.name)))"
     }
   }
 
@@ -299,8 +282,6 @@ extension GenericUnqualifiedTypeLookupResult {
       return "'\(extensionDecl._memberlessDescription)' > generic parameters"
     case .lookInModule:
       return ".lookInModule"
-    case .lookInImports(let imports):
-      return ".lookInImports(\(imports.map(\.name)))"
     }
   }
 }

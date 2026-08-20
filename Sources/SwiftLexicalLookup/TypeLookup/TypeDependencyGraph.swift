@@ -437,7 +437,7 @@ public struct TypeDependencyGraph {
   // var parentsToTypeMembers: [QualifiedTypeName: TypeTable]
   @_spi(_QualifiedLookupTests) public var extensionsToState: [Attached<ExtensionDeclSyntax>: ExtensionState]
 
-  var _verbose: Bool = false
+  var _verbose: Bool = true
   var logPrefix: [String] = [String]()
   /// The number of `withLogging` calls we can nest. Useful for debugging infinite loops
   /// that otherwise fill up standard output and become illegible.
@@ -683,11 +683,17 @@ extension TypeDependencyGraph {
   }
 
   enum NominalRegistrationFailure: Error {
-    // TODO: Enable
+    /// In order to register a nested type, its parent must be registered.
     case parentNotRegistered(parentTypeName: GlobalTypeName)
+
+    // TODO: Can we merge with the above case
+    /// Cannot register type nested in extension that hasn't been registered yet.
+    case parentExtensionUnbound(extensionDecl: Attached<ExtensionDeclSyntax>)
+
     /// Registering a global type with multiple components in its name implies a
     /// nested global nominal-type declaration.
     case noDeclGroupParent
+
     /// Can't register under a decl group that's a redeclaration.
     ///
     /// For instance, the following generates no error:
@@ -717,10 +723,11 @@ extension TypeDependencyGraph {
     /// `_(File.swift)::A`, we can only register member type 'C' under
     /// the main declaration.
     case cannotRegisterUnderRedeclaration
-    /// Cannot register type nested in extension that hasn't been registered yet.
-    case parentExtensionUnbound(extensionDecl: Attached<ExtensionDeclSyntax>)
     /// Main declaration isn't in the same file as the purported redeclaration
     case differentRedeclarationFile
+    // /// We can only register redeclarations under extensions, which may not
+    // /// have been bound when first registering a type. If a
+    // case cannotRegisterTopScopeRedeclaration
   }
 
   /// Registers the given nominal-type reference or return the
@@ -800,8 +807,10 @@ extension TypeDependencyGraph {
 
     // TODO: Justify this or restructure code to maintain invariants
     // // Ensure no dependents exist
-    // guard existingType.dependents.isEmpty else {
-    //   fatalError("TODO")
+    // guard existingType.mainDecl.declGroup == mainDecl else {
+    //   fatalError(
+    //     "[SwiftLexicalLookup] Internal error: Trying to register a redeclaration of '\(qualifiedName.debugDescription)' but type has dependents [\(existingType.dependents.map(\.debugDescription).joined(separator: ", "))]"
+    //   )
     // }
 
     // FIXME: Invalidate extensions if we're introducing a redecl to an existing type

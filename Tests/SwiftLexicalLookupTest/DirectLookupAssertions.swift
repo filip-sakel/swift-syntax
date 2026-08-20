@@ -34,9 +34,8 @@ struct DirectLookupMatcher {
   let lookupFile: SourceFileSyntax
 }
 
-// MARK: `Reference` Conformances
+// MARK: `Definition` Conformances
 
-// Vacuous conformances (`Reference` is unihabited)
 extension DirectLookupMatcher.Definition: LexicalAnnotation, Identifiable, CustomStringConvertible {
   typealias SyntaxReference = ValueDeclSyntax
   func findSyntaxFromToken(
@@ -154,7 +153,7 @@ extension DirectLookupMatcher: LexicalMatcher {
 /// ``DeclGroupSyntax/findDirectMembers``. We expect lookup to return the
 /// declarations with the given markers, e.g., the declaration marked '🟥'.
 ///
-/// See ``TestDirectLookup`` for examples.
+/// See ``DirectLookupTests`` for examples.
 func assertDirectLookup(
   _ lookupSource: LexicalLookupSource<DirectLookupMatcher>,
   configuredRegions: ConfiguredRegions? = nil,

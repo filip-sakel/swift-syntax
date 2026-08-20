@@ -15,16 +15,17 @@ import SwiftIfConfig
 import SwiftSyntax
 import XCTest
 
-/// Asserts that the annotated `ValueDeclSyntax` matches the given
-/// declaration-name references.
+/// Asserts the annotated `IdentifierTypeSyntax` expectation produces
+/// the expected unqualified-type-lookup results (with the right
+/// `CodeBlockItemListSyntax` scopes).
 struct UnqualifiedTypeLookupMatcher {
-  /// Marks a given 'TypeDeclSyntax' in source.
+  /// Marks a given 'CodeBlockItemListSyntax' in source.
   struct Definition {
     let typeDeclMarker: Character
   }
 
-  /// Annotates `ValueDeclSyntax` with the expected declaration-name references
-  /// and the other results that each reference should yield.
+  /// Annotates an `IdentifierTypeSyntax` with the expected
+  /// unqualified type lookup results (at that position).
   struct Expectation {
     let results: [GenericUnqualifiedTypeLookupResult<Character?>]
   }
@@ -33,9 +34,8 @@ struct UnqualifiedTypeLookupMatcher {
   let configuredRegions: ConfiguredRegions?
 }
 
-// MARK: `Reference` Conformances
+// MARK: `Definition` Conformances
 
-// Vacuous conformances (`Reference` is unihabited)
 extension UnqualifiedTypeLookupMatcher.Definition: LexicalAnnotation, Identifiable, CustomStringConvertible {
   typealias SyntaxReference = CodeBlockItemListSyntax
   func findSyntaxFromToken(
@@ -181,24 +181,12 @@ extension UnqualifiedTypeLookupMatcher: LexicalMatcher {
 // MARK: Assert Function
 
 /// A lookup source is an annotated string parsed as a `SourceFileSyntax`. Using
-/// string interpolation, you can mark `ValueDeclSyntax` nodes, and attach
-/// expectations to a `DeclGroupSyntaxType` (nominal type or extension). We
-/// test the results of `DeclGroupSyntax/findDirectMembers`.
+/// string interpolation, you can annotate `IdentifierTypeSyntax` nodes with
+/// the expected `GenericUnqualifiedTypeLookupResult<Character?>` results.
+/// These results use `Character?` markers as scopes; these markers should be
+/// attached to `CodeBlockItemListSyntax` scopes.
 ///
-/// ### Usage
-///
-/// We 'define' `ValueDeclSyntax` nodes by prepending `\("🟥")`. Then, we attach
-/// expectations before a declaration group with:
-/// ```swift
-/// \(members: [
-///   TestLookup(...): ["🟥", ...]
-/// ])
-/// ```
-/// `TestLookup` specifies the name and member kind passed to
-/// ``DeclGroupSyntax/findDirectMembers``. We expect lookup to return the
-/// declarations with the given markers, e.g., the declaration marked '🟥'.
-///
-/// See ``TestDirectLookup`` for examples.
+/// See ``UnqualifiedTypeLookupTests`` for examples.
 func assertUnqualifiedTypeLookup(
   _ lookupSource: LexicalLookupSource<UnqualifiedTypeLookupMatcher>,
   configuredRegions: ConfiguredRegions? = nil,
