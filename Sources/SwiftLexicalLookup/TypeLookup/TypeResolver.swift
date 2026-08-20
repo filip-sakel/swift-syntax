@@ -1127,7 +1127,7 @@ extension TypeResolver {
         switch registrationFailure {
         // TODO: Explain why these invariants hold
         case .cannotRegisterUnderRedeclaration, .noDeclGroupParent, .parentNotRegistered, .parentExtensionUnbound,
-          .differentRedeclarationFile:
+          .cannotRegisterRedeclaration:
           fatalError(
             "[ewiftLexicalLookup] Internal error: Unexpected nominal-registration error: \(registrationFailure)"
           )
@@ -1193,7 +1193,7 @@ extension TypeResolver {
         switch registrationFailure {
         // TODO: Explain why these invariants hold
         case .cannotRegisterUnderRedeclaration, .noDeclGroupParent, .parentNotRegistered, .parentExtensionUnbound,
-          .differentRedeclarationFile:
+          .cannotRegisterRedeclaration:
           fatalError(
             "[ewiftLexicalLookup] Internal error: Unexpected nominal-registration error: \(registrationFailure)"
           )

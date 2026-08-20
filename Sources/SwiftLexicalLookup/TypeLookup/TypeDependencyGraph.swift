@@ -723,11 +723,29 @@ extension TypeDependencyGraph {
     /// `_(File.swift)::A`, we can only register member type 'C' under
     /// the main declaration.
     case cannotRegisterUnderRedeclaration
-    /// Main declaration isn't in the same file as the purported redeclaration
-    case differentRedeclarationFile
-    // /// We can only register redeclarations under extensions, which may not
-    // /// have been bound when first registering a type. If a
-    // case cannotRegisterTopScopeRedeclaration
+    /// We don't allow registering redeclarations. Redeclarations should be
+    /// diagnosed as ambiguities.
+    ///
+    /// For instance:
+    /// ```swift
+    /// struct A {}
+    /// typealias A = ()
+    /// let _: A // <- 'A' is ambiguous
+    ///
+    /// extension A {
+    ///   struct B {}
+    ///   typealias B = ()
+    /// }
+    /// let _: A.B // 'A.B' is ambiguous
+    /// ```
+    /// It's possible that we discover ambiguities after binding extensions.
+    /// So, to keep the graph consistent, extensions track their extensions:
+    /// if member that an extension depends on becomes ambiguous, we invalidate
+    /// the extension. Further, in both unqualified and qualified lookup, all
+    /// possible declarations should be returned; if we can't disambiguate,
+    /// we diagnose an ambiguity error before attempting to register a type
+    /// in the graph.
+    case cannotRegisterRedeclaration
   }
 
   /// Registers the given nominal-type reference or return the
@@ -797,71 +815,23 @@ extension TypeDependencyGraph {
 
     // If this type is new, just register and return
     // TODO: Test following, e.g. struct A { struct B {} }; extension A { struct B {} }
-    guard let existingType = namesToTypes[qualifiedName] else {
+    let type: NominalType
+    if let existingType = namesToTypes[qualifiedName] {
+      // We don't allow redeclarations (see `.cannotRegisterRedeclaration`
+      // docstring for why)
+      guard existingType.mainDecl.declGroup == mainDecl else {
+        return .failure(NominalRegistrationFailure.cannotRegisterRedeclaration)
+      }
+      // Return the existing type
+      type = existingType
+    } else {
+      // Create a new type
       let freshNominal = NominalType(mainDecl: mappedMainDecl)
       namesToTypes[qualifiedName] = freshNominal
-      return .success(
-        NominalTypeRef(globalReference: GlobalNominalTypeRef(qualifiedName: qualifiedName, nominal: freshNominal))
-      )
+      type = freshNominal
     }
-
-    // TODO: Justify this or restructure code to maintain invariants
-    // // Ensure no dependents exist
-    // guard existingType.mainDecl.declGroup == mainDecl else {
-    //   fatalError(
-    //     "[SwiftLexicalLookup] Internal error: Trying to register a redeclaration of '\(qualifiedName.debugDescription)' but type has dependents [\(existingType.dependents.map(\.debugDescription).joined(separator: ", "))]"
-    //   )
-    // }
-
-    // FIXME: Invalidate extensions if we're introducing a redecl to an existing type
-    //
-    // But why would this be necessary? When we admit an extension, we should have made
-    // sure there are no top-level redeclarations, and the only possible redeclarations
-    // are by binding more extensions; instead consider banning registering redecls,
-    // or assert there are no dependents.
-    //
-    // Let's try removing the type
-    //
-    // if !existingType.dependents.isEmpty {
-    //   // Global types should have had the ambiguity diagnosed
-    //   guard let (qualifiedBaseName, member: _) = qualifiedName.baseAndMember else {
-    //     // TODO: Find message
-    //     fatalError("TODO")
-    //   }
-    //   _unbindMemberType(
-    //     baseTypeName: qualifiedBaseName,
-    //     baseTypeDecl: ,
-    //     baseTypeModule:,
-    //     baseType: NominalType,
-    //     member: TypeMember,
-    //     invalidatedExtensions: &[ExtensionState], symbolTable: SymbolTable)
-    //
-    //   let result: Result<NominalType?, NominalRemovalFailure> = __removeNominalTypeDeclaration(
-    //     existingType.mainDecl.declGroup,
-    //     nominalDeclModule: symbolTable.moduleMap[existingType.mainDecl.declGroup.fileRoot]!,
-    //     typeName: qualifiedName,
-    //     symbolTable: symbolTable
-    //   )
-    //   self._unbindMemberType(baseTypeName: GlobalTypeName, baseTypeDecl: Attached<DeclGroupSyntaxType>, baseTypeModule: Identifier, baseType: NominalType, member: TypeMember, invalidatedExtensions: &[ExtensionState], symbolTable: SymbolTable)
-    //   switch result {
-    //   case .success: break
-    //   case .failure(let failure):
-    //     // TODO: Justify
-    //     fatalError("[SwiftLexicalLookup] Internal error: Unexpected nominal-registration failure: \(failure)")
-    //   }
-    // }
-
-    // Add the redeclaration (or ignore if the decl is already added)
-    guard let typeWithRedeclaration = existingType.addingRedeclaration(mappedMainDecl) else {
-      // This means the main declaration is in a different file
-      return .failure(NominalRegistrationFailure.differentRedeclarationFile)
-    }
-    namesToTypes[qualifiedName] = typeWithRedeclaration
-
     return .success(
-      NominalTypeRef(
-        globalReference: GlobalNominalTypeRef(qualifiedName: qualifiedName, nominal: typeWithRedeclaration)
-      )
+      NominalTypeRef(globalReference: GlobalNominalTypeRef(qualifiedName: qualifiedName, nominal: type))
     )
   }
 
@@ -1442,7 +1412,7 @@ extension TypeDependencyGraph {
         symbolTable: symbolTable
       )
     ])
-    guard var memberNominal: NominalType = namesToTypes[memberNominalTypeName] else {
+    guard let memberNominal: NominalType = namesToTypes[memberNominalTypeName] else {
       return
     }
 
@@ -1711,7 +1681,7 @@ extension TypeDependencyGraph {
       else {
         return nil
       }
-      var newDependents = baseType.dependents
+      let newDependents = baseType.dependents
       // let nextDependent = newDependents.remove(at: nextIndex)
       let nextDependent = newDependents[nextIndex]
 
