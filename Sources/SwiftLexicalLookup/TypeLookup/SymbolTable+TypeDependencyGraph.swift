@@ -20,8 +20,12 @@ extension SymbolTable {
     var result = [SourceFileSyntax: OrderedSet<Attached<ExtensionDeclSyntax>>]()
     for (_, files) in moduleToSources {
       for (_, file) in files {
-        // TODO: Implement configuredRegions
-        result[file] = file.findExtensions(configuredRegions: nil)
+        guard case .success(let fileConfiguredRegions) = getConfiguredRegions(forFile: file) else {
+          fatalError(
+            "[SwiftLexicalLookup] Internal error: Unexpectedly cannot get configured regions for registered file."
+          )
+        }
+        result[file] = file.findExtensions(configuredRegions: fileConfiguredRegions)
       }
     }
     return result
@@ -171,17 +175,20 @@ extension SymbolTable {
     dependencies: DependencyTracker,
     verbose: Bool
   ) -> Result<BindingResult, ExtensionBindingFailure> {
-    // Get extension and module
-    guard let module = moduleMap[extensionDecl.fileRoot] else {
+    // Get extension module and its file's configured regions
+    guard
+      let module = moduleMap[extensionDecl.fileRoot],
+      case .success(let fileConfiguredRegions) = getConfiguredRegions(forFile: extensionDecl.fileRoot)
+    else {
       return .failure(ExtensionBindingFailure.nonRegisteredSyntaxRoot)
     }
     let admissionResult = dependencyGraph.admitExtension(
       extensionDecl,
       extensionDeclModule: module,
+      extensionFileConfiguredRegions: fileConfiguredRegions,
       isUpdatingInvalidating: isFixingInvalidating,
       to: result,
       dependencyTracker: dependencies,
-      configuredRegions: configuredRegions,
       symbolTable: self
     )
 
@@ -526,21 +533,13 @@ extension SymbolTable {
 // MARK: Qualified Type Lookup
 
 extension SymbolTable {
-  @_spi(_QualifiedLookupTests) public enum QualifiedTypeLookupFailure: Error {
-    /// Type syntax doesn't have source-file root or source-file root isn't in
-    /// module map.
-    case unregisteredSourceRoot
-
-    case lookupFailure(TypeDependencyGraph.QualifiedTypeLookupFailure)
-  }
-
   func findMemberType(
     baseType: NominalTypeRef,
     memberTypeName: Identifier,
     introducingTypeSyntax: Attached<TypeLikeSyntax>,
     introducingModule: ModuleName,
     dependencyTracker: inout DependencyTracker,
-  ) -> Result<[Attached<TypeDeclSyntax>], QualifiedTypeLookupFailure> {
+  ) -> Result<[Attached<TypeDeclSyntax>], TypeDependencyGraph.QualifiedTypeLookupFailure> {
     assert(
       moduleMap[introducingTypeSyntax.fileRoot] == introducingModule,
       "[SwiftLexicalLookup] Internal error: Caller passed wrong module for `\(introducingTypeSyntax.trimmedDescription)`: got '\(introducingModule.name)' but expected \(moduleMap[introducingTypeSyntax.fileRoot].debugDescription)"
@@ -562,7 +561,7 @@ extension SymbolTable {
       origin: (typeSyntax: introducingTypeSyntax, module: introducingModule),
       moduleMap: moduleMap,
       dependencyTracker: &dependencyTracker,
-      configuredRegions: configuredRegions
-    ).mapError(QualifiedTypeLookupFailure.lookupFailure)
+      symbolTable: self
+    )
   }
 }

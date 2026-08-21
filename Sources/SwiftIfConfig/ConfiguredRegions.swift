@@ -59,6 +59,18 @@ public struct ConfiguredRegions {
   /// This operation takes time that is logarthmic in the number of regions
   /// in the syntax tree.
   public func isActive(_ node: some SyntaxProtocol) -> IfConfigRegionState {
+    // TODO: Remove
+    #if DEBUG
+    if let (firstIfClause, _) = regions.first,
+      let regionFile = firstIfClause.root.as(SourceFileSyntax.self),
+      let nodeFile = node.root.as(SourceFileSyntax.self)
+    {
+      precondition(
+        regionFile == nodeFile,
+        "Unexpectedly looked up `\(node.trimmedDescription)` in ConfiguredRegions set up on other file `\(regionFile.trimmedDescription)`"
+      )
+    }
+    #endif
     // Find the slice of the regions in which this node lands.
     var currentSlice = regions[...]
     while !currentSlice.isEmpty {

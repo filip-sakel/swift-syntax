@@ -521,6 +521,15 @@ extension TypeResolutionFailure {
     }
     return module
   }
+  /// Gets the configured regions of an an attached node's file. Assumes the
+  /// file is registered; traps otherwise.
+  func extractConfiguredRegions<S: SyntaxProtocol>(syntax: Attached<S>) -> ConfiguredRegions? {
+    guard case .success(let fileConfiguredRegions) = symbolTable.getConfiguredRegions(forFile: syntax.fileRoot) else {
+      // Should be checked upon entrance in `resolveSyntax`
+      fatalError("[SwiftLexicalLookup] Internal error: Unexpectedly found unregistered file: ```\(syntax.fileRoot)```")
+    }
+    return fileConfiguredRegions
+  }
 }
 
 // MARK: Type Syntax
@@ -576,12 +585,15 @@ extension TypeResolver {
     defer { visitedTypeSyntax.remove(typeSyntax) }
 
     // We assert the file root is registered in the symbol table.
-    guard symbolTable.moduleMap[typeSyntax.fileRoot] != nil else {
+    guard
+      symbolTable.moduleMap[typeSyntax.fileRoot] != nil,
+      case .success(let fileConfiguredRegions) = symbolTable.getConfiguredRegions(forFile: typeSyntax.fileRoot)
+    else {
       return .failure(Failure.syntaxNotInSymbolTable(typeSyntax.fileRoot))
     }
     // Further, if given `configuredRegions`, ensure the given syntax is active.
-    if let configuredRegions = symbolTable.configuredRegions,
-      configuredRegions.isActive(typeSyntax.node) != .active
+    if let fileConfiguredRegions,
+      fileConfiguredRegions.isActive(typeSyntax.node) != .active
     {
       return .failure(Failure.syntaxInDisabledRegion)
     }
@@ -805,7 +817,7 @@ extension TypeResolver {
       // Scoped unqualified lookup in this module
       lookupResults = typeComponent.introducingSyntax.findUnqualifiedType(
         typeComponent.name,
-        configuredRegions: symbolTable.configuredRegions
+        configuredRegions: extractConfiguredRegions(syntax: typeComponent.introducingSyntax)
       )
     }
 
@@ -1045,7 +1057,7 @@ extension TypeResolver {
     // First, get the module
     let introducingModule = extractModule(syntax: memberIntroducingSyntax)
     // Look up
-    let memberTypeDeclsResult: Result<[Attached<TypeDeclSyntax>], SymbolTable.QualifiedTypeLookupFailure> =
+    let memberTypeDeclsResult: Result<[Attached<TypeDeclSyntax>], TypeDependencyGraph.QualifiedTypeLookupFailure> =
       symbolTable.findMemberType(
         baseType: resolvedNominalBaseType,
         memberTypeName: memberName,
@@ -1059,13 +1071,13 @@ extension TypeResolver {
     switch memberTypeDeclsResult {
     case .success(let success):
       memberTypeDecls = success
-    case .failure(.unregisteredSourceRoot):
+    case .failure(.unregisteredFileRoot):
       // We check that the root is a source file in the symbol table
       // at the top of ``resolveSyntax``.
       fatalError(
         "[SwiftLexicalLookup] Internal error: Unexpectedly asked to resolve a type declaration whose root isn't a file or a file not registered in the symbol table."
       )
-    case .failure(.lookupFailure(.invalidBase)):
+    case .failure(.invalidBase):
       fatalError(
         "[SwiftLexicalLookup] Internal error: Base type \(resolvedNominalBaseType) was unexpectedly invalid."
       )
@@ -1208,7 +1220,7 @@ extension TypeResolver {
         switch registrationFailure {
         // TODO: Explain why these invariants hold
         case .cannotRegisterUnderRedeclaration, .noDeclGroupParent, .parentNotRegistered, .parentExtensionUnbound,
-          .cannotRegisterRedeclaration:
+          .cannotRegisterRedeclaration, .unregisteredFileRoot:
           fatalError(
             "[ewiftLexicalLookup] Internal error: Unexpected nominal-registration error: \(registrationFailure)"
           )
@@ -1224,7 +1236,7 @@ extension TypeResolver {
       // Gather type decls with the same name
       var scopeTypeDecls = [TypeDeclSyntax]()
       codeBlockScope.node._visitDirectMembers(
-        configuredRegions: symbolTable.configuredRegions,
+        configuredRegions: extractConfiguredRegions(syntax: codeBlockScope),
         visit: { valueDecl in
           guard
             let typeDecl = valueDecl.as(TypeDeclSyntax.self),
@@ -1274,7 +1286,7 @@ extension TypeResolver {
         switch registrationFailure {
         // TODO: Explain why these invariants hold
         case .cannotRegisterUnderRedeclaration, .noDeclGroupParent, .parentNotRegistered, .parentExtensionUnbound,
-          .cannotRegisterRedeclaration:
+          .cannotRegisterRedeclaration, .unregisteredFileRoot:
           fatalError(
             "[ewiftLexicalLookup] Internal error: Unexpected nominal-registration error: \(registrationFailure)"
           )
@@ -1690,8 +1702,7 @@ extension TypeResolver {
 
     // Find all the extensions we need to bind
     let accessibleExtensions = symbolTable.findAllExtensions(
-      accessibleFrom: typeReference.originatingSyntax.fileRoot,
-      configuredRegions: symbolTable.configuredRegions
+      accessibleFrom: typeReference.originatingSyntax.fileRoot
     )
     log("Accessible extensions: \(accessibleExtensions.map(\._memberlessDescription))")
 

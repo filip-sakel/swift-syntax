@@ -77,7 +77,9 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
     case annotation(annotation: Annotation, file: StaticString, line: UInt)
   }
 
-  struct Interpolation: ExpressibleByStringLiteral, ExpressibleByStringInterpolation, StringInterpolationProtocol {
+  struct Interpolation: ExpressibleByStringInterpolation, StringInterpolationProtocol {
+    typealias StringInterpolation = Self
+
     fileprivate var components: [Component]
     /// A strong reference to identifier tokens used by `allocateIdentifier`
     fileprivate var identifierTokens: [TokenSyntax]
@@ -90,6 +92,9 @@ struct LexicalLookupSource<Matcher: LexicalMatcher>: ExpressibleByStringLiteral,
     init(stringLiteral: String) {
       self.init()
       appendLiteral(stringLiteral)
+    }
+    init(stringInterpolation: LexicalLookupSource<Matcher>.Interpolation) {
+      self = stringInterpolation
     }
     mutating func appendLiteral(_ literal: String) {
       components.append(.stringFragment(literal))

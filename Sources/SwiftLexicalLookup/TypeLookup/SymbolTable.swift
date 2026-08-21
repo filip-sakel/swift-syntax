@@ -22,7 +22,23 @@ import SwiftSyntax
   public let moduleName: ModuleName
   @_spi(_QualifiedLookupTests)
   public let moduleToSources: [ModuleName: [String: SourceFileSyntax]]
-  let configuredRegions: ConfiguredRegions?
+  public let buildConfiguration: (any BuildConfiguration)?
+
+  // private let _fileToConfiguredRegions: [SourceFileSyntax: ConfiguredRegions?]
+  //
+  // TODO: Remove
+  // let configuredRegions: ConfiguredRegions?
+  enum NonRegisteredFileFailure: Error {
+    case unregisteredFileRoot
+  }
+  func getConfiguredRegions(
+    forFile fileSyntax: SourceFileSyntax
+  ) -> Result<ConfiguredRegions?, NonRegisteredFileFailure> {
+    guard fileMap[fileSyntax] != nil else { return .failure(.unregisteredFileRoot) }
+    guard let buildConfiguration else { return .success(nil) }
+    let configuredRegions = fileSyntax.configuredRegions(in: buildConfiguration)
+    return .success(configuredRegions)
+  }
 
   let _verbose: Bool = false
   let _logNestingLimit: Int? = nil
@@ -51,14 +67,13 @@ import SwiftSyntax
   public init?(
     moduleName: ModuleName,
     moduleToSources: [ModuleName: [String: SourceFileSyntax]],
-    buildConfiguration: StaticBuildConfiguration?
+    buildConfiguration: (any BuildConfiguration)?
   ) {
     guard moduleToSources[moduleName] != nil else { return nil }
 
     self.moduleName = moduleName
     self.moduleToSources = moduleToSources
-    // FIXME: Pass `buildConfiguration`
-    self.configuredRegions = nil
+    self.buildConfiguration = buildConfiguration
   }
 }
 

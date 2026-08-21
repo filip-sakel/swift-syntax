@@ -97,7 +97,7 @@ extension SourceFileSyntax {
     }
     // Don't go into to nested scopes; just the source file
     override func visit(_ node: CodeBlockItemListSyntax) -> SyntaxVisitorContinueKind {
-      if node.parent?.is(SourceFileSyntax.self) == true {
+      if node.parent?.is(SourceFileSyntax.self) == true || node.parent?.is(IfConfigClauseSyntax.self) == true {
         return .visitChildren
       } else {
         return .skipChildren
@@ -136,12 +136,23 @@ extension SymbolTable {
   //    c. Transitive dependencies in member visibility migration mode (TODO :Verify)
   //
   func findAllExtensions(
-    accessibleFrom lookupFile: SourceFileSyntax,
-    configuredRegions: ConfiguredRegions?
+    accessibleFrom lookupFile: SourceFileSyntax
       // TODO: Convert to array
   ) -> OrderedSet<Attached<ExtensionDeclSyntax>> {
+    func extractConfiguredRegions(file: SourceFileSyntax) -> ConfiguredRegions? {
+      switch getConfiguredRegions(forFile: file) {
+      case .success(let success):
+        return success
+      case .failure(.unregisteredFileRoot):
+        fatalError(
+          "[SwiftLexicalLookup] Internal error: Unexpectedly couldn't find configured regions for file: \(file.trimmedDescription)"
+        )
+      }
+    }
+
     // TODO: This should be imported *decls*, e.g., import struct Swift.Int
-    let imports = lookupFile.findImportDecls(using: configuredRegions)
+    let lookupFileConfiguredRegions = extractConfiguredRegions(file: lookupFile)
+    let imports = lookupFile.findImportDecls(using: lookupFileConfiguredRegions)
     let importedModules = imports.flatMap({ $0.path.compactMap({ Identifier(validating: $0.name) }) })
 
     guard let lookupModule = self.moduleMap[lookupFile] else {
@@ -158,10 +169,10 @@ extension SymbolTable {
     }
 
     // Look in file
-    var results = lookupFile.findExtensions(configuredRegions: configuredRegions)
+    var results = lookupFile.findExtensions(configuredRegions: lookupFileConfiguredRegions)
     // Look in this module
     for file in internalSources.values where file != lookupFile {
-      results.formUnion(file.findExtensions(configuredRegions: configuredRegions))
+      results.formUnion(file.findExtensions(configuredRegions: extractConfiguredRegions(file: file)))
     }
     // Look for imported modules (reversed order to account for shadowing)
     for module in importedModules.reversed() {
@@ -172,7 +183,7 @@ extension SymbolTable {
         )
       }
       for file in moduleSources.values {
-        results.formUnion(file.findExtensions(configuredRegions: configuredRegions))
+        results.formUnion(file.findExtensions(configuredRegions: extractConfiguredRegions(file: file)))
       }
     }
 

@@ -534,6 +534,7 @@ extension TypeDependencyGraph {
   @_spi(_QualifiedLookupTests) public enum QualifiedTypeLookupFailure: Error {
     /// References non-registered base type
     case invalidBase
+    case unregisteredFileRoot(SourceFileSyntax)
   }
   func findMemberType(
     baseType: NominalTypeRef,
@@ -541,7 +542,7 @@ extension TypeDependencyGraph {
     origin: (typeSyntax: Attached<TypeLikeSyntax>, module: ModuleName),
     moduleMap: [SourceFileSyntax: ModuleName],
     dependencyTracker: inout DependencyTracker,
-    configuredRegions: ConfiguredRegions?
+    symbolTable: borrowing SymbolTable
   ) -> Result<[Attached<TypeDeclSyntax>], QualifiedTypeLookupFailure> {
     // Get global nominal reference
     let baseTypeReference: GlobalNominalTypeRef
@@ -549,9 +550,18 @@ extension TypeDependencyGraph {
     case .global(let globalReference):
       baseTypeReference = globalReference
     case .local(let nominalTypeDecl):
+      guard
+        case .success(let declFileConfiguredRegions) = symbolTable.getConfiguredRegions(
+          forFile: nominalTypeDecl.fileRoot
+        )
+      else {
+        return .failure(QualifiedTypeLookupFailure.unregisteredFileRoot(nominalTypeDecl.fileRoot))
+      }
+      // TODO: Directly collect members, rather than building hash map & then getting specific member
+      //
       // Local decls don't have extensions (=> no dependencies generated); just
       // look into the main declaration.
-      let groupedTypeMembers = nominalTypeDecl._groupTypeMembers(configuredRegions: configuredRegions)
+      let groupedTypeMembers = nominalTypeDecl._groupTypeMembers(configuredRegions: declFileConfiguredRegions)
       let typeMembers = groupedTypeMembers[memberTypeName, default: []]
       return .success(typeMembers)
     }
@@ -646,6 +656,8 @@ extension TypeDependencyGraph {
   }
 
   enum NominalRegistrationFailure: Error {
+    /// The file root is not registered in the symbol table.
+    case unregisteredFileRoot(SourceFileSyntax)
     /// In order to register a nested type, its parent must be registered.
     case parentNotRegistered(parentTypeName: GlobalTypeName)
 
@@ -773,8 +785,15 @@ extension TypeDependencyGraph {
     // TODO: Add an assertion when registering an extension-dependent nominal, that
     //       the extension is registered
 
-    // Map out the type
-    let mappedMainDecl = MappedDeclGroup.from(declGroup: mainDecl, configuredRegions: symbolTable.configuredRegions)
+    // Map out the main decl
+    guard
+      case .success(let declFileConfiguredRegions) = symbolTable.getConfiguredRegions(
+        forFile: mainDecl.fileRoot
+      )
+    else {
+      return .failure(NominalRegistrationFailure.unregisteredFileRoot(mainDecl.fileRoot))
+    }
+    let mappedMainDecl = MappedDeclGroup.from(declGroup: mainDecl, configuredRegions: declFileConfiguredRegions)
 
     // If this type is new, just register and return
     // TODO: Test following, e.g. struct A { struct B {} }; extension A { struct B {} }
@@ -1631,13 +1650,13 @@ extension TypeDependencyGraph {
   mutating func admitExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionDeclModule: ModuleName,
+    extensionFileConfiguredRegions: ConfiguredRegions?,
     isUpdatingInvalidating isFixingInvalidating: Bool,
     to rawResult: Result<
       (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
       TypeResolver.Failure
     >,
     dependencyTracker: DependencyTracker,
-    configuredRegions: ConfiguredRegions?,
     symbolTable: borrowing SymbolTable
   ) -> Result<BindingResult, ExtensionAdmissionFailure> {
     // Ensure extension isn't already bound
@@ -1646,7 +1665,10 @@ extension TypeDependencyGraph {
     }
 
     // Prepare to store extension state
-    let mappedExtensionDecl = MappedDeclGroup.from(declGroup: extensionDecl, configuredRegions: configuredRegions)
+    let mappedExtensionDecl = MappedDeclGroup.from(
+      declGroup: extensionDecl,
+      configuredRegions: extensionFileConfiguredRegions
+    )
 
     // === Diagnose Dependency Cycles ===
 

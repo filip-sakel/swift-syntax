@@ -186,12 +186,15 @@ final class TypeResolutionTests: XCTestCase {
 
   // MARK: If Config
   func testIfConfig() {
-    return
     let baseSourceInterpolation: LexicalLookupSource<TypeResolutionMatcher>.Interpolation = """
-      \("🟩")struct A {}
-      \("🟨")struct B {}
-      \("🟪")struct C {}
-      \("🟦")struct D {}
+      \("🟩", name: "_(MyFile.swift)::A")
+      struct A {}
+      \("🟨", name: "_(MyFile.swift)::B")
+      struct B {}
+      \("🟪", name: "_(MyFile.swift)::C")
+      struct C {}
+      \("🟦", name: "_(MyFile.swift)::D")
+      struct D {}
 
       #if FlagA
       extension A {
@@ -239,65 +242,66 @@ final class TypeResolutionTests: XCTestCase {
         let _: \(nominal: "🟩")A.T
         """
       ],
-      buildConfiguration: flagsConfig(["FlagA"])
+      buildConfiguration: flagsConfig(["FlagA"]),
+      verbose: true
     )
-    // Flags: FlagA, FlagB => `struct B`
-    assertTypeResolution(
-      [
-        "MyFile.swift": """
-        \(interpolation: baseSourceInterpolation)
-
-        let _: \(nominal: "🟨")A.T
-        """
-      ],
-      buildConfiguration: flagsConfig(["FlagA", "FlagB"])
-    )
-    // Flags: FlagB => no member
-    assertTypeResolution(
-      [
-        "MyFile.swift": """
-        \(interpolation: baseSourceInterpolation)
-
-        let _: \(failure: .noTypeMember(member: memberT, in: .memberResults(["🟩"])))A.T
-        """
-      ],
-      buildConfiguration: flagsConfig(["FlagB"])
-    )
-    // Flags: FlagB, FlagC => `struct C`
-    assertTypeResolution(
-      [
-        "MyFile.swift": """
-        \(interpolation: baseSourceInterpolation)
-
-        let _: \(nominal: "🟪"))A.T
-        """
-      ],
-      buildConfiguration: flagsConfig(["FlagB", "FlagC"])
-    )
-    // Flags: FlagB, FlagD => `struct D`
-    assertTypeResolution(
-      [
-        "MyFile.swift": """
-        \(interpolation: baseSourceInterpolation)
-
-        let _: \(nominal: "🟦"))A.T
-        """
-      ],
-      buildConfiguration: flagsConfig(["FlagB", "FlagD"])
-    )
-    // Flags: FlagB, FlagC, FlagD => ambiguity between `struct C` & `struct D`
-    assertTypeResolution(
-      [
-        "MyFile.swift": """
-        \(interpolation: baseSourceInterpolation)
-
-        let _: \(failure: .invalidBaseType(
-         .ambiguousTypeDecl(["struct C {}", "struct D {}"])
-        ))A.T
-        """
-      ],
-      buildConfiguration: flagsConfig(["FlagB", "FlagC", "FlagD"])
-    )
+    // // Flags: FlagA, FlagB => `struct B`
+    // assertTypeResolution(
+    //   [
+    //     "MyFile.swift": """
+    //     \(interpolation: baseSourceInterpolation)
+    //
+    //     let _: \(nominal: "🟨")A.T
+    //     """
+    //   ],
+    //   buildConfiguration: flagsConfig(["FlagA", "FlagB"])
+    // )
+    // // Flags: FlagB => no member
+    // assertTypeResolution(
+    //   [
+    //     "MyFile.swift": """
+    //     \(interpolation: baseSourceInterpolation)
+    //
+    //     let _: \(failure: .noTypeMember(member: memberT, in: .memberResults(["🟩"])))A.T
+    //     """
+    //   ],
+    //   buildConfiguration: flagsConfig(["FlagB"])
+    // )
+    // // Flags: FlagB, FlagC => `struct C`
+    // assertTypeResolution(
+    //   [
+    //     "MyFile.swift": """
+    //     \(interpolation: baseSourceInterpolation)
+    //
+    //     let _: \(nominal: "🟪"))A.T
+    //     """
+    //   ],
+    //   buildConfiguration: flagsConfig(["FlagB", "FlagC"])
+    // )
+    // // Flags: FlagB, FlagD => `struct D`
+    // assertTypeResolution(
+    //   [
+    //     "MyFile.swift": """
+    //     \(interpolation: baseSourceInterpolation)
+    //
+    //     let _: \(nominal: "🟦"))A.T
+    //     """
+    //   ],
+    //   buildConfiguration: flagsConfig(["FlagB", "FlagD"])
+    // )
+    // // Flags: FlagB, FlagC, FlagD => ambiguity between `struct C` & `struct D`
+    // assertTypeResolution(
+    //   [
+    //     "MyFile.swift": """
+    //     \(interpolation: baseSourceInterpolation)
+    //
+    //     let _: \(failure: .invalidBaseType(
+    //      .ambiguousTypeDecl(["struct C {}", "struct D {}"])
+    //     ))A.T
+    //     """
+    //   ],
+    //   buildConfiguration: flagsConfig(["FlagB", "FlagC", "FlagD"])
+    // )
   }
 
   // MARK: Aliases
