@@ -14,7 +14,8 @@ import SwiftSyntax
 
 /// The type result of structural type resolution. `Result`
 /// represents a nominal type.
-@_spi(_QualifiedLookup) public indirect enum MemberLookupResult<Result> {
+@_spi(_QualifiedLookupTests)
+public indirect enum MemberLookupResult<Result> {
   case function(argumentCount: Int)
   case tuple(labels: [Identifier?])
   case memberResults([Result])

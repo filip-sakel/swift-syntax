@@ -28,7 +28,7 @@ import SwiftSyntax
 public enum PartiallyResolvedType {
   /// `Any`, a suppressed type like `~Escapable`, or a composition thereof.
   case anyType
-  /// A metatype of a type
+  /// A metatype of a type, e.g., `(A, B).Type`
   case metatype(base: Attached<TypeSyntax>)
   /// A bare type identifier, such as 'A', 'Self', '`Self`', '`Any`',
   /// 'Module::A', or 'Module::Any'.
@@ -39,8 +39,6 @@ public enum PartiallyResolvedType {
     memberComponent: Result<TypeReference, InvalidTypeIdentifierFailure>
   )
   /// A composition of type syntax.
-  ///
-  /// Each
   ///
   /// E.g. A & B & (Int) -> Void
   case composition([Attached<TypeSyntax>])

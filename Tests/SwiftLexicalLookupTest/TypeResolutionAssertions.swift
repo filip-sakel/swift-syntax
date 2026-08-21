@@ -353,50 +353,6 @@ extension TypeResolutionMatcher: LexicalMatcher {
           )
         )
       }
-
-    // case (.success(.memberResults(let markers)), .success(.memberResults(let nominalTypes))):
-    //   // Find the referenced definitions
-    //   let expectations: [ContextualizedAnnotation<Definition>] = markers.compactMap({ marker in
-    //     guard let targetDefinition = markersToDefinitions[marker] else {
-    //       failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
-    //       return nil
-    //     }
-    //     return targetDefinition
-    //   })
-    //
-    //   let results: [ContextualizedAnnotation<Definition>] = nominalTypes.compactMap({ nominalType in
-    //     guard let targetDefinition = syntaxToDefinitions[nominalType.mainDecl.node] else {
-    //       failures.append(
-    //         ExpectationFailure.resultReferencesUnmarkedSyntax(
-    //           syntaxDescription: nominalType.nominalTypeRef.globalName.debugDescription
-    //         )
-    //       )
-    //       return nil
-    //     }
-    //     return targetDefinition
-    //   })
-    //
-    //   // Give up if markers are undefined (i.e. we already have failures)
-    //   //
-    //   // Continuing with undefined markers might give us confusing errors.
-    //   guard failures.isEmpty else { break }
-    //
-    //   // Diff if markers check out
-    //   LexicalAssertionUtilities.diffLexicalResults(expected: expectations, actual: results, failures: &failures)
-    // case (.success(let expectedLookupResult), .success(let actualLookupResult)):
-    //   // We handled markers more nicely above. Here, `\.description` is a
-    //   // simple fallback in the uncommon case that one result produces markers
-    //   // and the other doesn't.
-    //   let expectedLookupDescription = expectedLookupResult.mapMembers(\.description)._debugDescription
-    //   let actualLookupDescription = actualLookupResult.debugDescription
-    //   if expectedLookupDescription != actualLookupDescription {
-    //     failures.append(
-    //       ExpectationFailure.other(
-    //         failure:
-    //           "Resolved-type mismatch. Expected: \(expectedLookupDescription)\nBut got:  \(actualLookupDescription)"
-    //       )
-    //     )
-    //   }
     case (.failure(let expectedFailure), .failure(let actualFailure)):
       // Describe the expected failure
       func markerToQualifiedName(marker: Character) -> String {
