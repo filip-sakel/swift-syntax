@@ -108,10 +108,10 @@ extension Array {
   GlobalTypeName
 >
 
-@_spi(_QualifiedLookupTests) public typealias InvalidatedExtensions = [ExtensionState]
-@_spi(_QualifiedLookupTests) public typealias BindingFailure = TypeResolutionFailure<
-  GlobalTypeName, ResolvedNominalTypeReference, NominalTypeRef
->
+@_spi(_QualifiedLookupTests)
+public typealias InvalidatedExtensions = [ExtensionState]
+@_spi(_QualifiedLookupTests)
+public typealias BindingFailure = TypeResolutionFailure<GlobalTypeName, ResolvedNominalTypeReference>
 
 @_spi(_QualifiedLookupTests) public typealias BindingResult = (
   resolvedTypeName: Result<
@@ -124,8 +124,7 @@ extension Array {
 @_spi(_QualifiedLookupTests)
 public struct GenericExtensionState<
   TypeName: Sendable & Hashable & CustomDebugStringConvertible,
-  MinimalNominal: Sendable & CustomDebugStringConvertible,
-  ExtendedNominal: Sendable & CustomDebugStringConvertible
+  NominalType: Sendable & CustomDebugStringConvertible
 >: Sendable {
   // Invariant: The extensions listed must be valid and successfully bound to a type in `extensionsToState`
   // Invariant: There's only one dependency per type.
@@ -135,12 +134,12 @@ public struct GenericExtensionState<
     // TODO: Remove this property
     extensionDecl: Attached<ExtensionDeclSyntax>,
     /// The resolved type must be valid in `namesToTypes`
-    resolvedType: Result<TypeName, TypeResolutionFailure<TypeName, MinimalNominal, ExtendedNominal>>
+    resolvedType: Result<TypeName, TypeResolutionFailure<TypeName, NominalType>>
 
   @_spi(_QualifiedLookupTests) public init(
     _uncheckedDependencies dependencies: [GenericExtensionDependency<TypeName>],
     extensionDecl: Attached<ExtensionDeclSyntax>,
-    resolvedType: Result<TypeName, TypeResolutionFailure<TypeName, MinimalNominal, ExtendedNominal>>
+    resolvedType: Result<TypeName, TypeResolutionFailure<TypeName, NominalType>>
   ) {
     self.dependencies = dependencies
     self.extensionDecl = extensionDecl
@@ -150,7 +149,7 @@ public struct GenericExtensionState<
   @_spi(_QualifiedLookupTests) public init(
     dependencies: [QualifiedLookupDependency<GlobalTypeName>],
     extensionDecl: Attached<ExtensionDeclSyntax>,
-    resolvedType: Result<TypeName, TypeResolutionFailure<TypeName, MinimalNominal, ExtendedNominal>>
+    resolvedType: Result<TypeName, TypeResolutionFailure<TypeName, NominalType>>
   ) where TypeName == GlobalTypeName {
     // Group dependencies by base type and member name, while maintaing order
     var groupedDependencies =
@@ -191,9 +190,8 @@ public struct GenericExtensionState<
     )
   }
 }
-@_spi(_QualifiedLookupTests) public typealias ExtensionState = GenericExtensionState<
-  GlobalTypeName, ResolvedNominalTypeReference, NominalTypeRef
->
+@_spi(_QualifiedLookupTests)
+public typealias ExtensionState = GenericExtensionState<GlobalTypeName, ResolvedNominalTypeReference>
 
 @_spi(_QualifiedLookupTests) public struct TypeTable: Hashable {
   fileprivate(set) var typeMembersToDecls: [Identifier: TypeMember]
@@ -413,7 +411,7 @@ public struct TypeDependencyGraph {
   // var parentsToTypeMembers: [QualifiedTypeName: TypeTable]
   @_spi(_QualifiedLookupTests) public var extensionsToState: [Attached<ExtensionDeclSyntax>: ExtensionState]
 
-  var _verbose: Bool = true
+  var _verbose: Bool = false
   var logPrefix: [String] = [String]()
   /// The number of `withLogging` calls we can nest. Useful for debugging infinite loops
   /// that otherwise fill up standard output and become illegible.
@@ -1899,15 +1897,14 @@ extension GenericExtensionState: CustomDebugStringConvertible where TypeName: Cu
 }
 extension GenericExtensionState {
   @_spi(_QualifiedLookupTests)
-  public func _mapTypes<NewMinimalNominal, NewExtendedNominal>(
-    mapMinimalNominal: (MinimalNominal) -> NewMinimalNominal,
-    mapExtendedNominal: (ExtendedNominal) -> NewExtendedNominal
-  ) -> GenericExtensionState<TypeName, NewMinimalNominal, NewExtendedNominal> {
-    GenericExtensionState<TypeName, NewMinimalNominal, NewExtendedNominal>(
+  public func _mapTypes<NewNominalType>(
+    mapNominal: (NominalType) -> NewNominalType,
+  ) -> GenericExtensionState<TypeName, NewNominalType> {
+    GenericExtensionState<TypeName, NewNominalType>(
       _uncheckedDependencies: dependencies.map({ $0._map(mapName: \.self) }),
       extensionDecl: extensionDecl,
       resolvedType: resolvedType.mapError({
-        $0._map(mapName: \.self, mapMinimalNominal: mapMinimalNominal, mapExtendedNominal: mapExtendedNominal)
+        $0._map(mapName: \.self, mapNominal: mapNominal)
       })
     )
   }

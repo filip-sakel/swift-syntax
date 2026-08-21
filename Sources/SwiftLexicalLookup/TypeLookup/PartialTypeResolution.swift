@@ -28,6 +28,8 @@ import SwiftSyntax
 public enum PartiallyResolvedType {
   /// `Any`, a suppressed type like `~Escapable`, or a composition thereof.
   case anyType
+  /// A metatype of a type
+  case metatype(base: Attached<TypeSyntax>)
   /// A bare type identifier, such as 'A', 'Self', '`Self`', '`Any`',
   /// 'Module::A', or 'Module::Any'.
   case typeIdentifier(Result<TypeReference, InvalidTypeIdentifierFailure>)
@@ -194,6 +196,9 @@ extension Attached where Node: TypeSyntaxProtocol {
       })
       // Add tuple type
       return Result.success(PartiallyResolvedType.tuple(labels: labels))
+    // Metatypes
+    case .metatypeType(let metatypeType):
+      return Result.success(PartiallyResolvedType.metatype(base: _castChild(metatypeType.baseType)))
 
     // Nominal base cases
     case .identifierType(let identifierType):
@@ -320,7 +325,7 @@ extension Attached where Node: TypeSyntaxProtocol {
       )
 
     // Base cases that don't produce types
-    case .metatypeType, .namedOpaqueReturnType, .classRestrictionType:
+    case .namedOpaqueReturnType, .classRestrictionType:
       return Result.success(PartiallyResolvedType.composition([]))
     case .suppressedType:
       // Don't diagnose here since suppressed types can be aliased, e.g.:
@@ -423,6 +428,8 @@ extension PartiallyResolvedType: CustomDebugStringConvertible {
       return ".typeIdentifier(\(typeIdentifierResult._debugDescription))"
     case .tuple(let labels):
       return ".tuple([\(labels.map({ $0?.name ?? "nil" }).joined(separator: ", "))])"
+    case .metatype(let base):
+      return ".metatype(base: `\(base.trimmedDescription)`)"
     case .member(let base, let memberComponent):
       return ".member(base: `\(base.trimmedDescription)`, memberComponent: \(memberComponent._debugDescription))"
     case .composition(let children):

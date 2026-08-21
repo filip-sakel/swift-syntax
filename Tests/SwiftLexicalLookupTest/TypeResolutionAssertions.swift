@@ -16,8 +16,8 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
-typealias TestExtensionState = GenericExtensionState<TestTypeName, Character, Character>
-typealias TestTypeResolutionFailure = TypeResolutionFailure<TestTypeName, Character, Character>
+typealias TestExtensionState = GenericExtensionState<TestTypeName, Character>
+typealias TestTypeResolutionFailure = TypeResolutionFailure<TestTypeName, Character>
 
 /// A QualifiedTypeNameGlobalType represented as a `String`.
 /// Provides a CustomDebugStringConvertible conformance without quotes.
@@ -200,7 +200,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
       return _assertTypeSyntax(
         // Force unwrap because we parsed this from `lookupSources`
         typeSyntax: Attached(typeSyntax)!,
-        expectedResult: expectedResult,
+        expectedRawResult: expectedResult,
         markersToDefinitions: markersToDefinitions,
         syntaxToDefinitions: syntaxToDefinitions,
         verbose: verbose
@@ -279,16 +279,9 @@ extension TypeResolutionMatcher: LexicalMatcher {
       }
       return expectedName
     }
-    let expectedState = expectedRawState._mapTypes(
-      mapMinimalNominal: mapMarker(marker:),
-      mapExtendedNominal: mapMarker(marker:)
-    )
-
-    let actualState = actualRawState._mapTypes(
-      // Get the type name
-      mapMinimalNominal: \.nominalTypeRef._succinctDescription,
-      mapExtendedNominal: \._succinctDescription
-    )
+    let expectedState = expectedRawState._mapTypes(mapNominal: mapMarker(marker:))
+    // Get the type name
+    let actualState = actualRawState._mapTypes(mapNominal: \.nominalTypeRef._succinctDescription)
     // Don't continue if we couldn't map the states
     guard mappingFailures.isEmpty else { return mappingFailures }
 
@@ -309,7 +302,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
   /// `assertExpectation` forwards type syntax here.
   private func _assertTypeSyntax(
     typeSyntax: Attached<TypeSyntax>,
-    expectedResult: Result<MemberLookupResult<Character>, TestTypeResolutionFailure>,
+    expectedRawResult: Result<MemberLookupResult<Character>, TestTypeResolutionFailure>,
     markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool,
@@ -320,58 +313,90 @@ extension TypeResolutionMatcher: LexicalMatcher {
     }
 
     // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
-    let actualResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeResolver.Failure>
+    let actualRawResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeResolver.Failure>
     do {
       var typeResolver = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
-      actualResult = typeResolver.resolveSyntax(typeSyntax: typeSyntax)
+      actualRawResult = typeResolver.resolveSyntax(typeSyntax: typeSyntax)
     }
 
     // Assert output
     var failures = [ExpectationFailure]()
-    switch (expectedResult, actualResult) {
-    case (.success(.memberResults(let markers)), .success(.memberResults(let nominalTypes))):
-      // Find the referenced definitions
-      let expectations: [ContextualizedAnnotation<Definition>] = markers.compactMap({ marker in
+    switch (expectedRawResult, actualRawResult) {
+    case (.success(let expectedType), .success(let actualType)):
+      let expectedTypeDescription: String = expectedType.mapMembers({ marker -> String in
         guard let targetDefinition = markersToDefinitions[marker] else {
           failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
-          return nil
+          return ""
         }
-        return targetDefinition
-      })
-
-      let results: [ContextualizedAnnotation<Definition>] = nominalTypes.compactMap({ nominalType in
+        return targetDefinition.annotation.description
+      })._debugDescription
+      let actualTypeDescription: String = actualType.mapMembers({ nominalType -> String in
         guard let targetDefinition = syntaxToDefinitions[nominalType.mainDecl.node] else {
           failures.append(
             ExpectationFailure.resultReferencesUnmarkedSyntax(
               syntaxDescription: nominalType.nominalTypeRef.globalName.debugDescription
             )
           )
-          return nil
+          return ""
         }
-        return targetDefinition
-      })
+        return targetDefinition.annotation.description
+      })._debugDescription
 
       // Give up if markers are undefined (i.e. we already have failures)
-      //
-      // Continuing with undefined markers might give us confusing errors.
       guard failures.isEmpty else { break }
 
-      // Diff if markers check out
-      LexicalAssertionUtilities.diffLexicalResults(expected: expectations, actual: results, failures: &failures)
-    case (.success(let expectedLookupResult), .success(let actualLookupResult)):
-      // We handled markers more nicely above. Here, `\.description` is a
-      // simple fallback in the uncommon case that one result produces markers
-      // and the other doesn't.
-      let expectedLookupDescription = expectedLookupResult._describe(describeMembers: \.description)
-      let actualLookupDescription = actualLookupResult._describe(describeMembers: \.description)
-      if expectedLookupDescription != actualLookupDescription {
+      if expectedTypeDescription != actualTypeDescription {
         failures.append(
           ExpectationFailure.other(
             failure:
-              "Resolved-type mismatch. Expected: \(expectedLookupDescription)\nBut got:  \(actualLookupDescription)"
+              "Resolved-type mismatch. Expected: \(expectedTypeDescription)\nBut got:  \(actualTypeDescription)"
           )
         )
       }
+
+    // case (.success(.memberResults(let markers)), .success(.memberResults(let nominalTypes))):
+    //   // Find the referenced definitions
+    //   let expectations: [ContextualizedAnnotation<Definition>] = markers.compactMap({ marker in
+    //     guard let targetDefinition = markersToDefinitions[marker] else {
+    //       failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
+    //       return nil
+    //     }
+    //     return targetDefinition
+    //   })
+    //
+    //   let results: [ContextualizedAnnotation<Definition>] = nominalTypes.compactMap({ nominalType in
+    //     guard let targetDefinition = syntaxToDefinitions[nominalType.mainDecl.node] else {
+    //       failures.append(
+    //         ExpectationFailure.resultReferencesUnmarkedSyntax(
+    //           syntaxDescription: nominalType.nominalTypeRef.globalName.debugDescription
+    //         )
+    //       )
+    //       return nil
+    //     }
+    //     return targetDefinition
+    //   })
+    //
+    //   // Give up if markers are undefined (i.e. we already have failures)
+    //   //
+    //   // Continuing with undefined markers might give us confusing errors.
+    //   guard failures.isEmpty else { break }
+    //
+    //   // Diff if markers check out
+    //   LexicalAssertionUtilities.diffLexicalResults(expected: expectations, actual: results, failures: &failures)
+    // case (.success(let expectedLookupResult), .success(let actualLookupResult)):
+    //   // We handled markers more nicely above. Here, `\.description` is a
+    //   // simple fallback in the uncommon case that one result produces markers
+    //   // and the other doesn't.
+    //   let expectedLookupDescription = expectedLookupResult.mapMembers(\.description)._debugDescription
+    //   let actualLookupDescription = actualLookupResult.debugDescription
+    //   if expectedLookupDescription != actualLookupDescription {
+    //     failures.append(
+    //       ExpectationFailure.other(
+    //         failure:
+    //           "Resolved-type mismatch. Expected: \(expectedLookupDescription)\nBut got:  \(actualLookupDescription)"
+    //       )
+    //     )
+    //   }
     case (.failure(let expectedFailure), .failure(let actualFailure)):
       // Describe the expected failure
       func markerToQualifiedName(marker: Character) -> String {
@@ -381,16 +406,16 @@ extension TypeResolutionMatcher: LexicalMatcher {
         }
         return nominalDecl.annotation.description
       }
-      let expectedFailureDescription = expectedFailure._describeDebug(
-        resolveMininalNominal: markerToQualifiedName,
-        resolveExtendedNominal: markerToQualifiedName
-      )
+      let expectedFailureDescription = expectedFailure._map(
+        mapName: \.debugDescription,
+        mapNominal: markerToQualifiedName(marker:)
+      )._debugDescription
 
       // Describe the lookup failure
-      let actualFailureDescription = actualFailure._describeDebug(
-        resolveMininalNominal: { $0.nominalTypeRef.globalName?.debugDescription ?? "" },
-        resolveExtendedNominal: \.debugDescription
-      )
+      let actualFailureDescription = actualFailure._map(
+        mapName: \.debugDescription,
+        mapNominal: { $0.nominalTypeRef.globalName?.debugDescription ?? "" }
+      )._debugDescription
 
       // Check equality
       if expectedFailureDescription != actualFailureDescription {
@@ -405,7 +430,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
       failures.append(
         ExpectationFailure.other(
           failure:
-            "Lookup didn't succeed/fail as expected. Expected '\(expectedResult)'. Got: '\(actualResult)'"
+            "Lookup didn't succeed/fail as expected. Expected '\(expectedRawResult)'. Got: '\(actualRawResult)'"
         )
       )
     }

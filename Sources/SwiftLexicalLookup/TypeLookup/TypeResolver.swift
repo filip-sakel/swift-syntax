@@ -91,7 +91,7 @@ extension ResolvedNominalTypeReference {
 }
 
 @_spi(_QualifiedLookup)
-public indirect enum TypeResolutionFailure<TypeName: Sendable, MinimalNominal: Sendable, ExtendedNominal: Sendable>:
+public indirect enum TypeResolutionFailure<TypeName: Sendable, NominalType: Sendable>:
   Error
 {
   /// Cannot find the given type identifier in scope (using unqualified lookup).
@@ -105,13 +105,13 @@ public indirect enum TypeResolutionFailure<TypeName: Sendable, MinimalNominal: S
   /// Only protocol, class and composition types can form compositions.
   ///
   /// I.e. We don't allow structs/enums/actors, functions, tuples.
-  case cannotComposeNonClassOrProtocol(resolved: MemberLookupResult<MinimalNominal>)
-  case noTypeMember(member: ImplicitTypeReferenceComponent, in: MemberLookupResult<ExtendedNominal>)
+  case cannotComposeNonClassOrProtocol(resolved: MemberLookupResult<NominalType>)
+  case noTypeMember(member: ImplicitTypeReferenceComponent, in: MemberLookupResult<NominalType>)
 
   /// We can only extend structs/enums/classes/actors/protocols
   ///
   /// I.e. We can't extend tuples, functions, protocol compositions, metatypes, etc.
-  case cannotExtendNonNominal(nonnominal: MemberLookupResult<MinimalNominal>)
+  case cannotExtendNonNominal(nonnominal: MemberLookupResult<NominalType>)
   /// Extensions may only appear at file scope (top-level).
   /// ```swift
   /// func f() {
@@ -283,110 +283,13 @@ public indirect enum TypeResolutionFailure<TypeName: Sendable, MinimalNominal: S
 @_spi(_QualifiedLookupTests) public typealias ExtensionBindingCycle = GenericExtensionBindingCycle<
   GlobalTypeName
 >
-
-extension TypeResolutionFailure where TypeName: CustomDebugStringConvertible {
-  /// Produce a simplified description for debugging.
-  ///
-  /// Namely, for syntax nodes we use `.trimmedDescription` and for `ResolvedNominalTypeReference`
-  /// we simply compare the qualified type name description.
-  @_spi(_QualifiedLookupTests) public func _describeDebug(
-    resolveMininalNominal: (MinimalNominal) -> String,
-    resolveExtendedNominal: (ExtendedNominal) -> String,
-    newlinePrefix: String = ""
-  ) -> String {
-    let prefixStep = "  "
-    func describeType<T>(_ memberResults: MemberLookupResult<T>, describe: (T) -> String) -> String {
-      return memberResults._describe(describeMembers: { results in
-        results.map(describe).joined(separator: ", ")
-      })
-    }
-
-    switch self {
-    case .noTypeInScope:
-      return ".noTypeInScope"
-    case .cannotComposeNonClassOrProtocol(let type):
-      return ".cannotComposeNonClassOrProtocol(\(describeType(type, describe: resolveMininalNominal)))"
-    case .noTypeMember(let member, let type):
-      return
-        ".noTypeMember(member: \(member.debugDescription), in: \(describeType(type, describe: resolveExtendedNominal)))"
-    case .cannotExtendNonNominal(let nonnominal):
-      return ".cannotExtendNonNominal(nonnominal: \(describeType(nonnominal, describe: resolveMininalNominal)))"
-    case .extensionNotAtFileScope(let extensionDecl):
-      return ".extensionNotAtFileScope(extensionDecl: `\(extensionDecl._memberlessDescription)`)"
-    case .invalidAliasedType(let nestedFailure):
-      return """
-        .invalidAliasedType(
-        \(nestedFailure._describeDebug(
-          resolveMininalNominal: resolveMininalNominal,
-          resolveExtendedNominal: resolveExtendedNominal,
-          newlinePrefix: newlinePrefix + prefixStep
-          )
-        )
-        \(newlinePrefix))
-        """
-    case .invalidComposition(let invalidChildren):
-      let invalidChildrenDescription = invalidChildren.map({ (childSyntax, childFailure) in
-        let childDescription = childFailure._describeDebug(
-          resolveMininalNominal: resolveMininalNominal,
-          resolveExtendedNominal: resolveExtendedNominal,
-          newlinePrefix: newlinePrefix + prefixStep + prefixStep
-        )
-        return "\(newlinePrefix)\(prefixStep)\(childSyntax.trimmedDescription): \(childDescription)"
-      }).joined(separator: ",\n")
-      return ".invalidComposition([\(invalidChildrenDescription)])"
-    case .other(let otherFailure):
-      return ".other(\(String(reflecting: otherFailure)))"
-    case .genericParameterOrAssociatedType:
-      return ".genericParameterOrAssociatedType"
-    case .invalidMembers(let invalidMembers):
-      let invalidMembersDescription = invalidMembers.map({ (childSyntax, memberFailure) in
-        let memberDescription = memberFailure._describeDebug(
-          resolveMininalNominal: resolveMininalNominal,
-          resolveExtendedNominal: resolveExtendedNominal,
-          newlinePrefix: newlinePrefix + prefixStep + prefixStep
-        )
-        return "\(newlinePrefix)\(prefixStep)\(childSyntax.trimmedDescription): \(memberDescription)"
-      }).joined(separator: ", ")
-
-      return """
-        \(newlinePrefix).invalidMembers(
-        \(invalidMembersDescription)
-        \(newlinePrefix))
-        """
-    case .invalidBaseType(let baseFailure):
-      let baseDescription = baseFailure._describeDebug(
-        resolveMininalNominal: resolveMininalNominal,
-        resolveExtendedNominal: resolveExtendedNominal,
-        newlinePrefix: newlinePrefix + prefixStep + prefixStep
-      )
-
-      return """
-        \(newlinePrefix).invalidBaseType(
-        \(baseDescription)
-        \(newlinePrefix))
-        """
-    case .ambiguousTypeDecl(let ambiguousDecls):
-      let ambiguousDeclsDescription = ambiguousDecls.map(\.trimmedDescription).joined(separator: ", ")
-      return ".ambiguousTypeDecl([\(ambiguousDeclsDescription)])"
-    case .syntaxNotInSymbolTable(let fileRoot):
-      return ".syntaxNotInSymbolTable(rootKind: \(fileRoot))"
-    case .syntaxInDisabledRegion:
-      return ".syntaxInDisabledRegion"
-    case .cyclicalTypeReference(let cycle):
-      return ".cyclicalTypeReference(\(cycle.map(\.trimmedDescription)))"
-    case .cyclicalExtensionDependency(let cycle):
-      return ".cyclicalExtensionDependencies(\(cycle.debugDescription))"
-    case .extensionNotBoundYet:
-      return ".extensionNotBoundYet"
-    }
-  }
-  @_spi(_QualifiedLookupTests) public func _map<NewTypeName, NewMinimalNominal, NewExtendedNominal>(
+extension TypeResolutionFailure {
+  @_spi(_QualifiedLookupTests) public func _map<NewTypeName, NewNominalType>(
     mapName: (TypeName) -> NewTypeName,
-    mapMinimalNominal: (MinimalNominal) -> NewMinimalNominal,
-    mapExtendedNominal: (ExtendedNominal) -> NewExtendedNominal
-  ) -> TypeResolutionFailure<NewTypeName, NewMinimalNominal, NewExtendedNominal> {
-    func mapNested(_ nestedFailure: Self) -> TypeResolutionFailure<NewTypeName, NewMinimalNominal, NewExtendedNominal> {
-      nestedFailure._map(mapName: mapName, mapMinimalNominal: mapMinimalNominal, mapExtendedNominal: mapExtendedNominal)
+    mapNominal: (NominalType) -> NewNominalType
+  ) -> TypeResolutionFailure<NewTypeName, NewNominalType> {
+    func mapNested(_ nestedFailure: Self) -> TypeResolutionFailure<NewTypeName, NewNominalType> {
+      nestedFailure._map(mapName: mapName, mapNominal: mapNominal)
     }
 
     switch self {
@@ -413,11 +316,11 @@ extension TypeResolutionFailure where TypeName: CustomDebugStringConvertible {
     case .cyclicalExtensionDependency(let cycle):
       return .cyclicalExtensionDependency(cycle._map(mapName: mapName))
     case .cannotComposeNonClassOrProtocol(let type):
-      return .cannotComposeNonClassOrProtocol(resolved: type.mapMembers(mapMinimalNominal))
+      return .cannotComposeNonClassOrProtocol(resolved: type.mapMembers(mapNominal))
     case .noTypeMember(let member, let type):
-      return .noTypeMember(member: member, in: type.mapMembers(mapExtendedNominal))
+      return .noTypeMember(member: member, in: type.mapMembers(mapNominal))
     case .cannotExtendNonNominal(let nonnominal):
-      return .cannotExtendNonNominal(nonnominal: nonnominal.mapMembers(mapMinimalNominal))
+      return .cannotExtendNonNominal(nonnominal: nonnominal.mapMembers(mapNominal))
     case .invalidAliasedType(let nestedFailure):
       return .invalidAliasedType(mapNested(nestedFailure))
     case .invalidComposition(let invalidChildren):
@@ -438,22 +341,76 @@ extension TypeResolutionFailure where TypeName: CustomDebugStringConvertible {
   }
 }
 
-extension TypeResolutionFailure:
-  CustomDebugStringConvertible
-where
-  TypeName: CustomDebugStringConvertible,
-  MinimalNominal: CustomDebugStringConvertible,
-  ExtendedNominal: CustomDebugStringConvertible
-{
-  func _describe(describeTypeName: (TypeName) -> String) -> String {
-    _describeDebug(
-      resolveMininalNominal: \.debugDescription,
-      resolveExtendedNominal: \.debugDescription
-    )
-  }
+extension TypeResolutionFailure where TypeName == String, NominalType == String {
+  /// Debug description
+  ///
+  /// Namely, for syntax nodes we use `.trimmedDescription` and for `ResolvedNominalTypeReference`
+  /// we simply compare the qualified type name description.
+  @_spi(_QualifiedLookupTests)
+  public var _debugDescription: String {
+    func describeNested(_ nestedFailure: TypeResolutionFailure) -> String {
+      nestedFailure._debugDescription.replacing("\n", with: "\n  ")
+    }
 
+    switch self {
+    case .noTypeInScope:
+      return ".noTypeInScope"
+    case .cannotComposeNonClassOrProtocol(let type):
+      return ".cannotComposeNonClassOrProtocol(\(type._debugDescription))"
+    case .noTypeMember(let member, let type):
+      return
+        ".noTypeMember(member: \(member.debugDescription), in: \(type._debugDescription))"
+    case .cannotExtendNonNominal(let nonnominal):
+      return ".cannotExtendNonNominal(nonnominal: \(nonnominal._debugDescription))"
+    case .extensionNotAtFileScope(let extensionDecl):
+      return ".extensionNotAtFileScope(extensionDecl: `\(extensionDecl._memberlessDescription)`)"
+    case .invalidAliasedType(let nestedFailure):
+      return """
+        .invalidAliasedType(
+          \(describeNested(nestedFailure))
+        )
+        """
+    case .invalidComposition(let invalidChildren):
+      let invalidChildrenDescription = invalidChildren.map({ (childSyntax, childFailure) in
+        return "  \(childSyntax.trimmedDescription): \(describeNested(childFailure))"
+      }).joined(separator: ",\n")
+      return ".invalidComposition([\(invalidChildrenDescription)])"
+    case .other(let otherFailure):
+      return ".other(\(String(reflecting: otherFailure)))"
+    case .genericParameterOrAssociatedType:
+      return ".genericParameterOrAssociatedType"
+    case .invalidMembers(let invalidMembers):
+      let invalidMembersDescription = invalidMembers.map({ (childSyntax, memberFailure) in
+        return "  \(childSyntax.trimmedDescription): \(describeNested(memberFailure))"
+      }).joined(separator: ",\n")
+      return ".invalidMembers([\(invalidMembersDescription)])"
+    case .invalidBaseType(let baseFailure):
+      return """
+        .invalidBaseType(
+          \(describeNested(baseFailure))
+        )
+        """
+    case .ambiguousTypeDecl(let ambiguousDecls):
+      let ambiguousDeclsDescription = ambiguousDecls.map(\.trimmedDescription).joined(separator: ", ")
+      return ".ambiguousTypeDecl([\(ambiguousDeclsDescription)])"
+    case .syntaxNotInSymbolTable(let fileRoot):
+      return ".syntaxNotInSymbolTable(rootKind: \(fileRoot))"
+    case .syntaxInDisabledRegion:
+      return ".syntaxInDisabledRegion"
+    case .cyclicalTypeReference(let cycle):
+      return ".cyclicalTypeReference(\(cycle.map(\.trimmedDescription)))"
+    case .cyclicalExtensionDependency(let cycle):
+      return ".cyclicalExtensionDependencies(\(cycle.debugDescription))"
+    case .extensionNotBoundYet:
+      return ".extensionNotBoundYet"
+    }
+  }
+}
+
+extension TypeResolutionFailure: CustomDebugStringConvertible
+where TypeName: CustomDebugStringConvertible, NominalType: CustomDebugStringConvertible {
   public var debugDescription: String {
-    _describe(describeTypeName: \.debugDescription)
+    _map(mapName: \.debugDescription, mapNominal: \.debugDescription)._debugDescription
   }
 }
 
@@ -535,7 +492,7 @@ extension TypeResolutionFailure {
   }
 
   public typealias Failure = TypeResolutionFailure<
-    GlobalTypeName, ResolvedNominalTypeReference, NominalTypeRef
+    GlobalTypeName, ResolvedNominalTypeReference
   >
 
   let symbolTable: SymbolTable
@@ -638,6 +595,15 @@ extension TypeResolver {
       return Result.success(.tuple(labels: labels))
     case .success(.typeIdentifier(.success(let component))):
       return resolveUnqualifiedReference(typeComponent: ImplicitTypeReferenceComponent(from: component))
+    case .success(.metatype(let baseTypeSyntax)):
+      let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax)
+      // Wrap the base type/failure and return
+      switch baseTypeResult {
+      case .success(let baseType):
+        return Result.success(MemberLookupResult.metatype(base: baseType))
+      case .failure(let baseFailure):
+        return Result.failure(Failure.invalidBaseType(baseFailure))
+      }
     case .success(.member(let baseTypeSyntax, .success(let memberComponent))):
       let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax)
       return resolveMember(baseType: baseTypeResult, typeMember: ImplicitTypeReferenceComponent(from: memberComponent))
@@ -719,6 +685,13 @@ extension TypeResolver {
             childFailure: Failure.cannotComposeNonClassOrProtocol(
               resolved: .tuple(labels: labels)
             )
+          )
+        )
+      case .success(.metatype(let base)):
+        failures.append(
+          (
+            childSyntax: childTypeSyntax.node,
+            childFailure: Failure.cannotComposeNonClassOrProtocol(resolved: .metatype(base: base))
           )
         )
       // `Any` doesn't contribute any types but IS valid
@@ -1167,7 +1140,7 @@ extension TypeResolver {
       }
 
       // Find this nominal declaration through qualified lookup
-      let resolvedBase: NominalTypeRef
+      let resolvedBase: ResolvedNominalTypeReference
       switch resolveType(typeReference: baseType) {
       case .success(let success):
         resolvedBase = success
@@ -1182,7 +1155,7 @@ extension TypeResolver {
         defer { self.dependencyTracker = dependencyTracker }
 
         memberResult = findNominalTypeMemberDecl(
-          resolvedNominalBaseType: resolvedBase,
+          resolvedNominalBaseType: resolvedBase.nominalTypeRef,
           memberName: name,
           memberIntroducingSyntax: Attached<TypeLikeSyntax>(nominalDecl),
         )
@@ -1435,6 +1408,10 @@ extension TypeResolver {
       )
     case MemberLookupResult.tuple(let labels):
       return Result.failure(Failure.noTypeMember(member: typeMember, in: MemberLookupResult.tuple(labels: labels)))
+    case MemberLookupResult.metatype(let base):
+      return Result.failure(
+        Failure.noTypeMember(member: typeMember, in: MemberLookupResult.metatype(base: base))
+      )
     }
 
     // Perform qualified type lookup and mark the dependencies
@@ -1456,7 +1433,7 @@ extension TypeResolver {
     var visitedDecls = Set<Attached<TypeDeclSyntax>>()
     var declsAndResults = [(decl: Attached<TypeDeclSyntax>, result: MemberLookupResult<ResolvedNominalTypeReference>)]()
     var failures = [(Attached<TypeLikeSyntax>, Failure)]()
-    var nominalBaseTypes = [NominalTypeRef]()
+    var nominalBaseTypes = [ResolvedNominalTypeReference]()
 
     for baseType in baseTypes {
       // We'll collect the result, and type syntax
@@ -1487,7 +1464,7 @@ extension TypeResolver {
 
       // Bind extensions and construct a nominal type.
       // We ignore failures since they're from non-matching extensions and diagnosed separately
-      let nominalBaseType: NominalTypeRef
+      let nominalBaseType: ResolvedNominalTypeReference
       switch resolveType(typeReference: baseType) {
       case .success(let success):
         nominalBaseType = success
@@ -1499,7 +1476,7 @@ extension TypeResolver {
 
       // Get the member decl
       let memberTypeDeclResult = findNominalTypeMemberDecl(
-        resolvedNominalBaseType: nominalBaseType,
+        resolvedNominalBaseType: nominalBaseType.nominalTypeRef,
         memberName: typeMember.name,
         memberIntroducingSyntax: typeMember.introducingSyntax
       )
@@ -1642,8 +1619,8 @@ extension TypeResolver {
           originatingSyntax: nominalType.originatingSyntax
         )
       )
-    // Functions/tuples/`Any` aren't nominal
-    case .function, .tuple, .anyType:
+    // Functions/tuples/`Any`/metatypes aren't nominal
+    case .function, .tuple, .anyType, .metatype:
       return .failure(.cannotExtendNonNominal(nonnominal: resolvedType))
     }
   }
@@ -1656,7 +1633,7 @@ extension TypeResolver {
   /// extensions bound.
   @_spi(_QualifiedLookupTests) public mutating func resolveType(
     typeReference: ResolvedNominalTypeReference
-  ) -> Result<NominalTypeRef, Failure> {
+  ) -> Result<ResolvedNominalTypeReference, Failure> {
     withLogging(
       request: "Extended nominal`\(typeReference._succinctDescription)`",
       describe: \._debugDescription,
@@ -1667,13 +1644,22 @@ extension TypeResolver {
   /// Implements `resolveNominalType`
   fileprivate mutating func _resolveType(
     typeReference: ResolvedNominalTypeReference
-  ) -> Result<NominalTypeRef, Failure> {
+  ) -> Result<ResolvedNominalTypeReference, Failure> {
     // Skip extension binding for local declarations.
     //
     // For instance, there's no way to extend `A` in `func f() { struct A {} }`
     // since extensions may only be declared at the top level.
     guard case .global(let qualifiedGlobalRef) = typeReference.nominalTypeRef.storage else {
-      return .success(typeReference.nominalTypeRef)
+      return .success(typeReference)
+    }
+
+    // Wrap the new reference in a `ResolvedNominalTypeReference`
+    func wrapReference(_ nominalRef: NominalTypeRef) -> ResolvedNominalTypeReference {
+      ResolvedNominalTypeReference(
+        nominalTypeRef: nominalRef,
+        mainDecl: typeReference.mainDecl,
+        originatingSyntax: typeReference.originatingSyntax
+      )
     }
 
     // Get the nominal type from the symbol table (or register accordingly)
@@ -1718,7 +1704,7 @@ extension TypeResolver {
     // Return if no extensions are available
     guard !unadmittedExtensions.isEmpty else {
       log("No extensions to bind.")
-      return .success(currentNominal)
+      return .success(wrapReference(currentNominal))
     }
 
     symbolTable.admitExtensions(unadmittedExtensions)
@@ -1736,7 +1722,7 @@ extension TypeResolver {
       )
     }
 
-    return .success(finalizedNominalRef)
+    return .success(wrapReference(finalizedNominalRef))
   }
 
   /// Returns the nominal-type reference with the extension's extended-type

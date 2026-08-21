@@ -125,7 +125,7 @@ final class PartialTypeResolutionTests: XCTestCase {
     // Metatype, named opaque return type, class restriction
     assertPartialResolutionResult(
       typeSyntax: "(() -> A, B).Type",
-      result: .success(.composition([]))
+      result: .success(.metatype(base: "(() -> A, B)"))
     )
     assertPartialResolutionResult(
       typeSyntax: "<T: Hashable> [T]",

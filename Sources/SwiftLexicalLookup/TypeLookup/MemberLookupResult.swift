@@ -14,11 +14,12 @@ import SwiftSyntax
 
 /// The type result of structural type resolution. `Result`
 /// represents a nominal type.
-@_spi(_QualifiedLookup) public enum MemberLookupResult<Result> {
+@_spi(_QualifiedLookup) public indirect enum MemberLookupResult<Result> {
   case function(argumentCount: Int)
   case tuple(labels: [Identifier?])
   case memberResults([Result])
   case anyType
+  case metatype(base: MemberLookupResult)
 
   public func mapMembers<NewResult>(_ transform: (Result) -> NewResult) -> MemberLookupResult<NewResult> {
     switch self {
@@ -28,6 +29,8 @@ import SwiftSyntax
       return .tuple(labels: labels)
     case .anyType:
       return .anyType
+    case .metatype(let base):
+      return .metatype(base: base.mapMembers(transform))
     case .memberResults(let results):
       return .memberResults(results.map(transform))
     }
@@ -42,8 +45,9 @@ extension MemberLookupResult: Hashable where Result: Hashable {}
 
 // MARK: Debug Description
 
-extension MemberLookupResult {
-  @_spi(_QualifiedLookupTests) public func _describe(describeMembers: ([Result]) -> String) -> String {
+extension MemberLookupResult where Result == String {
+  @_spi(_QualifiedLookupTests)
+  public var _debugDescription: String {
     switch self {
     case .function(let argumentCount):
       return ".function(argumentCount: \(argumentCount))"
@@ -51,16 +55,17 @@ extension MemberLookupResult {
       return ".tuple(\(labels.map({ $0?.name ?? "_"}))"
     case .anyType:
       return ".anyType"
+    case .metatype(let base):
+      return ".metatype(base: \(base.debugDescription)"
     case .memberResults(let members):
-      return ".memberResults([\(describeMembers(members))])"
+      return ".memberResults([\(members.joined(separator: ", "))])"
     }
   }
 }
 
+@_spi(_QualifiedLookupTests)
 extension MemberLookupResult: CustomDebugStringConvertible where Result: CustomDebugStringConvertible {
   public var debugDescription: String {
-    _describe(describeMembers: { members in
-      members.map({ "`\($0.debugDescription)`" }).joined(separator: "\n")
-    })
+    mapMembers(\.debugDescription)._debugDescription
   }
 }
