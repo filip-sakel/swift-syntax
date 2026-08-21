@@ -442,72 +442,56 @@ final class TypeResolutionTests: XCTestCase {
   }
 
   func testExtendedType() {
-    // TODO: Why does Metatype pass
-    assertTypeResolution(
-      [
-        "MyFile.swift": """
-        \("🟥", name: "_(MyFile.swift)::ProtoA")
-        protocol ProtoA: ~Copyable {}
-        // Metatype
-        typealias Metatype = ProtoA.Type
-        \(extensionState: GenericExtensionState(
-          dependencies: [],
-          resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .metatype(base: .memberResults(["🟥"]))))
-        ))
-        extension Metatype {}
-        """
-      ],
-      verbose: true
-    )
-    // assertTypeResolution([
-    //   "MyFile.swift": """
-    //   \("🟥", name: "_(MyFile.swift)::ProtoA")
-    //   protocol ProtoA: ~Copyable {}
-    //
-    //   // Tuple
-    //   \(extensionState: GenericExtensionState(
-    //     dependencies: [],
-    //     resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .tuple(labels: [])))
-    //   ))
-    //   extension () {}
-    //
-    //   // Metatype
-    //   typealias Metatype = ProtoAA.Type
-    //   \(extensionState: GenericExtensionState(
-    //     dependencies: [],
-    //     resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .memberResults([])))
-    //   ))
-    //   extension Metatype {}
-    //
-    //   // Any
-    //   \(extensionState: GenericExtensionState(
-    //     dependencies: [],
-    //     resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .anyType))
-    //   ))
-    //   extension Any & ~Escapable {}
-    //
-    //   // Valid Compositions
-    //   //
-    //   // We defer diagnostics to SEMA
-    //   \(extensionState: .bound(to: "_(MyFile.swift)::ProtoA", dependencies: []))
-    //   extension ProtoA & ~Copyable {}
-    //
-    //   typealias ProtoAndAny = ProtoA & Any
-    //   \(extensionState: .bound(to: "_(MyFile.swift)::ProtoA", dependencies: []))
-    //   extension ProtoAndAny {}
-    //
-    //   // Invalid Compositions
-    //   \("🟪", name: "_(MyFile.swift)::ProtoB")
-    //   protocol ProtoB {}
-    //   \(extensionState: GenericExtensionState(
-    //     dependencies: [],
-    //     resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .memberResults([
-    //       "🟥", "🟪"
-    //     ])))
-    //   ))
-    //   extension ProtoA & ProtoB {}
-    //   """
-    // ])
+    assertTypeResolution([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::ProtoA")
+      protocol ProtoA: ~Copyable {}
+
+      // Tuple
+      \(extensionState: GenericExtensionState(
+        dependencies: [],
+        resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .tuple(labels: [])))
+      ))
+      extension () {}
+
+      // Metatype
+      typealias Metatype = ProtoA.Type
+      \(extensionState: GenericExtensionState(
+        dependencies: [],
+        resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .metatype(base: .memberResults(["🟥"]))))
+      ))
+      extension Metatype {}
+
+      // Any
+      \(extensionState: GenericExtensionState(
+        dependencies: [],
+        resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .anyType))
+      ))
+      extension Any & ~Escapable {}
+
+      // Valid Compositions
+      //
+      // We defer diagnostics to SEMA
+      \(extensionState: .bound(to: "_(MyFile.swift)::ProtoA", dependencies: []))
+      extension ProtoA & ~Copyable {}
+
+      typealias ProtoAndAny = ProtoA & Any
+      \(extensionState: .bound(to: "_(MyFile.swift)::ProtoA", dependencies: []))
+      extension ProtoAndAny {}
+
+      // Invalid Compositions
+      \("🟪", name: "_(MyFile.swift)::ProtoB")
+      protocol ProtoB {}
+
+      \(extensionState: GenericExtensionState(
+        dependencies: [],
+        resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .memberResults([
+          "🟥", "🟪"
+        ])))
+      ))
+      extension ProtoA & ProtoB {}
+      """
+    ])
   }
   func testTypeInExtension() {
     assertTypeResolution([
@@ -1000,21 +984,7 @@ final class TypeResolutionTests: XCTestCase {
     // \("🟧")Proto
     // \(.noResults)B
     // """)
-
   }
-  // func testEnumCase() {
-  //   assertTypeMemberLookup(
-  //     """
-  //     struct MyStruct {
-  //       // We assume the user meant static functions (diagnosed elsewhere)
-  //       case \(.named("case1").static())
-  //            case1,
-  //            \(.named("case2", args: ["a"]).static())
-  //            case2(a: Int)
-  //     }
-  //     """
-  //   )
-  // }
 
   // TODO: Shadowing tests. Local; same file; same-mdoule, etc.
 
