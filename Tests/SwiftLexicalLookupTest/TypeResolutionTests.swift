@@ -16,152 +16,6 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
-// Convenience `String` initializer for `TypeLikeSyntax`
-extension TypeLikeSyntax: ExpressibleByStringLiteral {
-  public init(stringLiteral value: StringLiteralType) {
-    self.init(TypeSyntax(stringLiteral: value))
-  }
-}
-
-// Convenience initializer
-
-struct ExtensionDependency {
-  let baseType: TestTypeName
-  let members: [IdentifierWrapper]
-}
-
-struct IdentifierWrapper: ExpressibleByStringLiteral {
-  let identifier: Identifier
-
-  init(stringLiteral value: StaticString) {
-    identifier = Identifier(canonicalName: value)
-  }
-
-  init(
-    string: String,
-    allocatingIn lookupSourceInterpolation: inout LexicalLookupSource<TypeResolutionMatcher>.Interpolation
-  ) {
-    identifier = lookupSourceInterpolation.allocateIdentifier(string: string)
-  }
-}
-
-extension GenericExtensionState where TypeName == TestTypeName {
-  /// Creates a mock extension state to check an extension's dependencies,
-  /// bound type, or failure to bind due to cycles.
-  ///
-  /// Note: Because `GenericBindingFailure` contains `TypeQualifier.Failure`
-  /// (which uses actual `ResolvedNominalTypeReference` and not mock types),
-  /// it's hard to test type-resolution failures. You may instead use regular
-  /// type-resolution tests and only use this initializer to test extension
-  /// binding.
-  fileprivate init(
-    dependencies: [ExtensionDependency],
-    resolvedType: Result<TestTypeName, GenericBindingFailure<TestTypeName>>,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) {
-    // Create fake extension (won't be checked)
-    //
-    // Wrap the type syntax in a file
-    var parser = Parser("extension")
-    let sourceFile = SourceFileSyntax.parse(from: &parser)
-    let mockExtension = Attached(sourceFile.children(ofType: ExtensionDeclSyntax.self)[0])!
-
-    self.init(
-      _uncheckedDependencies: dependencies.map({
-        let mappedMembers: [TypeMember] = $0.members.map({ member in
-          return TypeMember(name: member.identifier, decls: [])
-        })
-        return GenericExtensionDependency<TestTypeName>(dependencyTypeName: $0.baseType, members: mappedMembers)
-      }),
-      // Extension decl won't be checked
-      extensionDecl: mockExtension,
-      resolvedType: resolvedType
-    )
-  }
-
-  fileprivate static func bound(
-    to typeName: TestTypeName,
-    dependencies: [ExtensionDependency]
-  ) -> GenericExtensionState {
-    GenericExtensionState<TestTypeName>(dependencies: dependencies, resolvedType: .success(typeName))
-  }
-
-  fileprivate static func invalidCycle(
-    dependencies: [ExtensionDependency],
-    cycleElements: [(introducingDecl: String?, extension: String, base: TestTypeName)],
-    conflictingMember: IdentifierWrapper,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) -> GenericExtensionState {
-    let dependencyPath: [GenericDependencyCycleElement<TestTypeName>] = cycleElements.map({
-      (introducingTypeDeclText, extensionDeclText, baseTypeName) -> GenericDependencyCycleElement<TestTypeName> in
-      let introducingTypeDecl: TypeDeclSyntax?
-      if let introducingTypeDeclText {
-        let typeDeclRaw = DeclSyntax(stringLiteral: introducingTypeDeclText)
-        guard let typeDecl = Syntax(typeDeclRaw).as(TypeDeclSyntax.self) else {
-          fatalError(
-            "Couldn't cast the cycle element's 'introducingMember' `\(introducingTypeDeclText)` of kind '\(typeDeclRaw.kind)' to TypeDeclSyntax",
-            file: file,
-            line: line
-          )
-        }
-        introducingTypeDecl = typeDecl
-      } else {
-        introducingTypeDecl = nil
-      }
-
-      let extensionDeclRaw = DeclSyntax(stringLiteral: extensionDeclText)
-      guard let extensionDecl = extensionDeclRaw.as(ExtensionDeclSyntax.self) else {
-        fatalError(
-          "Couldn't cast the cycle element's 'extension' `\(extensionDeclText)` of kind '\(extensionDeclRaw.kind)' to ExtensionDeclSyntax",
-          file: file,
-          line: line
-        )
-      }
-      return GenericDependencyCycleElement(
-        introducingTypeDecl: introducingTypeDecl,
-        extensionDecl: extensionDecl,
-        boundType: baseTypeName,
-      )
-    })
-
-    let cycle = GenericExtensionBindingCycle<TestTypeName>(
-      dependencyPath: dependencyPath,
-      dependencyMember: conflictingMember.identifier
-    )
-
-    return GenericExtensionState<TestTypeName>(
-      dependencies: dependencies,
-      resolvedType: Result.failure(GenericBindingFailure.cyclicalExtensionDependency(cycle))
-    )
-  }
-}
-
-// TODO: Remove
-// extension ResolvedNominalTypeReference {
-//   fileprivate static func _mockMarkerType(_ kind: SyntaxKind, marker: Character) -> ResolvedNominalTypeReference? {
-//     // Get the declaration kind
-//     let rawTypeDecl: DeclSyntax
-//     switch kind {
-//     case .structDecl: rawTypeDecl = "struct"
-//     case .enumDecl: rawTypeDecl = "enum"
-//     case .classDecl: rawTypeDecl = "class"
-//     case .actorDecl: rawTypeDecl = "actor"
-//     case .protocolDecl: rawTypeDecl = "protocol"
-//     default: return nil
-//     }
-//     let originatingSyntax: TypeSyntax = "\(raw: marker)"
-//
-//     // We should only get type declarations
-//     let typeDecl = NominalTypeDeclSyntax(rawTypeDecl)!
-//     return ResolvedNominalTypeReference._mockMarkerType(
-//       mainDecl: typeDecl,
-//       originatingSyntax: originatingSyntax
-//     )
-//   }
-// }
-
 final class TypeResolutionTests: XCTestCase {
   func testSimpleCase() {
     assertTypeResolution(
@@ -177,25 +31,6 @@ final class TypeResolutionTests: XCTestCase {
     )
   }
 
-  // func testParseErrorResilience() {
-  //   assertQualifiedTypeName(
-  //     [
-  //       "MyFile.swift": """
-  //       \("🟥", name: "_(MyFile.swift)::A")
-  //       struct A {}
-  //
-  //       \("🟩", name: "_(MyFile.swift)::`0`")
-  //       struct 0 {
-  //         typealias B = A
-  //
-  //         func f(_: \(reference: "🟩")`0`)
-  //         func g(_: \(reference: "🟥")B)
-  //       }
-  //       """ as LexicalLookupSource
-  //     ],
-  //     verbose: true
-  //   )
-  // }
   func testSimpleNestedCase() {
     assertTypeResolution([
       "MyFile.swift": """
@@ -324,6 +159,26 @@ final class TypeResolutionTests: XCTestCase {
         let invalidB: \(failure: .noTypeInScope)B
       }
       """
+    ])
+  }
+
+  // MARK: Redeclarations
+
+  func testSimpleRedeclarations() {
+    assertTypeResolution([
+      "MyFile.swift": """
+      protocol A {}
+      struct A {}
+
+      let _: \(failure: .ambiguousTypeDecl(["protocol A {}", "struct A {}"]))A
+
+      func f() {
+        enum A {}
+        typealias A = ()
+
+        let _: \(failure: .ambiguousTypeDecl(["enum A {}", "typealias A = ()"]))A
+      }
+      """ as LexicalLookupSource
     ])
   }
 
@@ -556,9 +411,9 @@ final class TypeResolutionTests: XCTestCase {
       }
       """
     ])
-    // TODO: Add the following lookup expectation inside `struct A`.
-    // Currently fails because unqualified lookup emits implicit `Self`
-    // only inside protocols/extensions to match ASTScope behavior.
+    // TODO: Add the following lookup expectation inside `struct A` when `Self`
+    // is fixed. Currently fails because unqualified lookup emits implicit
+    // `Self` only inside protocols/extensions to match ASTScope behavior.
     // ```
     // func h() { let _: \(nominal: "🟩")Self }
     // ```
@@ -580,6 +435,59 @@ final class TypeResolutionTests: XCTestCase {
       // Test that incremental binding still works with a second request
       func g(_: \(nominal: "🟩")A.B)
       """ as LexicalLookupSource
+    ])
+  }
+
+  func testExtendedType() {
+    // TODO: Why does Metatype pass
+    assertTypeResolution([
+      "MyFile.swift": """
+      \("🟥", name: "_(MyFile.swift)::ProtoA")
+      protocol ProtoA: ~Copyable {}
+
+      // Tuple
+      \(extensionState: GenericExtensionState(
+        dependencies: [],
+        resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .tuple(labels: [])))
+      ))
+      extension () {}
+
+      // Metatype
+      typealias Metatype = ProtoAA.Type
+      \(extensionState: GenericExtensionState(
+        dependencies: [],
+        resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .memberResults([])))
+      ))
+      extension Metatype {}
+
+      // Any
+      \(extensionState: GenericExtensionState(
+        dependencies: [],
+        resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .anyType))
+      ))
+      extension Any & ~Escapable {}
+
+      // Valid Compositions
+      //
+      // We defer diagnostics to SEMA
+      \(extensionState: .bound(to: "_(MyFile.swift)::ProtoA", dependencies: []))
+      extension ProtoA & ~Copyable {}
+
+      typealias ProtoAndAny = ProtoA & Any
+      \(extensionState: .bound(to: "_(MyFile.swift)::ProtoA", dependencies: []))
+      extension ProtoAndAny {}
+
+      // Invalid Compositions
+      \("🟪", name: "_(MyFile.swift)::ProtoB")
+      protocol ProtoB {}
+      \(extensionState: GenericExtensionState(
+        dependencies: [],
+        resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .memberResults([
+          "🟥", "🟪"
+        ])))
+      ))
+      extension ProtoA & ProtoB {}
+      """
     ])
   }
   func testTypeInExtension() {
@@ -637,7 +545,6 @@ final class TypeResolutionTests: XCTestCase {
     ])
   }
 
-  // TODO: Reenable
   func testPathologicalN3() {
     // When debugging this by logging the graph's state, remember
     // that we start binding extensions at `\(extensionState: ...)` expectations.
@@ -653,28 +560,11 @@ final class TypeResolutionTests: XCTestCase {
       extension T_0 { typealias Last = T_3 }
 
 
-      //        |- Depends on : ()
-      //        `- Introduces : T_0>Last
-      //
-      //              `- ℹ️ note:  For `T_0`'s member `Last` to resolve to `output.T_3`,
-      //                          `T_0` must not contain any type member named `T_3`.
-
-
-
       \(extensionState: .bound(
         to: "_(File.swift)::T_3",
         dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_0", members: ["Last", "T_3"])]
       ))
       extension T_0.Last { typealias Prev = T_2 }
-
-
-      //        |- Depends on : T_0>Last, T_0>T_3
-      //        |- Resolves to: T_3
-      //        `- Introduces : T_3>Prev
-      //
-      //           `- ℹ️ note: `T_0`'s member `Last` is declared in `extension T_0.Last`
-
-
 
 
       // j=3
@@ -685,29 +575,12 @@ final class TypeResolutionTests: XCTestCase {
       extension T_3.Prev { typealias Prev = T_1 }
 
 
-      //        |- Depends on : T_3>Prev, T_3>T_2
-      //        |- Resolves to: T_2
-      //        `- Introduces : T_2>Prev
-      //
-      //           `- ℹ️ note: `T_3`'s member `Prev` is declared in `extension T_0.Last`
-
-
-
-
-
       // j=2
       \(extensionState: .bound(
         to: "_(File.swift)::T_1",
         dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_2", members: ["Prev", "T_1"])]
       ))
       extension T_2.Prev { typealias Prev = T_0 }
-
-
-      //        |- Depends on : T_2>Prev, T_2>T_1
-      //        |- Resolves to: T_1
-      //        `- Introduces : T_1>Prev
-      //
-      //           `- ℹ️ note: `T_2`'s member `Prev` is declared in `extension T_3.Prev`
 
       \(extensionState: .invalidCycle(
         dependencies: [
@@ -721,15 +594,6 @@ final class TypeResolutionTests: XCTestCase {
         conflictingMember: "T_3"
       ))
       extension T_1.Prev { struct T_3 {} }
-
-
-      //        |- Depends on : T_1>Prev, T_1>T_0
-      //        |- Resolves to: T_0
-      //        `- Introduces : T_0>T_3     <- collides with the first extension's empty dependency
-      //
-      //           `- ℹ️ note: `T_1`'s member `Prev` is declared in `extension T_2.Prev`
-      // `- ❌ error: Resolving `extension T_1.Prev` to the extended type `T_0` requires that `T_0`
-      //           have no type member `T_3`, but the extension introduces `T_3`.
       """
     ])
   }
@@ -768,7 +632,7 @@ final class TypeResolutionTests: XCTestCase {
     ])
   }
 
-  /// Similar to pathological n=3 above but for any `n`
+  /// Similar to pathological n=3 above, but for any `n`
   func testPathologicalArbitrary() {
     let n = 20
     precondition(n >= 2, "Pathological case requires `n` of at least 2.")
@@ -1133,62 +997,7 @@ final class TypeResolutionTests: XCTestCase {
   //   )
   // }
 
-  // TODO: Test lookup of an associated type and how it interacts with MyProto.Type, etc.
-
-  // TODO: Test multiple variables/patterns and finding those, e.g., var a, b, c: Int {}, etc.
-
-  // TODO: Test weird parameters: variadics (+packs) & trailing closures.
-
-  // TODO: Test nested and non-nested (invalid) macro lookup
-  // TODO: Test macro and non-`macro` attributes, e.g., actors, result builders, property wrappers
-
-  // TODO: Test supertype cycles protocol A: B {}; protocol B: A {}
-
-  // TODO: Macro test, e.g. @freestanding macro noargsButCallable() = ...; #closure(args)
-
-  // TODO: Test same-file redeclarations
-  // e.g.
-  // // FileA.swift
-  // protocol A {}
-  // struct A {}
-  //
-  // e.g.
-  // func f() {
-  //   struct A {}
-  //   typealias A = Int
-  // }
-
-  // TODO: Aliased suppressed type test (base type / suppressed base type can be aliased & composed)
-  // NOTE: Looks like this is SEMA (name lookup also diagnoses later)
-  //   typealias A = Escapable
-  //   struct B: ~A {}
-  // Another legal program:
-  //   typealias A = Hashable & ~Escapable & ~Copyable
-  //   struct B: A {}
-  //
-  // Also failing test:
-  //   typealias A = Encodable
-  //   typealias B = ~A & Hashable // ❌ cannot suppress `Encodable`
-  //   func f(b: B) {
-  //     b.invalidProp // ✅ not diagnosed
-  //   }
-  //
-  // Second failing test:
-  //   typealias A = ~(Escapable & Copyable)
-  // Third failing test:
-  //   typealias A = Hashable & ~Escapable & ~Copyable
-  //   struct B: ~A {}
-  //
-  // Fourth failing:
-  //   typealias A = ~Sendable
-
   // TODO: Shadowing tests. Local; same file; same-mdoule, etc.
-
-  // TODO: Diagnose compositions with `anyType`
-  // e.g.
-  //   protocol MyProto: ~Copyable {}
-  //   extension MyProto & ~Copyable {} // ❌ error: non-nominal type 'MyProto & ~Copyable' cannot be extended
-  //   extension MyProto & Any {} // ⚠️ extending a protocol composition is not supported; extending 'MyProto' instead
 
   // TODO: Test syntax resolution request in disabled `#if`
   // TODO: Test syntax resolution requesr with `ConfiguredRegions` across multiple files

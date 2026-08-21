@@ -12,9 +12,14 @@
 
 // TODO: Remove Glibc import
 @preconcurrency import Glibc
-import SwiftDiagnostics
 import SwiftIfConfig
 import SwiftSyntax
+
+#if compiler(>=6)
+private import SwiftDiagnostics
+#else
+import SwiftDiagnostics
+#endif
 
 extension Array {
   /// Appends if the array has no duplicates using the given key
@@ -90,19 +95,23 @@ extension Array {
     self.dependencyTypeName = dependencyTypeName
     self.members = members
   }
+
+  fileprivate func _map<NewTypeName>(mapName: (TypeName) -> NewTypeName) -> GenericExtensionDependency<NewTypeName> {
+    GenericExtensionDependency<NewTypeName>(
+      dependencyTypeName: mapName(dependencyTypeName),
+      members: members
+    )
+  }
 }
 
 @_spi(_QualifiedLookupTests) public typealias ExtensionDependency = GenericExtensionDependency<
   GlobalTypeName
 >
 
-@_spi(_QualifiedLookupTests) public typealias GenericBindingFailure<
-  TypeName: Sendable & Hashable & CustomDebugStringConvertible
-> = TypeResolutionFailure<
-  TypeName, ResolvedNominalTypeReference, NominalTypeRef
->
 @_spi(_QualifiedLookupTests) public typealias InvalidatedExtensions = [ExtensionState]
-@_spi(_QualifiedLookupTests) public typealias BindingFailure = GenericBindingFailure<GlobalTypeName>
+@_spi(_QualifiedLookupTests) public typealias BindingFailure = TypeResolutionFailure<
+  GlobalTypeName, ResolvedNominalTypeReference, NominalTypeRef
+>
 
 @_spi(_QualifiedLookupTests) public typealias BindingResult = (
   resolvedTypeName: Result<
@@ -113,7 +122,11 @@ extension Array {
 )
 
 @_spi(_QualifiedLookupTests)
-public struct GenericExtensionState<TypeName: Sendable & Hashable & CustomDebugStringConvertible>: Sendable {
+public struct GenericExtensionState<
+  TypeName: Sendable & Hashable & CustomDebugStringConvertible,
+  MinimalNominal: Sendable & CustomDebugStringConvertible,
+  ExtendedNominal: Sendable & CustomDebugStringConvertible
+>: Sendable {
   // Invariant: The extensions listed must be valid and successfully bound to a type in `extensionsToState`
   // Invariant: There's only one dependency per type.
   //
@@ -122,12 +135,12 @@ public struct GenericExtensionState<TypeName: Sendable & Hashable & CustomDebugS
     // TODO: Remove this property
     extensionDecl: Attached<ExtensionDeclSyntax>,
     /// The resolved type must be valid in `namesToTypes`
-    resolvedType: Result<TypeName, GenericBindingFailure<TypeName>>
+    resolvedType: Result<TypeName, TypeResolutionFailure<TypeName, MinimalNominal, ExtendedNominal>>
 
   @_spi(_QualifiedLookupTests) public init(
     _uncheckedDependencies dependencies: [GenericExtensionDependency<TypeName>],
     extensionDecl: Attached<ExtensionDeclSyntax>,
-    resolvedType: Result<TypeName, GenericBindingFailure<TypeName>>
+    resolvedType: Result<TypeName, TypeResolutionFailure<TypeName, MinimalNominal, ExtendedNominal>>
   ) {
     self.dependencies = dependencies
     self.extensionDecl = extensionDecl
@@ -137,7 +150,7 @@ public struct GenericExtensionState<TypeName: Sendable & Hashable & CustomDebugS
   @_spi(_QualifiedLookupTests) public init(
     dependencies: [QualifiedLookupDependency<GlobalTypeName>],
     extensionDecl: Attached<ExtensionDeclSyntax>,
-    resolvedType: Result<TypeName, GenericBindingFailure<TypeName>>
+    resolvedType: Result<TypeName, TypeResolutionFailure<TypeName, MinimalNominal, ExtendedNominal>>
   ) where TypeName == GlobalTypeName {
     // Group dependencies by base type and member name, while maintaing order
     var groupedDependencies =
@@ -178,7 +191,9 @@ public struct GenericExtensionState<TypeName: Sendable & Hashable & CustomDebugS
     )
   }
 }
-@_spi(_QualifiedLookupTests) public typealias ExtensionState = GenericExtensionState<GlobalTypeName>
+@_spi(_QualifiedLookupTests) public typealias ExtensionState = GenericExtensionState<
+  GlobalTypeName, ResolvedNominalTypeReference, NominalTypeRef
+>
 
 @_spi(_QualifiedLookupTests) public struct TypeTable: Hashable {
   fileprivate(set) var typeMembersToDecls: [Identifier: TypeMember]
@@ -833,42 +848,6 @@ extension TypeDependencyGraph {
     self.typeDecls = typeDecls
   }
 }
-
-@_spi(_QualifiedLookupTests) public struct GenericDependencyCycleElement<TypeName: Sendable>: Sendable {
-  @_spi(_QualifiedLookupTests) public let introducingTypeDecl: TypeDeclSyntax?
-  @_spi(_QualifiedLookupTests) public let extensionDecl: ExtensionDeclSyntax
-  @_spi(_QualifiedLookupTests) public let boundType: TypeName
-
-  @_spi(_QualifiedLookupTests) public init(
-    introducingTypeDecl: TypeDeclSyntax?,
-    extensionDecl: ExtensionDeclSyntax,
-    boundType: TypeName
-  ) {
-    self.introducingTypeDecl = introducingTypeDecl
-    self.extensionDecl = extensionDecl
-    self.boundType = boundType
-  }
-}
-@_spi(_QualifiedLookupTests) public typealias DependencyCycleElement = GenericDependencyCycleElement<
-  GlobalTypeName
->
-
-@_spi(_QualifiedLookupTests) public struct GenericExtensionBindingCycle<TypeName: Sendable>: Sendable {
-  @_spi(_QualifiedLookupTests) public let dependencyPath: [GenericDependencyCycleElement<TypeName>]
-  @_spi(_QualifiedLookupTests) public let dependencyMember: Identifier
-
-  @_spi(_QualifiedLookupTests) public init(
-    dependencyPath: [GenericDependencyCycleElement<TypeName>],
-    dependencyMember: Identifier
-  ) {
-    self.dependencyPath = dependencyPath
-    self.dependencyMember = dependencyMember
-  }
-}
-
-@_spi(_QualifiedLookupTests) public typealias ExtensionBindingCycle = GenericExtensionBindingCycle<
-  GlobalTypeName
->
 
 extension TypeDependencyGraph {
   enum CycleDetectionFailure: Error {
@@ -1832,7 +1811,7 @@ extension TypeDependencyGraph {
   }
 }
 
-// MARK: Debugging
+// MARK: Debug
 
 @_spi(_QualifiedLookupTests)
 extension NominalTypeRef: CustomDebugStringConvertible {
@@ -1918,6 +1897,21 @@ extension GenericExtensionState: CustomDebugStringConvertible where TypeName: Cu
       """
   }
 }
+extension GenericExtensionState {
+  @_spi(_QualifiedLookupTests)
+  public func _mapTypes<NewMinimalNominal, NewExtendedNominal>(
+    mapMinimalNominal: (MinimalNominal) -> NewMinimalNominal,
+    mapExtendedNominal: (ExtendedNominal) -> NewExtendedNominal
+  ) -> GenericExtensionState<TypeName, NewMinimalNominal, NewExtendedNominal> {
+    GenericExtensionState<TypeName, NewMinimalNominal, NewExtendedNominal>(
+      _uncheckedDependencies: dependencies.map({ $0._map(mapName: \.self) }),
+      extensionDecl: extensionDecl,
+      resolvedType: resolvedType.mapError({
+        $0._map(mapName: \.self, mapMinimalNominal: mapMinimalNominal, mapExtendedNominal: mapExtendedNominal)
+      })
+    )
+  }
+}
 
 // TypeDependencyGraph description
 
@@ -1929,8 +1923,7 @@ private struct _DependencyGraphDiagnostic: DiagnosticMessage {
 }
 
 extension TypeDependencyGraph {
-  @_spi(_QualifiedLookupTests)
-  public func _describeWithDiagnostics() -> (diagnostics: [Diagnostic], hasErrors: Bool) {
+  fileprivate func _describeWithDiagnostics() -> (diagnostics: [Diagnostic], hasErrors: Bool) {
     var diagnostics = [Diagnostic]()
     /// Attach a note to the given node.
     func _attachNote<S: SyntaxProtocol>(to syntax: Attached<S>, message: String) {

@@ -16,6 +16,9 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
+typealias TestExtensionState = GenericExtensionState<TestTypeName, Character, Character>
+typealias TestTypeResolutionFailure = TypeResolutionFailure<TestTypeName, Character, Character>
+
 /// A QualifiedTypeNameGlobalType represented as a `String`.
 /// Provides a CustomDebugStringConvertible conformance without quotes.
 struct TestTypeName: Hashable, ExpressibleByStringLiteral, CustomDebugStringConvertible {
@@ -51,9 +54,9 @@ struct TypeResolutionMatcher {
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
   enum Expectation {
     case syntaxResolution(
-      Result<MemberLookupResult<Character>, TypeResolutionFailure<TestTypeName, Character, Character>>
+      Result<MemberLookupResult<Character>, TestTypeResolutionFailure>
     )
-    case extensionBinding(GenericExtensionState<TestTypeName>)
+    case extensionBinding(TestExtensionState)
   }
 
   let symbolTable: SymbolTable
@@ -212,7 +215,9 @@ extension TypeResolutionMatcher: LexicalMatcher {
       return _assertExtensionBinding(
         // Force unwrap because we parsed this from `lookupSources`
         extensionDecl: Attached(extensionDecl)!,
-        expectedState: expectedState,
+        expectedRawState: expectedState,
+        markersToDefinitions: markersToDefinitions,
+        syntaxToDefinitions: syntaxToDefinitions,
         verbose: verbose
       )
     }
@@ -221,14 +226,16 @@ extension TypeResolutionMatcher: LexicalMatcher {
   /// `assertExpectation` forwards extensions here.
   private func _assertExtensionBinding(
     extensionDecl: Attached<ExtensionDeclSyntax>,
-    expectedState: GenericExtensionState<TestTypeName>,
+    expectedRawState: TestExtensionState,
+    markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
+    syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool
   ) -> [ExpectationFailure] {
     // Look up extended type if not already resolved
-    let actualState: ExtensionState
+    let actualRawState: ExtensionState
     // Try to get already-resolved state
     if let existingState = symbolTable.dependencyGraph.extensionsToState[extensionDecl] {
-      actualState = existingState
+      actualRawState = existingState
     } else {
       if verbose {
         print("Extension `\(extensionDecl.node._memberlessDescription)` not already bound; initating binding.")
@@ -250,8 +257,40 @@ extension TypeResolutionMatcher: LexicalMatcher {
         ]
       }
 
-      actualState = producedState
+      actualRawState = producedState
     }
+
+    // Map the types
+    var mappingFailures = [ExpectationFailure]()
+    /// Helper for mapping the expected state
+    func mapMarker(marker: Character) -> String {
+      guard let targetDefinition = markersToDefinitions[marker] else {
+        mappingFailures.append(ExpectationFailure.referencesUndefinedMarker(marker))
+        return ""
+      }
+      guard let expectedName = targetDefinition.annotation.name else {
+        mappingFailures.append(
+          ExpectationFailure.other(
+            failure:
+              "Must specify 'name' argument in annotation '\(targetDefinition.annotation.marker)' for declaration '\(targetDefinition.syntax.trimmedDescription)'."
+          )
+        )
+        return ""
+      }
+      return expectedName
+    }
+    let expectedState = expectedRawState._mapTypes(
+      mapMinimalNominal: mapMarker(marker:),
+      mapExtendedNominal: mapMarker(marker:)
+    )
+
+    let actualState = actualRawState._mapTypes(
+      // Get the type name
+      mapMinimalNominal: \.nominalTypeRef._succinctDescription,
+      mapExtendedNominal: \._succinctDescription
+    )
+    // Don't continue if we couldn't map the states
+    guard mappingFailures.isEmpty else { return mappingFailures }
 
     // We use strings for the expected qualified name; just print that name
     let expectedStateDescription = expectedState.debugDescription
@@ -259,7 +298,8 @@ extension TypeResolutionMatcher: LexicalMatcher {
     guard expectedStateDescription == actualStateDescription else {
       return [
         ExpectationFailure.other(
-          failure: "Extension-state mismatch.\nExpected: \(expectedState)\nBut got:  \(actualState)"
+          failure:
+            "Extension-state mismatch.\nExpected: \(expectedStateDescription)\nBut got:  \(actualStateDescription)"
         )
       ]
     }
@@ -269,7 +309,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
   /// `assertExpectation` forwards type syntax here.
   private func _assertTypeSyntax(
     typeSyntax: Attached<TypeSyntax>,
-    expectedResult: Result<MemberLookupResult<Character>, TypeResolutionFailure<TestTypeName, Character, Character>>,
+    expectedResult: Result<MemberLookupResult<Character>, TestTypeResolutionFailure>,
     markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool,
@@ -429,7 +469,7 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     append(definition: TypeResolutionMatcher.Definition(marker: marker, name: name), file: file, line: line)
   }
   mutating func appendInterpolation(
-    extensionState: GenericExtensionState<TestTypeName>,
+    extensionState: TestExtensionState,
     file: StaticString = #file,
     line: UInt = #line
   ) {
@@ -440,14 +480,14 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     )
   }
   mutating func appendInterpolation(
-    result: Result<MemberLookupResult<Character>, TypeResolutionFailure<TestTypeName, Character, Character>>,
+    result: Result<MemberLookupResult<Character>, TestTypeResolutionFailure>,
     file: StaticString = #file,
     line: UInt = #line
   ) {
     appendInterpolation(expects: [TypeResolutionMatcher.Expectation.syntaxResolution(result)], file: file, line: line)
   }
   mutating func appendInterpolation(
-    failure: TypeResolutionFailure<TestTypeName, Character, Character>,
+    failure: TestTypeResolutionFailure,
     file: StaticString = #file,
     line: UInt = #line
   ) {
@@ -473,5 +513,126 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     line: UInt = #line
   ) {
     appendInterpolation(nominals: [marker], file: file, line: line)
+  }
+}
+
+// MARK: Convenience Initializers
+
+extension TypeLikeSyntax: ExpressibleByStringLiteral {
+  public init(stringLiteral value: StringLiteralType) {
+    self.init(TypeSyntax(stringLiteral: value))
+  }
+}
+
+struct ExtensionDependency {
+  let baseType: TestTypeName
+  let members: [IdentifierWrapper]
+}
+
+struct IdentifierWrapper: ExpressibleByStringLiteral {
+  let identifier: Identifier
+
+  init(stringLiteral value: StaticString) {
+    identifier = Identifier(canonicalName: value)
+  }
+
+  init(
+    string: String,
+    allocatingIn lookupSourceInterpolation: inout LexicalLookupSource<TypeResolutionMatcher>.Interpolation
+  ) {
+    identifier = lookupSourceInterpolation.allocateIdentifier(string: string)
+  }
+}
+
+extension TestExtensionState {
+  /// Creates a mock extension state to check an extension's dependencies,
+  /// bound type, or failure to bind due to cycles.
+  ///
+  /// Note: Because `GenericBindingFailure` contains `TypeQualifier.Failure`
+  /// (which uses actual `ResolvedNominalTypeReference` and not mock types),
+  /// it's hard to test type-resolution failures. You may instead use regular
+  /// type-resolution tests and only use this initializer to test extension
+  /// binding.
+  init(
+    dependencies: [ExtensionDependency],
+    resolvedType: Result<TestTypeName, TestTypeResolutionFailure>,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) {
+    // Create fake extension (won't be checked)
+    //
+    // Wrap the type syntax in a file
+    var parser = Parser("extension")
+    let sourceFile = SourceFileSyntax.parse(from: &parser)
+    let mockExtension = Attached(sourceFile.children(ofType: ExtensionDeclSyntax.self)[0])!
+
+    self.init(
+      _uncheckedDependencies: dependencies.map({
+        let mappedMembers: [TypeMember] = $0.members.map({ member in
+          return TypeMember(name: member.identifier, decls: [])
+        })
+        return GenericExtensionDependency<TestTypeName>(dependencyTypeName: $0.baseType, members: mappedMembers)
+      }),
+      // Extension decl won't be checked
+      extensionDecl: mockExtension,
+      resolvedType: resolvedType
+    )
+  }
+
+  static func bound(
+    to typeName: TestTypeName,
+    dependencies: [ExtensionDependency]
+  ) -> TestExtensionState {
+    TestExtensionState(dependencies: dependencies, resolvedType: .success(typeName))
+  }
+
+  static func invalidCycle(
+    dependencies: [ExtensionDependency],
+    cycleElements: [(introducingDecl: String?, extension: String, base: TestTypeName)],
+    conflictingMember: IdentifierWrapper,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) -> TestExtensionState {
+    let dependencyPath: [GenericDependencyCycleElement<TestTypeName>] = cycleElements.map({
+      (introducingTypeDeclText, extensionDeclText, baseTypeName) -> GenericDependencyCycleElement<TestTypeName> in
+      let introducingTypeDecl: TypeDeclSyntax?
+      if let introducingTypeDeclText {
+        let typeDeclRaw = DeclSyntax(stringLiteral: introducingTypeDeclText)
+        guard let typeDecl = Syntax(typeDeclRaw).as(TypeDeclSyntax.self) else {
+          fatalError(
+            "Couldn't cast the cycle element's 'introducingMember' `\(introducingTypeDeclText)` of kind '\(typeDeclRaw.kind)' to TypeDeclSyntax",
+            file: file,
+            line: line
+          )
+        }
+        introducingTypeDecl = typeDecl
+      } else {
+        introducingTypeDecl = nil
+      }
+
+      let extensionDeclRaw = DeclSyntax(stringLiteral: extensionDeclText)
+      guard let extensionDecl = extensionDeclRaw.as(ExtensionDeclSyntax.self) else {
+        fatalError(
+          "Couldn't cast the cycle element's 'extension' `\(extensionDeclText)` of kind '\(extensionDeclRaw.kind)' to ExtensionDeclSyntax",
+          file: file,
+          line: line
+        )
+      }
+      return GenericDependencyCycleElement(
+        introducingTypeDecl: introducingTypeDecl,
+        extensionDecl: extensionDecl,
+        boundType: baseTypeName,
+      )
+    })
+
+    let cycle = GenericExtensionBindingCycle<TestTypeName>(
+      dependencyPath: dependencyPath,
+      dependencyMember: conflictingMember.identifier
+    )
+
+    return TestExtensionState(
+      dependencies: dependencies,
+      resolvedType: Result.failure(TestTypeResolutionFailure.cyclicalExtensionDependency(cycle))
+    )
   }
 }
