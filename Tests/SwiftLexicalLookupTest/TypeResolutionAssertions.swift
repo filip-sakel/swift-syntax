@@ -407,7 +407,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 func assertTypeResolution(
   _ lookupSources: KeyValuePairs<String, LexicalLookupSource<TypeResolutionMatcher>>,
   moduleName: StaticString = "MyModule",
-  configuredRegions: ConfiguredRegions? = nil,
+  buildConfiguration: StaticBuildConfiguration? = nil,
   file: StaticString = #file,
   line: UInt = #line,
   verbose: Bool = false
@@ -427,7 +427,7 @@ func assertTypeResolution(
       symbolTable: SymbolTable(
         moduleName: moduleIdentifier,
         moduleToSources: [moduleIdentifier: uniquedLookupFiles],
-        configuredRegions: configuredRegions
+        buildConfiguration: buildConfiguration
       )!,
       moduleName: moduleIdentifier,
       lookupFiles: lookupFiles

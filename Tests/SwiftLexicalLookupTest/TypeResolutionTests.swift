@@ -184,6 +184,122 @@ final class TypeResolutionTests: XCTestCase {
     ])
   }
 
+  // MARK: If Config
+  func testIfConfig() {
+    return
+    let baseSourceInterpolation: LexicalLookupSource<TypeResolutionMatcher>.Interpolation = """
+      \("🟩")struct A {}
+      \("🟨")struct B {}
+      \("🟪")struct C {}
+      \("🟦")struct D {}
+
+      #if FlagA
+      extension A {
+        #if !FlagB
+        typealias T = A
+        #else
+        typealias T = B
+        #endif
+      }
+      #elseif FlagB
+      extension A {
+        #if FlagC
+        typealias T = C
+        #endif
+        #if FlagD
+        typealias T = D
+        #endif
+      }
+      #endif
+      """
+
+    func flagsConfig(_ flags: Set<String>) -> StaticBuildConfiguration {
+      StaticBuildConfiguration(
+        customConditions: flags,
+        languageVersion: VersionTuple(6),
+        compilerVersion: VersionTuple(6, 2)
+      )
+    }
+    let memberT = ImplicitTypeReferenceComponent(
+      from: TypeReference(
+        module: nil,
+        name: Identifier(canonicalName: "T"),
+        introducingSyntax: "T"
+      )
+    )
+
+    // We'll look up `A.T` with different flags
+    //
+    // Flags: FlagA => `struct A`
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        \(interpolation: baseSourceInterpolation)
+
+        let _: \(nominal: "🟩")A.T
+        """
+      ],
+      buildConfiguration: flagsConfig(["FlagA"])
+    )
+    // Flags: FlagA, FlagB => `struct B`
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        \(interpolation: baseSourceInterpolation)
+
+        let _: \(nominal: "🟨")A.T
+        """
+      ],
+      buildConfiguration: flagsConfig(["FlagA", "FlagB"])
+    )
+    // Flags: FlagB => no member
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        \(interpolation: baseSourceInterpolation)
+
+        let _: \(failure: .noTypeMember(member: memberT, in: .memberResults(["🟩"])))A.T
+        """
+      ],
+      buildConfiguration: flagsConfig(["FlagB"])
+    )
+    // Flags: FlagB, FlagC => `struct C`
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        \(interpolation: baseSourceInterpolation)
+
+        let _: \(nominal: "🟪"))A.T
+        """
+      ],
+      buildConfiguration: flagsConfig(["FlagB", "FlagC"])
+    )
+    // Flags: FlagB, FlagD => `struct D`
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        \(interpolation: baseSourceInterpolation)
+
+        let _: \(nominal: "🟦"))A.T
+        """
+      ],
+      buildConfiguration: flagsConfig(["FlagB", "FlagD"])
+    )
+    // Flags: FlagB, FlagC, FlagD => ambiguity between `struct C` & `struct D`
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        \(interpolation: baseSourceInterpolation)
+
+        let _: \(failure: .invalidBaseType(
+         .ambiguousTypeDecl(["struct C {}", "struct D {}"])
+        ))A.T
+        """
+      ],
+      buildConfiguration: flagsConfig(["FlagB", "FlagC", "FlagD"])
+    )
+  }
+
   // MARK: Aliases
 
   func testSimpleAlias() {

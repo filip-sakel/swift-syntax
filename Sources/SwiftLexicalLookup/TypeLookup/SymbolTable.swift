@@ -51,13 +51,14 @@ import SwiftSyntax
   public init?(
     moduleName: ModuleName,
     moduleToSources: [ModuleName: [String: SourceFileSyntax]],
-    configuredRegions: ConfiguredRegions?
+    buildConfiguration: StaticBuildConfiguration?
   ) {
     guard moduleToSources[moduleName] != nil else { return nil }
 
     self.moduleName = moduleName
     self.moduleToSources = moduleToSources
-    self.configuredRegions = configuredRegions
+    // FIXME: Pass `buildConfiguration`
+    self.configuredRegions = nil
   }
 }
 
