@@ -1578,8 +1578,6 @@ extension TypeResolver {
     case .success(let success):
       currentNominal = success
     // If the reference changed, report those failures
-    case .failure(.redeclared(let declarations)):
-      return .failure(Failure.ambiguousTypeDecl(declarations.map({ TypeDeclSyntax($0.node) })))
     case .failure(.removed):
       return .failure(Failure.noTypeInScope)
     // TODO: Remove if we don't handle this failure
