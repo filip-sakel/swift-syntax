@@ -163,7 +163,9 @@ private func _visitDirectMembersOfDecl(
       }
     }
     // If configuredRegions is nil, visit all if-config clauses
-    else if let ifConfigDecl = decl.as(IfConfigDeclSyntax.self) {
+    else if let ifConfigDecl = decl.as(IfConfigDeclSyntax.self),
+      configuredRegions == nil
+    {
       for clause in ifConfigDecl.clauses {
         guard case .decls(let members) = clause.elements else { return }
         for member in members {
@@ -198,6 +200,9 @@ extension DeclGroupSyntax {
     configuredRegions: ConfiguredRegions?,
     visit: (ValueDeclSyntax) -> Void
   ) {
+    // If we're in a disabled region, visit nothing
+    if let configuredRegions, configuredRegions.isActive(self) != .active { return }
+
     for member in memberBlock.members {
       _visitDirectMembersOfDecl(decl: member.decl, configuredRegions: configuredRegions, visit: visit)
     }

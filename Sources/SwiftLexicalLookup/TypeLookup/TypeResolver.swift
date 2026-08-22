@@ -978,7 +978,10 @@ extension TypeResolver {
   fileprivate func _findDeclContext(ofDeclGroup node: Attached<DeclGroupSyntaxType>) -> DeclContext {
     var currentAncestor: Attached<Syntax>? = node.parent
     while let ancestor = currentAncestor {
-      if let codeBlockScope = ancestor.as(CodeBlockItemListSyntax.self) {
+      if let codeBlockScope = ancestor.as(CodeBlockItemListSyntax.self),
+        // `#if` aren't true scopes
+        codeBlockScope.parent?.is(IfConfigClauseSyntax.self) != true
+      {
         return DeclContext.codeBlock(codeBlockScope)
       } else if let declGroupScope = ancestor.as(DeclGroupSyntaxType.self) {
         return DeclContext.declGroup(declGroupScope)

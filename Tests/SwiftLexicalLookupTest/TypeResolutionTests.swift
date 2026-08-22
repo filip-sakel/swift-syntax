@@ -205,7 +205,8 @@ final class TypeResolutionTests: XCTestCase {
         #endif
       }
       #elseif FlagB
-      extension A {
+      typealias AliasedA = A
+      extension AliasedA {
         #if FlagC
         typealias T = C
         #endif
@@ -245,63 +246,64 @@ final class TypeResolutionTests: XCTestCase {
       buildConfiguration: flagsConfig(["FlagA"]),
       verbose: true
     )
-    // // Flags: FlagA, FlagB => `struct B`
-    // assertTypeResolution(
-    //   [
-    //     "MyFile.swift": """
-    //     \(interpolation: baseSourceInterpolation)
-    //
-    //     let _: \(nominal: "🟨")A.T
-    //     """
-    //   ],
-    //   buildConfiguration: flagsConfig(["FlagA", "FlagB"])
-    // )
-    // // Flags: FlagB => no member
-    // assertTypeResolution(
-    //   [
-    //     "MyFile.swift": """
-    //     \(interpolation: baseSourceInterpolation)
-    //
-    //     let _: \(failure: .noTypeMember(member: memberT, in: .memberResults(["🟩"])))A.T
-    //     """
-    //   ],
-    //   buildConfiguration: flagsConfig(["FlagB"])
-    // )
-    // // Flags: FlagB, FlagC => `struct C`
-    // assertTypeResolution(
-    //   [
-    //     "MyFile.swift": """
-    //     \(interpolation: baseSourceInterpolation)
-    //
-    //     let _: \(nominal: "🟪"))A.T
-    //     """
-    //   ],
-    //   buildConfiguration: flagsConfig(["FlagB", "FlagC"])
-    // )
-    // // Flags: FlagB, FlagD => `struct D`
-    // assertTypeResolution(
-    //   [
-    //     "MyFile.swift": """
-    //     \(interpolation: baseSourceInterpolation)
-    //
-    //     let _: \(nominal: "🟦"))A.T
-    //     """
-    //   ],
-    //   buildConfiguration: flagsConfig(["FlagB", "FlagD"])
-    // )
-    // // Flags: FlagB, FlagC, FlagD => ambiguity between `struct C` & `struct D`
-    // assertTypeResolution(
-    //   [
-    //     "MyFile.swift": """
-    //     \(interpolation: baseSourceInterpolation)
-    //
-    //     let _: \(failure: .invalidBaseType(
-    //      .ambiguousTypeDecl(["struct C {}", "struct D {}"])
-    //     ))A.T
-    //     """
-    //   ],
-    //   buildConfiguration: flagsConfig(["FlagB", "FlagC", "FlagD"])
-    // )
+    // Flags: FlagA, FlagB => `struct B`
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        \(interpolation: baseSourceInterpolation)
+
+        let _: \(nominal: "🟨")A.T
+        """
+      ],
+      buildConfiguration: flagsConfig(["FlagA", "FlagB"])
+    )
+    // Flags: FlagB => no member
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        \(interpolation: baseSourceInterpolation)
+
+        let _: \(failure: .noTypeMember(member: memberT, in: .memberResults(["🟩"])))A.T
+        """
+      ],
+      buildConfiguration: flagsConfig(["FlagB"]),
+      verbose: true
+    )
+    // Flags: FlagB, FlagC => `struct C`
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        \(interpolation: baseSourceInterpolation)
+
+        let _: \(nominal: "🟪")A.T
+        """
+      ],
+      buildConfiguration: flagsConfig(["FlagB", "FlagC"])
+    )
+    // Flags: FlagB, FlagD => `struct D`
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        \(interpolation: baseSourceInterpolation)
+
+        let _: \(nominal: "🟦")A.T
+        """
+      ],
+      buildConfiguration: flagsConfig(["FlagB", "FlagD"])
+    )
+    // Flags: FlagB, FlagC, FlagD => ambiguity between `typealias T = C` & `typealias T = D`
+    assertTypeResolution(
+      [
+        "MyFile.swift": """
+        \(interpolation: baseSourceInterpolation)
+
+        let _: \(failure: .invalidMembers(
+          [("A.T", .ambiguousTypeDecl(["typealias T = C", "typealias T = D"]))]
+        ))A.T
+        """
+      ],
+      buildConfiguration: flagsConfig(["FlagB", "FlagC", "FlagD"])
+    )
   }
 
   // MARK: Aliases
