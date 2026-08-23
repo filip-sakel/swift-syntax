@@ -37,19 +37,19 @@ extension SymbolTable {
 extension SymbolTable {
   /// Registers nominal type by forwarding to `TypeDependencyGraph/registerNominalType`
   func registerNominalType(
-    nestedMainDecl: Attached<NominalTypeDeclSyntax>,
-    mainDeclName: Identifier,
-    mainDeclModule: ModuleName,
-    declGroupBase: Attached<DeclGroupSyntaxType>,
-    baseType: ResolvedNominalTypeReference,
+    topScopeMainDecl: Attached<NominalTypeDeclSyntax>,
+    declName: Identifier,
+    declFileConfiguredRegions: ConfiguredRegions?,
+    declModule: ModuleName,
+    isGlobal: Bool,
     originatingSyntax: Attached<TypeLikeSyntax>
   ) -> Result<ResolvedNominalTypeReference, TypeDependencyGraph.NominalRegistrationFailure> {
     return dependencyGraph.registerNominalType(
-      nestedMainDecl: nestedMainDecl,
-      mainDeclName: mainDeclName,
-      mainDeclModule: mainDeclModule,
-      declGroupBase: declGroupBase,
-      baseType: baseType.nominalTypeRef,
+      topScopeMainDecl: topScopeMainDecl,
+      declName: declName,
+      declFileConfiguredRegions: declFileConfiguredRegions,
+      declModule: declModule,
+      isGlobal: isGlobal,
       symbolTable: self
     ).map({ nominalRef in
       ResolvedNominalTypeReference(
@@ -60,17 +60,21 @@ extension SymbolTable {
   }
   /// Registers nominal type by forwarding to `TypeDependencyGraph/registerNominalType`
   func registerNominalType(
-    topScopeMainDecl: Attached<NominalTypeDeclSyntax>,
-    mainDeclName: Identifier,
-    mainDeclModule: ModuleName,
-    isGlobal: Bool,
+    nestedMainDecl: Attached<NominalTypeDeclSyntax>,
+    declName: Identifier,
+    declFileConfiguredRegions: ConfiguredRegions?,
+    declModule: ModuleName,
+    baseDeclGroup: Attached<DeclGroupSyntaxType>,
+    baseType: ResolvedNominalTypeReference,
     originatingSyntax: Attached<TypeLikeSyntax>
-  ) -> Result<ResolvedNominalTypeReference, TypeDependencyGraph.NominalRegistrationFailure> {
+  ) -> Result<ResolvedNominalTypeReference, TypeDependencyGraph.NestedNominalRegistrationFailure> {
     return dependencyGraph.registerNominalType(
-      topScopeMainDecl: topScopeMainDecl,
-      mainDeclName: mainDeclName,
-      mainDeclModule: mainDeclModule,
-      isGlobal: isGlobal,
+      nestedMainDecl: nestedMainDecl,
+      declName: declName,
+      declFileConfiguredRegions: declFileConfiguredRegions,
+      declModule: declModule,
+      baseDeclGroup: baseDeclGroup,
+      baseType: baseType.nominalTypeRef,
       symbolTable: self
     ).map({ nominalRef in
       ResolvedNominalTypeReference(
@@ -546,20 +550,23 @@ extension SymbolTable {
     introducingTypeSyntax: Attached<TypeLikeSyntax>,
     introducingModule: ModuleName,
     dependencyTracker: inout DependencyTracker,
-  ) -> Result<[Attached<TypeDeclSyntax>], TypeDependencyGraph.QualifiedTypeLookupFailure> {
+  ) -> Result<
+    [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)],
+    TypeDependencyGraph.QualifiedTypeLookupFailure
+  > {
     assert(
       moduleMap[introducingTypeSyntax.fileRoot] == introducingModule,
       "[SwiftLexicalLookup] Internal error: Caller passed wrong module for `\(introducingTypeSyntax.trimmedDescription)`: got '\(introducingModule.name)' but expected \(moduleMap[introducingTypeSyntax.fileRoot].debugDescription)"
     )
 
     // TODO: Remove
-    print(
-      "Finding member \(baseType) > \(memberTypeName.name)"
-    )
+    if _verbose {
+      print("Finding member \(baseType) > \(memberTypeName.name)")
+    }
     defer {
-      print(
-        "New deps for member-type lookup: \(dependencyTracker.dependencies)"
-      )
+      if _verbose {
+        print("New deps for member-type lookup: \(dependencyTracker.dependencies)")
+      }
     }
 
     return dependencyGraph.findMemberType(

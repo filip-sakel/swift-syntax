@@ -764,6 +764,15 @@ extension TypeResolver {
   enum DeclContext {
     case declGroup(Attached<DeclGroupSyntaxType>)
     case codeBlock(Attached<CodeBlockItemListSyntax>)
+
+    fileprivate var syntax: Syntax {
+      switch self {
+      case .declGroup(let syntax):
+        return Syntax(syntax.node)
+      case .codeBlock(let syntax):
+        return Syntax(syntax.node)
+      }
+    }
   }
   func _describeDeclContext(_ declContext: DeclContext) -> String {
     switch declContext {
@@ -1047,23 +1056,27 @@ extension TypeResolver {
     resolvedNominalBaseType: NominalTypeRef,
     memberName: Identifier,
     memberIntroducingSyntax: Attached<TypeLikeSyntax>
-  ) -> Result<Attached<TypeDeclSyntax>?, Failure> {
+  ) -> Result<(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)?, Failure> {
     // Perform direct type lookup and mark dependency
     //
     // First, get the module
     let introducingModule = extractModule(syntax: memberIntroducingSyntax)
     // Look up
-    let memberTypeDeclsResult: Result<[Attached<TypeDeclSyntax>], TypeDependencyGraph.QualifiedTypeLookupFailure> =
-      symbolTable.findMemberType(
-        baseType: resolvedNominalBaseType,
-        memberTypeName: memberName,
-        introducingTypeSyntax: memberIntroducingSyntax,
-        introducingModule: introducingModule,
-        dependencyTracker: &dependencyTracker
-      )
+    let memberTypeDeclsResult:
+      Result<
+        [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)],
+        TypeDependencyGraph.QualifiedTypeLookupFailure
+      > =
+        symbolTable.findMemberType(
+          baseType: resolvedNominalBaseType,
+          memberTypeName: memberName,
+          introducingTypeSyntax: memberIntroducingSyntax,
+          introducingModule: introducingModule,
+          dependencyTracker: &dependencyTracker
+        )
 
     // Handle failures
-    let memberTypeDecls: [Attached<TypeDeclSyntax>]
+    let memberTypeDecls: [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)]
     switch memberTypeDeclsResult {
     case .success(let success):
       memberTypeDecls = success
@@ -1095,7 +1108,9 @@ extension TypeResolver {
     // TODO: Add ability to disambiguite shadowing/fileprivate
     guard memberTypeDecls.count == 1 else {
       // TODO: Find more efficient solution (perhaps force `symbolTable.findMembers` to sort for us).
-      return Result.failure(Failure.ambiguousTypeDecl(symbolTable.sortDeclarations(memberTypeDecls).map(\.node)))
+      return Result.failure(
+        Failure.ambiguousTypeDecl(symbolTable.sortDeclarations(memberTypeDecls.map(\.typeDecl)).map(\.node))
+      )
     }
     // There's just one member; return that
     return Result.success(firstTypeDecl)
@@ -1107,21 +1122,10 @@ extension TypeResolver {
     declContext: DeclContext,
     originatingSyntax: Attached<TypeLikeSyntax>
   ) -> Result<ResolvedNominalTypeReference, Failure> {
-    // TODO: Reenable cache or remove
-    // let registeredGlobalName = symbolTable.dependencyGraph.namesToTypes.first(where: { (name, type) in
-    //   type.mainDecl.declGroup == nominalDecl
-    // })?.key
-    // if let registeredGlobalName = registeredGlobalName,
-    //   let registeredGlobalReference = symbolTable.dependencyGraph.getNominalTypeReference(name: registeredGlobalName)
-    // {
-    //   return .success(
-    //     ResolvedNominalTypeReference(
-    //       nominalTypeRef: registeredGlobalReference,
-    //       mainDecl: nominalDecl,
-    //       originatingSyntax: originatingSyntax
-    //     )
-    //   )
-    // }
+    assert(
+      declContext.syntax.range.contains(nominalDecl.node.range),
+      "[SwiftLexicalLookup] Internal error: Decl context doesn't contain declaration."
+    )
 
     guard let declName = Identifier(validating: nominalDecl.node.name) else {
       // TODO: Produce actual error
@@ -1129,89 +1133,12 @@ extension TypeResolver {
       return .failure(Failure.other(InvalidIdentifier()))
     }
 
+    // Extract file info
     let file = nominalDecl.fileRoot
     let module = extractModule(syntax: nominalDecl)
+    let declFileConfiguredRegions = extractConfiguredRegions(syntax: nominalDecl)
+
     switch declContext {
-    case .declGroup(let declGroupParent):
-      // Find the base type
-      let baseResult: Result<ResolvedNominalTypeReference, Failure> = resolveDeclGroup(
-        declGroup: declGroupParent,
-        originatingSyntax: originatingSyntax
-      )
-      // Extract the type, or throw
-      let baseType: ResolvedNominalTypeReference
-      switch baseResult {
-      case .success(let success):
-        baseType = success
-      case .failure(let failure):
-        return .failure(Failure.invalidBaseType(failure))
-      }
-
-      // Find this nominal declaration through qualified lookup
-      let resolvedBase: ResolvedNominalTypeReference
-      switch resolveType(typeReference: baseType) {
-      case .success(let success):
-        resolvedBase = success
-      case .failure(let failure):
-        return .failure(Failure.invalidBaseType(failure))
-      }
-      let memberResult: Result<Attached<TypeDeclSyntax>?, Failure>
-      do {
-        // Don't track dependencies (only extensions track dependencies)
-        let dependencyTracker = self.dependencyTracker
-        self.dependencyTracker = DependencyTracker()
-        defer { self.dependencyTracker = dependencyTracker }
-
-        memberResult = findNominalTypeMemberDecl(
-          resolvedNominalBaseType: resolvedBase.nominalTypeRef,
-          memberName: declName,
-          memberIntroducingSyntax: Attached<TypeLikeSyntax>(nominalDecl),
-        )
-      }
-
-      // Ensure we exist and there are no duplicates
-      switch memberResult {
-      case .success(Attached<TypeDeclSyntax>(nominalDecl)):
-        break
-      case .success(let unexpectedResult):
-        // We should have diagnosed an ambiguity if there was a different
-        // nominal decl or we couldn't find a member
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Qualified lookup of \(baseType._succinctDescription) > '\(declName.name)' unexpectedly returned `\(unexpectedResult.debugDescription)`"
-        )
-      case .failure(let failure):
-        return .failure(failure)
-      }
-
-      // Register the type
-      let resolvedReferenceResult =
-        symbolTable.registerNominalType(
-          nestedMainDecl: nominalDecl,
-          mainDeclName: declName,
-          mainDeclModule: module,
-          declGroupBase: declGroupParent,
-          baseType: baseType,
-          originatingSyntax: originatingSyntax
-        ) as Result<ResolvedNominalTypeReference, TypeDependencyGraph.NominalRegistrationFailure>
-
-      let resolvedReference: ResolvedNominalTypeReference
-      switch resolvedReferenceResult {
-      case .success(let success):
-        resolvedReference = success
-      case .failure(let registrationFailure):
-        switch registrationFailure {
-        // TODO: Explain why these invariants hold
-        case .cannotRegisterUnderRedeclaration, .noDeclGroupParent, .parentNotRegistered, .parentExtensionUnbound,
-          .cannotRegisterRedeclaration, .unregisteredFileRoot, .nonNestedUnderDeclGroup:
-          fatalError(
-            "[ewiftLexicalLookup] Internal error: Unexpected nominal-registration error: \(registrationFailure)"
-          )
-        }
-      }
-
-      // TODO: Do we need to register in `SymbolTable`?
-      return .success(resolvedReference)
-
     case .codeBlock(let codeBlockScope):
       let isGlobal: Bool = codeBlockScope.node == file.statements
 
@@ -1245,22 +1172,104 @@ extension TypeResolver {
       let resolvedReferenceResult =
         symbolTable.registerNominalType(
           topScopeMainDecl: nominalDecl,
-          mainDeclName: declName,
-          mainDeclModule: module,
+          declName: declName,
+          declFileConfiguredRegions: declFileConfiguredRegions,
+          declModule: module,
           isGlobal: isGlobal,
           originatingSyntax: originatingSyntax
         ) as Result<ResolvedNominalTypeReference, TypeDependencyGraph.NominalRegistrationFailure>
 
-      // Extract reference, or throw
+      // Extract reference, or trap
       let resolvedReference: ResolvedNominalTypeReference
       switch resolvedReferenceResult {
       case .success(let success):
         resolvedReference = success
       case .failure(let registrationFailure):
         switch registrationFailure {
-        // TODO: Explain why these invariants hold
-        case .cannotRegisterUnderRedeclaration, .noDeclGroupParent, .parentNotRegistered, .parentExtensionUnbound,
-          .cannotRegisterRedeclaration, .unregisteredFileRoot, .nonNestedUnderDeclGroup:
+        // Reasoning: We just checked for redeclarations
+        case .cannotRegisterRedeclaration:
+          fatalError(
+            "[ewiftLexicalLookup] Internal error: Unexpected nominal-registration error: \(registrationFailure)"
+          )
+        }
+      }
+
+      return .success(resolvedReference)
+    case .declGroup(let declGroupParent):
+      // Find the base type
+      let baseResult: Result<ResolvedNominalTypeReference, Failure> = resolveDeclGroup(
+        declGroup: declGroupParent,
+        originatingSyntax: originatingSyntax
+      )
+      // Extract the type, or throw
+      let baseType: ResolvedNominalTypeReference
+      switch baseResult {
+      case .success(let success):
+        baseType = success
+      case .failure(let failure):
+        return .failure(Failure.invalidBaseType(failure))
+      }
+
+      // Find this nominal declaration through qualified lookup
+      let resolvedBase: ResolvedNominalTypeReference
+      switch resolveType(typeReference: baseType) {
+      case .success(let success):
+        resolvedBase = success
+      case .failure(let failure):
+        return .failure(Failure.invalidBaseType(failure))
+      }
+      let memberResult:
+        Result<(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)?, Failure>
+      do {
+        // Don't track dependencies (only extensions track dependencies)
+        let dependencyTracker = self.dependencyTracker
+        self.dependencyTracker = DependencyTracker()
+        defer { self.dependencyTracker = dependencyTracker }
+
+        memberResult = findNominalTypeMemberDecl(
+          resolvedNominalBaseType: resolvedBase.nominalTypeRef,
+          memberName: declName,
+          memberIntroducingSyntax: Attached<TypeLikeSyntax>(nominalDecl),
+        )
+      }
+
+      // Ensure we exist under the right decl group and there are no duplicates
+      switch memberResult {
+      case .success((declGroupParent, Attached<TypeDeclSyntax>(nominalDecl))?):
+        break
+      case .success(let unexpectedResult):
+        // We should have diagnosed an ambiguity if there was a different
+        // nominal decl or we couldn't find a member
+        fatalError(
+          "[SwiftLexicalLookup] Internal error: Qualified lookup of \(baseType._succinctDescription) > '\(declName.name)' unexpectedly returned `\(unexpectedResult.debugDescription)`"
+        )
+      case .failure(let failure):
+        return .failure(failure)
+      }
+
+      // Register the type
+      let resolvedReferenceResult =
+        symbolTable.registerNominalType(
+          nestedMainDecl: nominalDecl,
+          declName: declName,
+          declFileConfiguredRegions: declFileConfiguredRegions,
+          declModule: module,
+          baseDeclGroup: declGroupParent,
+          baseType: baseType,
+          originatingSyntax: originatingSyntax
+        ) as Result<ResolvedNominalTypeReference, TypeDependencyGraph.NestedNominalRegistrationFailure>
+
+      // Extract the reference, or trap
+      let resolvedReference: ResolvedNominalTypeReference
+      switch resolvedReferenceResult {
+      case .success(let success):
+        resolvedReference = success
+      case .failure(let registrationFailure):
+        switch registrationFailure {
+        // Reasoning:
+        // .cannotRegisterRedeclaration -> We just checked for redeclarations
+        // .baseNotRegistered, .baseDeclGroupUnbound -> We should have a valid base from the recursive step
+        case .other(.cannotRegisterRedeclaration), .baseNotRegistered, .baseDeclGroupUnbound:
           fatalError(
             "[ewiftLexicalLookup] Internal error: Unexpected nominal-registration error: \(registrationFailure)"
           )
@@ -1296,6 +1305,11 @@ extension TypeResolver {
     declContext: DeclContext,
     originatingSyntax: Attached<TypeLikeSyntax>
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
+    assert(
+      declContext.syntax.range.contains(typeDecl.node.range),
+      "[SwiftLexicalLookup] Internal error: Decl context doesn't contain declaration."
+    )
+
     // We mainly handle nominal types; type aliases are trivially recursive, and we skip
     // associated types and generic parameters
     if let nominalTypeDecl = typeDecl.as(NominalTypeDeclSyntax.self) {
@@ -1468,10 +1482,10 @@ extension TypeResolver {
       )
       log("Type members matching '\(typeMember.name.name)': \(memberTypeDeclResult._debugDescription)")
       // Collect; skip if it doesn't exist; throw on failure
-      let memberTypeDecl: Attached<TypeDeclSyntax>
+      let (memberDeclGroupParent, memberTypeDecl): (Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)
       switch memberTypeDeclResult {
       case .success(let success?):
-        memberTypeDecl = success
+        (memberDeclGroupParent, memberTypeDecl) = success
       case .success(nil):
         // Skip if no such member exists, e.g.: in `(Encodable & Collection<Int>).Element`,
         // `Encodable` may not have an `Element` type member.
@@ -1485,7 +1499,7 @@ extension TypeResolver {
       // Resolve this type declaration and add it to the results
       memberResult = resolveTypeDecl(
         typeDecl: memberTypeDecl,
-        declContext: DeclContext.declGroup(Attached<DeclGroupSyntaxType>(baseType.nominalTypeRef.mainDecl)),
+        declContext: DeclContext.declGroup(memberDeclGroupParent),
         originatingSyntax: typeMember.introducingSyntax
       ).map({ result in Optional((typeDecl: memberTypeDecl, result: result)) })
     }

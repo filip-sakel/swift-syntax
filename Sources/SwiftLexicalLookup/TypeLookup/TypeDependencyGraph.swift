@@ -294,7 +294,7 @@ public struct GenericExtensionState<
       [
         (
           key: GlobalTypeName,
-          value: [(key: Identifier, value: [(IntroducingExtensionOrMainDecl, Attached<TypeDeclSyntax>)])]
+          value: [(key: Identifier, value: [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)])]
         )
       ]()
 
@@ -315,7 +315,9 @@ public struct GenericExtensionState<
         members: members.map({ (name, typeDecls) in
           TypeMember(
             name: name,
-            decls: typeDecls.map({ TypeMemberDecl(introducingExtensionOrMainDecl: $0.0, typeDeclSyntax: $0.1) })
+            decls: typeDecls.map({
+              TypeMemberDecl(introducingExtensionOrMainDecl: $0.0.as(ExtensionDeclSyntax.self), typeDeclSyntax: $0.1)
+            })
           )
         })
       )
@@ -702,7 +704,10 @@ extension TypeDependencyGraph {
     moduleMap: [SourceFileSyntax: ModuleName],
     dependencyTracker: inout DependencyTracker,
     symbolTable: borrowing SymbolTable
-  ) -> Result<[Attached<TypeDeclSyntax>], QualifiedTypeLookupFailure> {
+  ) -> Result<
+    [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)],
+    QualifiedTypeLookupFailure
+  > {
     // Get global nominal reference
     let baseTypeReference: GlobalNominalTypeRef
     switch baseType.storage {
@@ -722,7 +727,9 @@ extension TypeDependencyGraph {
       // look into the main declaration.
       let groupedTypeMembers = nominalTypeDecl._groupTypeMembers(configuredRegions: declFileConfiguredRegions)
       let typeMembers = groupedTypeMembers[memberTypeName, default: []]
-      return .success(typeMembers)
+      return .success(
+        typeMembers.map({ (declGroupParent: Attached<DeclGroupSyntaxType>(nominalTypeDecl), typeDecl: $0) })
+      )
     }
 
     // Diagnose invalid base
@@ -769,12 +776,12 @@ extension TypeDependencyGraph {
       let sortedDeclGroups = fileDecls + otherInternalDecls + externalDecls
 
       // Add members from each decl group and register the dependencies
-      var typeDecls = [(IntroducingExtensionOrMainDecl, Attached<TypeDeclSyntax>)]()
+      var typeDecls = [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)]()
       for declGroup in sortedDeclGroups {
         // Add the matching decls
         let introducedDecls =
           declGroup.typeMap.typeMembersToDecls[memberTypeName]?.decls.map({
-            (declGroup.declGroup.as(ExtensionDeclSyntax.self), $0.typeDeclSyntax)
+            (declGroup.declGroup, $0.typeDeclSyntax)
           }) ?? []
         typeDecls.append(contentsOf: introducedDecls)
       }
@@ -789,77 +796,12 @@ extension TypeDependencyGraph {
     )
 
     // Distill to type declarations (throw away declaration groups)
-    return .success(result.typeDecls.map(\.1))
+    return .success(result.typeDecls)
   }
 }
 
 extension TypeDependencyGraph {
-  // TODO: Remove
-  // // TODO: Extract out to a better place
-  // //
-  // /// Get the declaration-group parent of the given node; returns `nil`
-  // /// if no such parent exists and for top-level/local declarations.
-  // fileprivate func _declGroupScope<S: SyntaxProtocol>(
-  //   of node: Attached<S>
-  // ) -> Attached<DeclGroupSyntaxType>? {
-  //   // Ensure we have parent
-  //   guard let parent = node.parent else { return nil }
-  //
-  //   // Return `nil` for local declarationns
-  //   guard parent.kind != .codeBlockItemList else { return nil }
-  //
-  //   // Get the parent or recurse
-  //   guard let declGroupParent = parent.as(DeclGroupSyntaxType.self) else {
-  //     return _declGroupScope(of: parent)
-  //   }
-  //   return declGroupParent
-  // }
-
   enum NominalRegistrationFailure: Error {
-    case nonNestedUnderDeclGroup(Attached<DeclGroupSyntaxType>)
-
-    /// The file root is not registered in the symbol table.
-    case unregisteredFileRoot(SourceFileSyntax)
-    /// In order to register a nested type, its parent must be registered.
-    case parentNotRegistered(parentTypeName: GlobalTypeName)
-
-    // TODO: Can we merge with the above case
-    /// Cannot register type nested in extension that hasn't been registered yet.
-    case parentExtensionUnbound(extensionDecl: Attached<ExtensionDeclSyntax>)
-
-    /// Registering a global type with multiple components in its name implies a
-    /// nested global nominal-type declaration.
-    case noDeclGroupParent
-
-    /// Can't register under a decl group that's a redeclaration.
-    ///
-    /// For instance, the following generates no error:
-    /// ```swift
-    /// struct A {
-    ///     struct B {
-    ///         func f(_: C) {}
-    ///     }
-    /// }
-    /// extension A {
-    ///     struct C {}
-    /// }
-    /// ```
-    /// However, replacing the last extension with the following yields an error:
-    /// ```swift
-    /// struct A {
-    ///     struct B {
-    ///         func f(_: B) {} // ✅
-    ///         func f(_: C) {} // ❌ error: Can't find `C`
-    ///     }
-    /// }
-    /// struct A {
-    ///     struct C {}
-    /// }
-    /// ```
-    /// So, despite both `struct A`'s being nominal declarations for
-    /// `_(File.swift)::A`, we can only register member type 'C' under
-    /// the main declaration.
-    case cannotRegisterUnderRedeclaration
     /// We don't allow registering redeclarations. Redeclarations should be
     /// diagnosed as ambiguities.
     ///
@@ -888,8 +830,9 @@ extension TypeDependencyGraph {
   // Top-scope (local or global)
   mutating func registerNominalType(
     topScopeMainDecl mainDecl: Attached<NominalTypeDeclSyntax>,
-    mainDeclName: Identifier,
-    mainDeclModule: ModuleName,
+    declName: Identifier,
+    declFileConfiguredRegions: ConfiguredRegions?,
+    declModule: ModuleName,
     isGlobal: Bool,
     symbolTable: borrowing SymbolTable
   ) -> Result<NominalTypeRef, NominalRegistrationFailure> {
@@ -898,37 +841,56 @@ extension TypeDependencyGraph {
       return .success(NominalTypeRef(localNominalType: mainDecl))
     }
 
-    let globalTypeName = GlobalTypeName(
+    let globalName = GlobalTypeName(
       component: GlobalTypeName.Component(
-        name: mainDeclName,
+        name: declName,
         file: mainDecl.fileRoot,
-        module: mainDeclModule,
+        module: declModule,
         symbolTable: symbolTable
       )
     )
 
-    return _admitNominalType(globalDecl: mainDecl, globalTypeName: globalTypeName, symbolTable: symbolTable)
+    return _admitNominalType(
+      globalDecl: mainDecl,
+      declFileConfiguredRegions: declFileConfiguredRegions,
+      globalTypeName: globalName
+    )
+  }
+
+  enum NestedNominalRegistrationFailure: Error {
+    case other(NominalRegistrationFailure)
+
+    /// In order to register a nested type, its parent must be registered.
+    case baseNotRegistered(parentTypeName: GlobalTypeName)
+    /// Decl group unexpectedly isn't registered to the given base type.
+    case baseDeclGroupUnbound(Attached<DeclGroupSyntaxType>)
   }
   // Nested (local or global)
   mutating func registerNominalType(
     nestedMainDecl mainDecl: Attached<NominalTypeDeclSyntax>,
-    mainDeclName: Identifier,
-    mainDeclModule: ModuleName,
-    declGroupBase: Attached<DeclGroupSyntaxType>,
+    declName: Identifier,
+    declFileConfiguredRegions: ConfiguredRegions?,
+    declModule: ModuleName,
+    baseDeclGroup: Attached<DeclGroupSyntaxType>,
     baseType: NominalTypeRef,
     symbolTable: borrowing SymbolTable
-  ) -> Result<NominalTypeRef, NominalRegistrationFailure> {
+  ) -> Result<NominalTypeRef, NestedNominalRegistrationFailure> {
+    // Check this is the right decl group
+    assert(
+      baseDeclGroup.fileRoot == mainDecl.fileRoot && baseDeclGroup.node.range.contains(mainDecl.node.range),
+      "[SwiftLexicalLookup] Internal error: Unexpectedly tried to register nested type `\(mainDecl._memberlessDescription)` under non-base decl group `\(baseDeclGroup._memberlessDescription)`."
+    )
+
     // Get the global reference, or return the local
     let globalParent: GlobalNominalTypeRef
     switch baseType.storage {
     case .global(let globalReference):
       globalParent = globalReference
     case .local(let parentDecl):
-      // Local decls don't have extensions so member types must be nested
-      // in their parent decl.
-      guard parentDecl.fileRoot == mainDecl.fileRoot, parentDecl.node.range.contains(mainDecl.node.range) else {
-        return .failure(NominalRegistrationFailure.nonNestedUnderDeclGroup(Attached<DeclGroupSyntaxType>(parentDecl)))
-      }
+      assert(
+        DeclGroupSyntaxType(parentDecl.node) == baseDeclGroup.node,
+        "[SwiftLexicalLookup] Internal error: Local type's declaration group parent doesn't match NominalTypeRef parent."
+      )
 
       // We can't extend local types; just return a reference.
       return .success(NominalTypeRef(localNominalType: mainDecl))
@@ -936,28 +898,28 @@ extension TypeDependencyGraph {
 
     let globalName = globalParent.name.addingComponents([
       GlobalTypeName.Component(
-        name: mainDeclName,
+        name: declName,
         file: mainDecl.fileRoot,
-        module: mainDeclModule,
+        module: declModule,
         symbolTable: symbolTable
       )
     ])
 
     // The parent must be bound
     guard let baseType = namesToTypes[globalParent.name] else {
-      return .failure(NominalRegistrationFailure.parentNotRegistered(parentTypeName: globalParent.name))
+      return .failure(NestedNominalRegistrationFailure.baseNotRegistered(parentTypeName: globalParent.name))
     }
 
-    // Check extension is bound
-    if let parentExtension = declGroupBase.as(ExtensionDeclSyntax.self),
+    // Check base decl group is actually bound to baseType
+    if let parentExtension = baseDeclGroup.as(ExtensionDeclSyntax.self),
       let parentExtensionState = extensionsToState[parentExtension],
       case .success(let extendedTypeName) = parentExtensionState.resolvedType,
       extendedTypeName != globalParent.name
     {
-      return .failure(NominalRegistrationFailure.parentExtensionUnbound(extensionDecl: parentExtension))
-    }
-    // Check parent decl is the main decl
-    else if let parentNominal = declGroupBase.as(NominalTypeDeclSyntax.self),
+      return .failure(
+        NestedNominalRegistrationFailure.baseDeclGroupUnbound(Attached<DeclGroupSyntaxType>(parentExtension))
+      )
+    } else if let parentNominal = baseDeclGroup.as(NominalTypeDeclSyntax.self),
       baseType.mainDecl.declGroup != parentNominal
     {
       // Note that we still register even if there are redeclarations. E.g.,
@@ -970,28 +932,28 @@ extension TypeDependencyGraph {
       //     }
       // }
       // struct A {} // ❌ error: Invalid redeclaration of 'A'
-      return .failure(NominalRegistrationFailure.cannotRegisterUnderRedeclaration)
+      return .failure(
+        NestedNominalRegistrationFailure.baseDeclGroupUnbound(Attached<DeclGroupSyntaxType>(parentNominal))
+      )
     }
-    return _admitNominalType(globalDecl: mainDecl, globalTypeName: globalName, symbolTable: symbolTable)
+
+    return _admitNominalType(
+      globalDecl: mainDecl,
+      declFileConfiguredRegions: declFileConfiguredRegions,
+      globalTypeName: globalName
+    ).mapError(NestedNominalRegistrationFailure.other)
   }
 
-  /// Admits the given nominal-type into the graph or returns the
+  /// Admits the given (global) nominal-type into the graph or returns the
   /// existing reference.
   ///
   /// Important: Callers must validate the inputs
   fileprivate mutating func _admitNominalType(
     globalDecl mainDecl: Attached<NominalTypeDeclSyntax>,
-    globalTypeName: GlobalTypeName,
-    symbolTable: borrowing SymbolTable
+    declFileConfiguredRegions: ConfiguredRegions?,
+    globalTypeName: GlobalTypeName
   ) -> Result<NominalTypeRef, NominalRegistrationFailure> {
     // Map out the main decl
-    guard
-      case .success(let declFileConfiguredRegions) = symbolTable.getConfiguredRegions(
-        forFile: mainDecl.fileRoot
-      )
-    else {
-      return .failure(NominalRegistrationFailure.unregisteredFileRoot(mainDecl.fileRoot))
-    }
     let mappedMainDecl = MappedDeclGroup.from(declGroup: mainDecl, configuredRegions: declFileConfiguredRegions)
 
     // If already registered, ensure we have no redeclaration
@@ -1051,7 +1013,7 @@ extension TypeDependencyGraph {
 @_spi(_QualifiedLookupTests) public struct QualifiedLookupDependency<TypeName: Sendable>: Sendable {
   let extendedTypeName: TypeName
   let member: Identifier
-  let typeDecls: [(introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl, typeDecl: Attached<TypeDeclSyntax>)]
+  let typeDecls: [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)]
 
   // TODO: Clean up
   @_spi(_QualifiedLookupTests) public init(
@@ -1059,7 +1021,7 @@ extension TypeDependencyGraph {
     extendedTypeName: TypeName,
     member: Identifier,
     // typeDecls: [TypeDeclSyntax]
-    typeDecls: [(IntroducingExtensionOrMainDecl, Attached<TypeDeclSyntax>)]
+    typeDecls: [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)]
   ) {
     // self.introducingExtensionOrMainDecl = introducingExtensionOrMainDecl
     self.extendedTypeName = extendedTypeName
@@ -2066,7 +2028,7 @@ extension NominalTypeRef: CustomDebugStringConvertible {
 @_spi(_QualifiedLookupTests)
 extension QualifiedLookupDependency: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
   @_spi(_QualifiedLookupTests) public var _succinctDescription: String {
-    let declGroupSources = typeDecls.map({ $0.0?._memberlessDescription ?? "nil" })
+    let declGroupSources = typeDecls.map({ $0.0._memberlessDescription })
     return """
       '\(extendedTypeName.debugDescription)' > '\(member.name)' [from \(declGroupSources)]
       """
@@ -2074,7 +2036,7 @@ extension QualifiedLookupDependency: CustomDebugStringConvertible where TypeName
 
   public var debugDescription: String {
     let typeDeclDescriptions = typeDecls.map({ (introducingExtensionOrMainDecl, typeDecl) in
-      "`\(introducingExtensionOrMainDecl?._memberlessDescription ?? "nil")`: `\(typeDecl._memberlessDescription)`"
+      "`\(introducingExtensionOrMainDecl._memberlessDescription)`: `\(typeDecl._memberlessDescription)`"
     }).joined(separator: ", ")
 
     return
