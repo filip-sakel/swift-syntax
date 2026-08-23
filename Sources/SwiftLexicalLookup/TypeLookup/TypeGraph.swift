@@ -1816,7 +1816,6 @@ extension TypeGraph {
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionDeclModule: ModuleName,
     extensionFileConfiguredRegions: ConfiguredRegions?,
-    isUpdatingInvalidating isFixingInvalidating: Bool,
     to rawResult: Result<
       (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
       TypeResolver.Failure

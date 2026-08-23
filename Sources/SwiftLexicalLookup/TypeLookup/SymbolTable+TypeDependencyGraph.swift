@@ -98,32 +98,6 @@ extension SymbolTable {
   typealias InvalidatedExtensions = OrderedSet<ExtensionDeclSyntax>
   typealias ExtensionBindingFailure = SwiftLexicalLookup.ExtensionBindingFailure
 
-  /// Add extension to the symbol table and, if possible, bind it
-  /// to the resolved nominal type. Cannot run on invalidated extensions.
-  /// All invalidated extensions must be fixed before calling `bindExtension`
-  /// again.
-  ///
-  /// Handles failed resolutions and resolutions that cause cycles.
-  ///
-  /// Returns: Broken extensions or binding failure.
-  func bindExtension(
-    _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    to result: Result<
-      (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
-      TypeResolver.Failure
-    >,
-    dependencies: DependencyTracker,
-    verbose: Bool
-  ) -> Result<BindingResult, ExtensionBindingFailure> {
-    return _admitExtension(
-      extensionDecl,
-      isUpdatingInvalidating: false,
-      to: result,
-      dependencies: dependencies,
-      verbose: verbose
-    )
-  }
-
   func getExtensionResolvedType(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
   ) -> Result<
@@ -138,31 +112,17 @@ extension SymbolTable {
     })
   }
 
-  /// Similar to `bindExtension` but for the extensions that were invalidated.
-  /// All invalidated extensions should be fixed before calling `bindExtension`
-  /// again.
-  func fixInvalidatedExtension(
-    _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    to result: Result<
-      (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
-      TypeResolver.Failure
-    >,
-    dependencies: DependencyTracker,
-    verbose: Bool
-  ) -> Result<BindingResult, ExtensionBindingFailure> {
-    _admitExtension(
-      extensionDecl,
-      isUpdatingInvalidating: true,
-      to: result,
-      dependencies: dependencies,
-      verbose: verbose
-    )
-  }
-
-  /// Helper for `bindExtension` and `fixInvalidatedExtension`.
+  /// Add extension to the type graph and, if possible, bind it
+  /// to the resolved nominal type.
+  ///
+  /// Notes
+  /// 1. Helper for  that forwards to `TypeGraph/admitExtension`
+  /// 2. Handles failed resolutions and resolutions that cause cycles.
+  ///
+  /// Returns: Evicted extensions or binding failure.
+  /// TODO: Consider inlining into `_bindRequestedExtension`
   fileprivate func _admitExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    isUpdatingInvalidating isFixingInvalidating: Bool,
     to result: Result<
       (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
       TypeResolver.Failure
@@ -181,7 +141,6 @@ extension SymbolTable {
       extensionDecl,
       extensionDeclModule: module,
       extensionFileConfiguredRegions: fileConfiguredRegions,
-      isUpdatingInvalidating: isFixingInvalidating,
       to: result,
       dependencyTracker: dependencies,
       symbolTable: self
@@ -191,8 +150,6 @@ extension SymbolTable {
     //
     // TODO: Add behind verbose flag
     //
-    // Whether we're binding or fixing invalidated
-    let actionVerb = isFixingInvalidating ? "rebinding invalidated" : "binding"
     // Describe dependencies
     let dependencyDescription = "[\(dependencies.dependencies.map(\.debugDescription).joined(separator: ", "))]"
     // Describe result
@@ -207,7 +164,7 @@ extension SymbolTable {
       let (typeGraphDescription, hasErrors) = typeGraph._describe(symbolTable: self)
       print(String(repeating: "-", count: 80))
       print(
-        "After \(actionVerb) extension `\(extensionDecl._memberlessDescription)` to \(result.map(\.qualifiedName.debugDescription)) with dependencies: \(dependencyDescription); admission result (i.e. invalidated exts): \(admissionResultDescriptions), new dependency graph is:"
+        "After admitting extension `\(extensionDecl._memberlessDescription)` to \(result.map(\.qualifiedName.debugDescription)) with dependencies: \(dependencyDescription); admission result (i.e. invalidated exts): \(admissionResultDescriptions), new dependency graph is:"
       )
       print(typeGraphDescription)
       print(String(repeating: "-", count: 80) + "\n")
@@ -379,7 +336,7 @@ extension SymbolTable {
 
     // Register in the symbol table to get invalidated extensions
     let bindingResult: Result<BindingResult, SymbolTable.ExtensionBindingFailure>
-    bindingResult = bindExtension(
+    bindingResult = _admitExtension(
       extensionDecl,
       // Only get the name and main decl
       to: extendedTypeResult.map({ extendedTypeReference in
