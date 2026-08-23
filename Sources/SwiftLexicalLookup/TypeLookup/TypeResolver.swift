@@ -1065,7 +1065,7 @@ extension TypeResolver {
     let memberTypeDeclsResult:
       Result<
         [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)],
-        TypeDependencyGraph.QualifiedTypeLookupFailure
+        TypeGraph.QualifiedTypeLookupFailure
       > =
         symbolTable.findMemberType(
           baseType: resolvedNominalBaseType,
@@ -1177,7 +1177,7 @@ extension TypeResolver {
           declModule: module,
           isGlobal: isGlobal,
           originatingSyntax: originatingSyntax
-        ) as Result<ResolvedNominalTypeReference, TypeDependencyGraph.NominalRegistrationFailure>
+        ) as Result<ResolvedNominalTypeReference, TypeGraph.NominalRegistrationFailure>
 
       // Extract reference, or trap
       let resolvedReference: ResolvedNominalTypeReference
@@ -1257,7 +1257,7 @@ extension TypeResolver {
           baseDeclGroup: declGroupParent,
           baseType: baseType,
           originatingSyntax: originatingSyntax
-        ) as Result<ResolvedNominalTypeReference, TypeDependencyGraph.NestedNominalRegistrationFailure>
+        ) as Result<ResolvedNominalTypeReference, TypeGraph.NestedNominalRegistrationFailure>
 
       // Extract the reference, or trap
       let resolvedReference: ResolvedNominalTypeReference
@@ -1661,8 +1661,8 @@ extension TypeResolver {
     }
 
     // Get the nominal type from the symbol table (or register accordingly)
-    let currentNominalResult: Result<NominalTypeRef, TypeDependencyGraph.NominalTypeRefUpdateFailure> =
-      symbolTable.dependencyGraph.updateNominalTypeReference(oldReference: typeReference.nominalTypeRef)
+    let currentNominalResult: Result<NominalTypeRef, TypeGraph.NominalTypeRefUpdateFailure> =
+      symbolTable.typeGraph.updateNominalTypeReference(oldReference: typeReference.nominalTypeRef)
 
     // Handle reregistration (we should diagnose reregistrations and not save them in the table)
     let currentNominal: NominalTypeRef
@@ -1708,7 +1708,7 @@ extension TypeResolver {
 
     // After binding all extensions, get the new nominal type
     guard
-      case .success(let finalizedNominalRef) = symbolTable.dependencyGraph.updateNominalTypeReference(
+      case .success(let finalizedNominalRef) = symbolTable.typeGraph.updateNominalTypeReference(
         oldReference: NominalTypeRef(globalReference: qualifiedGlobalRef)
       )
     else {
@@ -1745,7 +1745,7 @@ extension TypeResolver {
 
     // If there's not an existing extension-binding request, the extension
     // should be admitted. Otherwise, return a failure for now.
-    guard let boundTypeResult = symbolTable.dependencyGraph.getExtensionResolvedType(extensionDecl) else {
+    guard let boundTypeResult = symbolTable.typeGraph.getExtensionResolvedType(extensionDecl) else {
       // The extension graph tracks dependencies so this result should be
       // invalidated and fixed after the primary extension-binding request
       // completes.

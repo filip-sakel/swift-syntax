@@ -35,7 +35,7 @@ extension SymbolTable {
 // MARK: Registering Nominal
 
 extension SymbolTable {
-  /// Registers nominal type by forwarding to `TypeDependencyGraph/registerNominalType`
+  /// Registers nominal type by forwarding to `TypeGraph/registerNominalType`
   func registerNominalType(
     topScopeMainDecl: Attached<NominalTypeDeclSyntax>,
     declName: Identifier,
@@ -43,8 +43,8 @@ extension SymbolTable {
     declModule: ModuleName,
     isGlobal: Bool,
     originatingSyntax: Attached<TypeLikeSyntax>
-  ) -> Result<ResolvedNominalTypeReference, TypeDependencyGraph.NominalRegistrationFailure> {
-    return dependencyGraph.registerNominalType(
+  ) -> Result<ResolvedNominalTypeReference, TypeGraph.NominalRegistrationFailure> {
+    return typeGraph.registerNominalType(
       topScopeMainDecl: topScopeMainDecl,
       declName: declName,
       declFileConfiguredRegions: declFileConfiguredRegions,
@@ -58,7 +58,7 @@ extension SymbolTable {
       )
     })
   }
-  /// Registers nominal type by forwarding to `TypeDependencyGraph/registerNominalType`
+  /// Registers nominal type by forwarding to `TypeGraph/registerNominalType`
   func registerNominalType(
     nestedMainDecl: Attached<NominalTypeDeclSyntax>,
     declName: Identifier,
@@ -67,8 +67,8 @@ extension SymbolTable {
     baseDeclGroup: Attached<DeclGroupSyntaxType>,
     baseType: ResolvedNominalTypeReference,
     originatingSyntax: Attached<TypeLikeSyntax>
-  ) -> Result<ResolvedNominalTypeReference, TypeDependencyGraph.NestedNominalRegistrationFailure> {
-    return dependencyGraph.registerNominalType(
+  ) -> Result<ResolvedNominalTypeReference, TypeGraph.NestedNominalRegistrationFailure> {
+    return typeGraph.registerNominalType(
       nestedMainDecl: nestedMainDecl,
       declName: declName,
       declFileConfiguredRegions: declFileConfiguredRegions,
@@ -89,7 +89,7 @@ extension SymbolTable {
   /// Either root isn't a source file, or said source file isn't registered
   case nonRegisteredSyntaxRoot
 
-  case admissionFailure(TypeDependencyGraph.ExtensionAdmissionFailure)
+  case admissionFailure(TypeGraph.ExtensionAdmissionFailure)
 }
 
 // MARK: Extension Binding
@@ -115,23 +115,6 @@ extension SymbolTable {
     dependencies: DependencyTracker,
     verbose: Bool
   ) -> Result<BindingResult, ExtensionBindingFailure> {
-    // TODO: Remove
-    // // TODO: Refactor; super ugly (perhaps the caller should have this responsibility;
-    // // also we get back a NominalTypeRef only to discard it)
-    // if case .success(let (qualifiedName, mainDecl)) = result {
-    //   let nominalRegistrationResult = dependencyGraph.registerNominalTypeReference(
-    //     rawQualifiedName: TypeName.global(qualifiedName),
-    //     mainDecl: mainDecl,
-    //     configuredRegions: configuredRegions
-    //   )
-    //
-    //   // TODO: Rewrite so we don't even have a failure
-    //   // Ensure we succeed (guards against future cases)
-    //   switch nominalRegistrationResult {
-    //   case .success(_): break
-    //   case .failure(TypeDependencyGraph.NominalRegistrationFailure.parentNotRegistered)
-    //   }
-    // }
     return _admitExtension(
       extensionDecl,
       isUpdatingInvalidating: false,
@@ -147,7 +130,7 @@ extension SymbolTable {
     GenericResolvedNominalTypeReference<GlobalNominalTypeRef>,
     BindingFailure
   >? {
-    dependencyGraph.getExtensionResolvedType(extensionDecl)?.map({ (globalReference, mainDecl) in
+    typeGraph.getExtensionResolvedType(extensionDecl)?.map({ (globalReference, mainDecl) in
       GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
         nominalTypeRef: globalReference,
         originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
@@ -194,7 +177,7 @@ extension SymbolTable {
     else {
       return .failure(ExtensionBindingFailure.nonRegisteredSyntaxRoot)
     }
-    let admissionResult = dependencyGraph.admitExtension(
+    let admissionResult = typeGraph.admitExtension(
       extensionDecl,
       extensionDeclModule: module,
       extensionFileConfiguredRegions: fileConfiguredRegions,
@@ -221,12 +204,12 @@ extension SymbolTable {
     // New graph description
     // TODO: Remove once done debugging
     if false || verbose {
-      let (dependencyGraphDescription, hasErrors) = dependencyGraph._describe(symbolTable: self)
+      let (typeGraphDescription, hasErrors) = typeGraph._describe(symbolTable: self)
       print(String(repeating: "-", count: 80))
       print(
         "After \(actionVerb) extension `\(extensionDecl._memberlessDescription)` to \(result.map(\.qualifiedName.debugDescription)) with dependencies: \(dependencyDescription); admission result (i.e. invalidated exts): \(admissionResultDescriptions), new dependency graph is:"
       )
-      print(dependencyGraphDescription)
+      print(typeGraphDescription)
       print(String(repeating: "-", count: 80) + "\n")
       precondition(!hasErrors, "[SwiftLexicalLookup] Internal error: Detected dependency-graph corruption.")
     }
@@ -377,7 +360,7 @@ extension SymbolTable {
 
     // Return saved result if the extension was already admitted to the graph
     // TODO: Should this ever happen?
-    if let existingResolution = dependencyGraph.getExtensionResolvedType(extensionDecl) {
+    if let existingResolution = typeGraph.getExtensionResolvedType(extensionDecl) {
       return existingResolution.map(mapToNominalTypeReference(_:))
     }
 
@@ -425,7 +408,7 @@ extension SymbolTable {
         // print(
         //   "[SwiftLexicalLookup] Internal error: Tried to readmit `\(extensionDecl._memberlessDescription)`; old state \(existingState)."
         // )
-        // return symbolTable.dependencyGraph.getExtensionResolvedType(extensionDecl)!.map(mapToNominalTypeReference(_:))
+        // return symbolTable.typeGraph.getExtensionResolvedType(extensionDecl)!.map(mapToNominalTypeReference(_:))
         fatalError(
           "[SwiftLexicalLookup] Internal error: Tried to readmit `\(extensionDecl._memberlessDescription)`; old state \(existingState)."
         )
@@ -552,7 +535,7 @@ extension SymbolTable {
     dependencyTracker: inout DependencyTracker,
   ) -> Result<
     [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)],
-    TypeDependencyGraph.QualifiedTypeLookupFailure
+    TypeGraph.QualifiedTypeLookupFailure
   > {
     assert(
       moduleMap[introducingTypeSyntax.fileRoot] == introducingModule,
@@ -569,7 +552,7 @@ extension SymbolTable {
       }
     }
 
-    return dependencyGraph.findMemberType(
+    return typeGraph.findMemberType(
       baseType: baseType,
       memberTypeName: memberTypeName,
       origin: (typeSyntax: introducingTypeSyntax, module: introducingModule),

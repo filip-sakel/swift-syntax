@@ -215,7 +215,7 @@ extension Array {
 
 /// An extension dependency stores cached information such as what declaration
 /// group the given member was introduced. Normally, we don't store cached
-/// information for types stored in the `TypeDependencyGraph` since we must
+/// information for types stored in the `TypeGraph` since we must
 /// later update a lot of cached data when we bind/invalidate an extension.
 /// However, extension dependencies are different because if the dependency
 /// type changes, we necessarily have to invalidate and recompute the extensions.
@@ -422,7 +422,7 @@ public typealias ExtensionState = GenericExtensionState<GlobalTypeName, Resolved
 ///       * This dependence comes from resolving `typealias Inner = A`
 ///    e. Finally, we bind `extension A.Inner` to '_(MyFile.swift)::A'
 @_spi(_QualifiedLookupTests)
-public struct TypeDependencyGraph {
+public struct TypeGraph {
   @_spi(_QualifiedLookupTests) public struct TypeDependent: Sendable, Hashable, CustomDebugStringConvertible {
     @_spi(_QualifiedLookupTests) public let memberType: Identifier
     @_spi(_QualifiedLookupTests) public let dependentExtension: Attached<ExtensionDeclSyntax>
@@ -571,7 +571,7 @@ public struct TypeDependencyGraph {
   mutating func withLogging<T>(
     request: String,
     describe: (T) -> String,
-    perform action: (_ mutableSelf: inout TypeDependencyGraph) -> T,
+    perform action: (_ mutableSelf: inout TypeGraph) -> T,
     file: StaticString = #file,
     line: UInt = #line
   ) -> T {
@@ -651,7 +651,7 @@ public struct TypeDependencyGraph {
 extension GlobalNominalTypeRef {
   init(
     name: GlobalTypeName,
-    nominal: __shared TypeDependencyGraph.NominalType
+    nominal: __shared TypeGraph.NominalType
   ) {
     self.init(name: name, mainDecl: nominal.mainDecl.declGroup, _version: nominal.version)
   }
@@ -691,7 +691,7 @@ extension GlobalNominalTypeRef {
   }
 }
 
-extension TypeDependencyGraph {
+extension TypeGraph {
   @_spi(_QualifiedLookupTests) public enum QualifiedTypeLookupFailure: Error {
     /// References non-registered base type
     case invalidBase
@@ -800,7 +800,7 @@ extension TypeDependencyGraph {
   }
 }
 
-extension TypeDependencyGraph {
+extension TypeGraph {
   enum NominalRegistrationFailure: Error {
     /// We don't allow registering redeclarations. Redeclarations should be
     /// diagnosed as ambiguities.
@@ -1031,7 +1031,7 @@ extension TypeDependencyGraph {
   }
 }
 
-extension TypeDependencyGraph {
+extension TypeGraph {
   enum CycleDetectionFailure: Error {
     case unresolvedDependencyExtension(
       dependentExtensionOrMainDecl: IntroducingExtensionOrMainDecl,
@@ -1162,7 +1162,7 @@ extension TypeDependencyGraph {
   }
 }
 
-extension TypeDependencyGraph {
+extension TypeGraph {
   fileprivate func _firstRegisteredMemberName(
     declGroup: Attached<DeclGroupSyntaxType>,
     declGroupModule: ModuleName,
@@ -1789,7 +1789,7 @@ extension TypeDependencyGraph {
 
 // MARK: Extension Binding
 
-extension TypeDependencyGraph {
+extension TypeGraph {
   func getGlobalNominalTypeReference(name: GlobalTypeName) -> GlobalNominalTypeRef? {
     namesToTypes[name].map({
       GlobalNominalTypeRef(name: name, nominal: $0)
@@ -1805,7 +1805,7 @@ extension TypeDependencyGraph {
   }
 }
 
-extension TypeDependencyGraph {
+extension TypeGraph {
   @_spi(_QualifiedLookupTests) public enum ExtensionAdmissionFailure: Error {
     case cannotReadmit(existingState: ExtensionState)
     case invalidDependencyExtension(extensionState: ExtensionState?)
@@ -2097,16 +2097,16 @@ extension GenericExtensionState {
   }
 }
 
-// TypeDependencyGraph description
+// TypeGraph description
 
 private struct _DependencyGraphDiagnostic: DiagnosticMessage {
   let message: String
   let severity: DiagnosticSeverity
 
-  var diagnosticID: MessageID { MessageID(domain: "SwiftLexicalLookup", id: "TypeDependencyGraphDiagnostic") }
+  var diagnosticID: MessageID { MessageID(domain: "SwiftLexicalLookup", id: "TypeGraphDiagnostic") }
 }
 
-extension TypeDependencyGraph {
+extension TypeGraph {
   fileprivate func _describeWithDiagnostics() -> (diagnostics: [Diagnostic], hasErrors: Bool) {
     var diagnostics = [Diagnostic]()
     /// Attach a note to the given node.
@@ -2341,7 +2341,7 @@ extension TypeDependencyGraph {
   }
 }
 
-extension TypeDependencyGraph {
+extension TypeGraph {
   /// Gets the name and main decl of the type to which the extension is bound,
   /// or the binding the failure; returns `nil` for non-admitted extensions.
   func getExtensionResolvedType(
@@ -2401,7 +2401,7 @@ extension GenericExtensionBindingCycle: CustomDebugStringConvertible where TypeN
   }
 }
 
-extension TypeDependencyGraph {
+extension TypeGraph {
   @_spi(_QualifiedLookupTests) public func _describe(
     symbolTable: SymbolTable
   ) -> (description: String, hasErrors: Bool) {

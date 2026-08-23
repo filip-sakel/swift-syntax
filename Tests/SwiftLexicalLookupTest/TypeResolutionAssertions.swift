@@ -234,7 +234,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
     // Look up extended type if not already resolved
     let actualRawState: ExtensionState
     // Try to get already-resolved state
-    if let existingState = symbolTable.dependencyGraph.extensionsToState[extensionDecl] {
+    if let existingState = symbolTable.typeGraph.extensionsToState[extensionDecl] {
       actualRawState = existingState
     } else {
       if verbose {
@@ -247,8 +247,8 @@ extension TypeResolutionMatcher: LexicalMatcher {
         typeQualifier.bindExtension(extensionDecl)
 
       // After binding, we should we have a state
-      guard let producedState = symbolTable.dependencyGraph.extensionsToState[extensionDecl] else {
-        let availableExtensions = symbolTable.dependencyGraph.extensionsToState.keys.map(\.node._memberlessDescription)
+      guard let producedState = symbolTable.typeGraph.extensionsToState[extensionDecl] else {
+        let availableExtensions = symbolTable.typeGraph.extensionsToState.keys.map(\.node._memberlessDescription)
         return [
           ExpectationFailure.other(
             failure:

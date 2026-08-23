@@ -62,7 +62,7 @@ import SwiftSyntax
   @_spi(_QualifiedLookupTests)
   public internal(set) lazy var unresolvedExtensions = _findUnresolvedExtensions()
   @_spi(_QualifiedLookupTests)
-  public internal(set) var dependencyGraph = TypeDependencyGraph()
+  public internal(set) var typeGraph = TypeGraph()
 
   public init?(
     moduleName: ModuleName,
