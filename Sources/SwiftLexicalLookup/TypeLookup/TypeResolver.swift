@@ -85,6 +85,16 @@ extension ResolvedNominalTypeReference {
 public indirect enum TypeResolutionFailure<TypeName: Sendable, NominalType: Sendable>:
   Error
 {
+  /// A type declaration in an outer scope has an invalid identifier.
+  ///
+  /// E.g.
+  /// ```swift
+  /// struct { // ❌ Invalid identifier
+  ///   let _: Self // <- Lookup here
+  /// }
+  /// ```
+  case invalidNameToken(TokenSyntax)
+
   /// Cannot find the given type identifier in scope (using unqualified lookup).
   ///
   /// E.g.,
@@ -285,6 +295,8 @@ extension TypeResolutionFailure {
 
     switch self {
     // Passthrough
+    case .invalidNameToken(let nameToken):
+      return .invalidNameToken(nameToken)
     case .noTypeInScope:
       return .noTypeInScope
     case .extensionNotAtFileScope(let extensionDecl):
@@ -344,6 +356,8 @@ extension TypeResolutionFailure where TypeName == String, NominalType == String 
     }
 
     switch self {
+    case .invalidNameToken(let nameToken):
+      return ".invalidNameToken(\(nameToken.trimmedDescription))"
     case .noTypeInScope:
       return ".noTypeInScope"
     case .cannotComposeNonClassOrProtocol(let type):
@@ -419,10 +433,11 @@ extension TypeResolutionFailure {
       return nestedCycle
 
     // No nested ``TypeQualifierFailure`` => nil
-    case .noTypeInScope, .cannotComposeNonClassOrProtocol(_), .noTypeMember(member: _, in: _),
-      .cannotExtendNonNominal(nonnominal: _), .extensionNotAtFileScope(extensionDecl: _),
-      .other(_), .genericParameterOrAssociatedType, .ambiguousTypeDecl(_), .syntaxNotInSymbolTable,
-      .syntaxInDisabledRegion, .extensionNotBoundYet,
+    case .invalidNameToken(_), .noTypeInScope, .cannotComposeNonClassOrProtocol(_),
+      .noTypeMember(member: _, in: _), .cannotExtendNonNominal(nonnominal: _),
+      .extensionNotAtFileScope(extensionDecl: _), .other(_),
+      .genericParameterOrAssociatedType, .ambiguousTypeDecl(_),
+      .syntaxNotInSymbolTable, .syntaxInDisabledRegion, .extensionNotBoundYet,
       // Extension cycles are distinct
       .cyclicalExtensionDependency(_),
       // If the above case don't directly contain a cycle
@@ -526,18 +541,6 @@ extension TypeResolutionFailure {
 // MARK: Type Syntax
 
 extension TypeResolver {
-  // TODO: Add per-scope canonicalized cache so that:
-  //   func f() {
-  //     // === `f`'s scope ===
-  //     let a: ProtoA // -> canonical syntax `_::ProtoA`
-  //     let aAgain: (ProtoA) // -> same canonical syntax
-  //     let aOnceMore: (ProtoA & Any) & ~Escapable // -> same canonical syntax
-  //     let aOnceAgain: (~Copyable & Any) & ProtoA // -> same canonical syntax
-  //   }
-  //   // === top-level scope ===
-  //   let maybeDifferentA: ProtoA // -> same canonical syntax, but different scope
-  //   NOTE: This is just the syntax; if we want to treat this as a nominal type (e.g.
-  //    to store in a property), then we need to consider that `ProtoA` != ``
   public mutating func resolveSyntax(
     typeSyntax: Attached<TypeSyntax>
   ) -> Result<MemberLookupResult<ResolvedNominalTypeReference>, Failure> {
@@ -611,7 +614,6 @@ extension TypeResolver {
       let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax)
       return resolveMember(baseType: baseTypeResult, typeMember: ImplicitTypeReferenceComponent(from: memberComponent))
     case .success(.composition(let childTypes)):
-      // TODO: Record assumption that `childTypes` is unique.
       var syntaxToTypes = [
         (
           childSyntax: Attached<TypeSyntax>,
@@ -631,6 +633,7 @@ extension TypeResolver {
     }
   }
 
+  /// Combines the given types into one type result.
   func reduceComposition(
     _ syntaxToTypes: [(
       childSyntax: Attached<TypeSyntax>,
@@ -1014,12 +1017,11 @@ extension TypeResolver {
       )
 
     } else if let extensionDecl = declGroup.as(ExtensionDeclSyntax.self) {
-      // TODO: Produce accurate error; move check to `bindExtension`
       guard
         case .codeBlock(let fileStatements) = declContext,
         fileStatements.node == extensionDecl.fileRoot.statements
       else {
-        return .failure(Failure.extensionNotBoundYet)
+        return .failure(Failure.extensionNotAtFileScope(extensionDecl: extensionDecl.node))
       }
       // Wrap the global reference
       return bindExtension(extensionDecl).map(ResolvedNominalTypeReference.init(globalTypeReference:))
@@ -1128,9 +1130,7 @@ extension TypeResolver {
     )
 
     guard let declName = Identifier(validating: nominalDecl.node.name) else {
-      // TODO: Produce actual error
-      struct InvalidIdentifier: Error {}
-      return .failure(Failure.other(InvalidIdentifier()))
+      return .failure(Failure.invalidNameToken(nominalDecl.node.name))
     }
 
     // Extract file info
@@ -1669,21 +1669,9 @@ extension TypeResolver {
     switch currentNominalResult {
     case .success(let success):
       currentNominal = success
-    // If the reference changed, report those failures
     case .failure(.removed):
+      // If the reference changed, report those failures
       return .failure(Failure.noTypeInScope)
-    // TODO: Remove if we don't handle this failure
-    //
-    // case .failure(.parentNotRegistered(let parentName)):
-    //   fatalError(
-    //     "[SwiftLexicalLookup] Internal error: Tried to register \(typeReference.qualifiedName.debugDescription) but the parent \(parentName.debugDescription) is unexpectedly unregistered."
-    //   )
-    // TODO: Remove old failure
-    //
-    // case .failure(.unexpectedReregistration(existingMainDecl: _)):
-    //   fatalError(
-    //     "[SwiftLexicalLookup] Internal error: Unexpectedly found nominal type `\(typeReference.qualifiedName)` registered under a different main declaration."
-    //   )
     }
 
     // Find all the extensions we need to bind
@@ -1713,7 +1701,6 @@ extension TypeResolver {
       )
     else {
       // We checked the nominal type is registered at the start.
-      // TODO: Make sure this assumption holds true
       fatalError(
         "[SwiftLexicalLookup] Internal error: Nominal type unexpectedly removed from symbol table after binding extensions."
       )
