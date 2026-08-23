@@ -331,7 +331,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
         return targetDefinition.annotation.description
       })._debugDescription
       let actualTypeDescription: String = actualType.mapMembers({ nominalType -> String in
-        guard let targetDefinition = syntaxToDefinitions[nominalType.mainDecl.node] else {
+        guard let targetDefinition = syntaxToDefinitions[nominalType.nominalTypeRef.mainDecl.node] else {
           failures.append(
             ExpectationFailure.resultReferencesUnmarkedSyntax(
               syntaxDescription: nominalType.nominalTypeRef.globalName.debugDescription

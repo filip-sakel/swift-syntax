@@ -184,6 +184,19 @@ final class TypeResolutionTests: XCTestCase {
     ])
   }
 
+  func testRedeclarationAcrossExtensions() {
+    assertTypeResolution([
+      "MyFile.swift": """
+      struct A { struct B {} }
+      extension A { struct B {} }
+
+      let _: \(failure: .invalidMembers(
+          [("A.B", .ambiguousTypeDecl(["struct B {}", "struct B {}"]))]
+        ))A.B
+      """
+    ])
+  }
+
   // MARK: If Config
   func testIfConfig() {
     let baseSourceInterpolation: LexicalLookupSource<TypeResolutionMatcher>.Interpolation = """

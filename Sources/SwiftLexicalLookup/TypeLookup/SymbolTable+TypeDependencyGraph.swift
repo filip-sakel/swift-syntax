@@ -35,44 +35,53 @@ extension SymbolTable {
 // MARK: Registering Nominal
 
 extension SymbolTable {
-  enum NominalRegistrationFailure: Error {
-    case invalidReregistration(existingMainDecl: NominalTypeDeclSyntax)
-  }
-
-  /// Register the given qualified name with the given main declaration.
-  // func registerNominalTypeReference(
-  //   qualifiedName: TypeName,
-  //   mainDecl: Attached<NominalTypeDeclSyntax>
-  // ) -> Result<NominalTypeRef, TypeDependencyGraph.NominalRegistrationFailure> {
-  //   return dependencyGraph.registerNominalTypeReference(
-  //     rawQualifiedName: qualifiedName,
-  //     mainDecl: mainDecl,
-  //     configuredRegions: configuredRegions
-  //   )
-  // }
-
-  /// Like above but returns `ResolvedNominalTypeReference`
-  func registerNominalTypeReference(
-    qualifiedName: TypeName,
-    mainDecl: Attached<NominalTypeDeclSyntax>,
+  /// Registers nominal type by forwarding to `TypeDependencyGraph/registerNominalType`
+  func registerNominalType(
+    nestedMainDecl: Attached<NominalTypeDeclSyntax>,
+    mainDeclName: Identifier,
+    mainDeclModule: ModuleName,
+    declGroupBase: Attached<DeclGroupSyntaxType>,
+    baseType: ResolvedNominalTypeReference,
     originatingSyntax: Attached<TypeLikeSyntax>
   ) -> Result<ResolvedNominalTypeReference, TypeDependencyGraph.NominalRegistrationFailure> {
-    return dependencyGraph.registerNominalTypeReference(
-      rawQualifiedName: qualifiedName,
-      mainDecl: mainDecl,
+    return dependencyGraph.registerNominalType(
+      nestedMainDecl: nestedMainDecl,
+      mainDeclName: mainDeclName,
+      mainDeclModule: mainDeclModule,
+      declGroupBase: declGroupBase,
+      baseType: baseType.nominalTypeRef,
       symbolTable: self
     ).map({ nominalRef in
       ResolvedNominalTypeReference(
         nominalTypeRef: nominalRef,
-        // We'll get a failure if `mainDecl` is a redeclaration.
-        mainDecl: mainDecl,
+        originatingSyntax: originatingSyntax
+      )
+    })
+  }
+  /// Registers nominal type by forwarding to `TypeDependencyGraph/registerNominalType`
+  func registerNominalType(
+    topScopeMainDecl: Attached<NominalTypeDeclSyntax>,
+    mainDeclName: Identifier,
+    mainDeclModule: ModuleName,
+    isGlobal: Bool,
+    originatingSyntax: Attached<TypeLikeSyntax>
+  ) -> Result<ResolvedNominalTypeReference, TypeDependencyGraph.NominalRegistrationFailure> {
+    return dependencyGraph.registerNominalType(
+      topScopeMainDecl: topScopeMainDecl,
+      mainDeclName: mainDeclName,
+      mainDeclModule: mainDeclModule,
+      isGlobal: isGlobal,
+      symbolTable: self
+    ).map({ nominalRef in
+      ResolvedNominalTypeReference(
+        nominalTypeRef: nominalRef,
         originatingSyntax: originatingSyntax
       )
     })
   }
 }
 
-@_spi(_QualifiedLookupTests) public enum ExtensionBindingFailure<TypeName: Sendable>: Error {
+@_spi(_QualifiedLookupTests) public enum ExtensionBindingFailure: Error {
   /// Either root isn't a source file, or said source file isn't registered
   case nonRegisteredSyntaxRoot
 
@@ -83,7 +92,7 @@ extension SymbolTable {
 
 extension SymbolTable {
   typealias InvalidatedExtensions = OrderedSet<ExtensionDeclSyntax>
-  typealias ExtensionBindingFailure = SwiftLexicalLookup.ExtensionBindingFailure<TypeName>
+  typealias ExtensionBindingFailure = SwiftLexicalLookup.ExtensionBindingFailure
 
   /// Add extension to the symbol table and, if possible, bind it
   /// to the resolved nominal type. Cannot run on invalidated extensions.
@@ -137,7 +146,6 @@ extension SymbolTable {
     dependencyGraph.getExtensionResolvedType(extensionDecl)?.map({ (globalReference, mainDecl) in
       GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
         nominalTypeRef: globalReference,
-        mainDecl: mainDecl,
         originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
       )
     })
@@ -359,7 +367,6 @@ extension SymbolTable {
     ) -> GenericResolvedNominalTypeReference<GlobalNominalTypeRef> {
       GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
         nominalTypeRef: typeInfo.globalReference,
-        mainDecl: typeInfo.mainDecl,
         originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
       )
     }
@@ -389,7 +396,7 @@ extension SymbolTable {
       extensionDecl,
       // Only get the name and main decl
       to: extendedTypeResult.map({ extendedTypeReference in
-        return (extendedTypeReference.nominalTypeRef.name, extendedTypeReference.mainDecl)
+        return (extendedTypeReference.nominalTypeRef.name, extendedTypeReference.nominalTypeRef.mainDecl)
       }),
       dependencies: resolver.dependencyTracker,
       verbose: _verbose

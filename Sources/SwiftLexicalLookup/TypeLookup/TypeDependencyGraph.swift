@@ -21,6 +21,144 @@ private import SwiftDiagnostics
 import SwiftDiagnostics
 #endif
 
+/// A global type name, `Swift::Int._(MyFileA.swift)::MyType`.
+///
+/// ### File-Name Specifier
+///
+/// We use the '_(FileName.swift)::MyType' notation to describe
+/// an internal type declared in 'FileName.swift'. This notation
+/// gives us an unambiguous way to refer to types of the same name
+/// in our module. Types exposed as public/usable-from-inline
+/// from an external module should have a unique name. Also, types
+/// of the same name within the same file are invalid redeclarations.
+@_spi(_QualifiedLookupTests)
+public struct GlobalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
+  public enum Qualifier: Sendable, Hashable {
+    case `internal`(fileID: SyntaxIdentifier)
+    case external(moduleName: Identifier)
+
+    fileprivate init(file: SourceFileSyntax, module: Identifier, internalModule: Identifier) {
+      if module == internalModule {
+        self = GlobalTypeName.Qualifier.internal(fileID: file.id)
+      } else {
+        self = GlobalTypeName.Qualifier.external(moduleName: module)
+      }
+    }
+
+    /// Like `CustomDebugStringConvertible`'s `debugDescription` but accepts
+    /// a `describeFileID` closure to get the file names.
+    fileprivate func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
+      switch self {
+      case .internal(let fileID):
+        "_(\(describeFileID(fileID)))"
+      case .external(let moduleName):
+        "\(moduleName.name)"
+      }
+    }
+  }
+  /// A component of a qualified type name, external or internal. For instance,
+  /// `Swift::Int` (external) and `_(FileA.swift)::MyType` (internal).
+  public struct Component: Sendable, Hashable, CustomDebugStringConvertible {
+    // TODO: Consider using the module identifier instead and just always
+    // keep track of the file? But is that actually useful in the compilation model?
+    // I.e. Would we be performing lookup on a different module?
+    let qualifier: Qualifier
+    let name: Identifier
+    let debugFileMap: DebugFileMap
+
+    fileprivate init(
+      _uncheckedQualifier qualifier: GlobalTypeName.Qualifier,
+      name: Identifier,
+      debugFileMap: DebugFileMap
+    ) {
+      self.qualifier = qualifier
+      self.name = name
+      self.debugFileMap = debugFileMap
+    }
+
+    /// Creates a component named `name` in the file `file` in the module `module`
+    /// with respect to the given symbol table.
+    ///
+    /// Important: The file and module must be mapped as such in the symbol table.
+    fileprivate init(
+      name: Identifier,
+      file: SourceFileSyntax,
+      module: ModuleName,
+      symbolTable: borrowing SymbolTable
+    ) {
+      assert(
+        symbolTable.moduleMap[file] == module,
+        "[SwiftLexicalLookup] Internal error: File registered under '\(symbolTable.moduleMap[file]?.name ?? "nil")', and not the given module '\(module.name)'"
+      )
+
+      self.init(
+        _uncheckedQualifier: GlobalTypeName.Qualifier(
+          file: file,
+          module: module,
+          internalModule: symbolTable.moduleName
+        ),
+        name: name,
+        debugFileMap: symbolTable.debugFileMap
+      )
+    }
+
+    public var debugDescription: String {
+      let qualifierDescription = qualifier._describe(describeFileID: debugFileMap.describeFileID(_:))
+      return "\(qualifierDescription)::\(name.name)"
+    }
+  }
+
+  /// The type's components.
+  /// Invariant: `components.count >= 1`
+  public let components: [Component]
+
+  /// Creates a a global type with the given components; returns `nil` if no
+  /// components are provided
+  private init?(_components: [Component]) {
+    guard !_components.isEmpty else { return nil }
+    self.components = _components
+  }
+
+  /// Creates a a global type with the given component.
+  fileprivate init(component: Component) {
+    // Force unwrap because we provide non-empty components.
+    self.init(_components: [component])!
+
+    // TODO: Remove
+    // // Maintains the invariant of `components.component >= 1`
+    // self.components = [component]
+  }
+
+  var baseComponent: Component {
+    // Asserted at init
+    components.first!
+  }
+  /// If this is not a top-level type, break it up into a base and member.
+  var baseAndMember: (base: GlobalTypeName, member: Component)? {
+    var baseComponents = components
+    // We have at least one component according to initializer precondition
+    let member = baseComponents.popLast()!
+    guard let base = GlobalTypeName(_components: baseComponents) else {
+      return nil
+    }
+    return (base, member)
+  }
+
+  public func addingComponents(_ tailComponents: [Component]) -> GlobalTypeName {
+    // Shouldn't return `nil` because `self.components` should be nonempty
+    guard let newType = GlobalTypeName(_components: components + tailComponents) else {
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Unexpectedly got `QualifiedTypeNameNestedType` instance with empty components."
+      )
+    }
+    return newType
+  }
+
+  public var debugDescription: String {
+    return components.map(\.debugDescription).joined(separator: ".")
+  }
+}
+
 extension Array {
   /// Appends if the array has no duplicates using the given key
   private mutating func _indexAfterInsertingUnique<Key: Equatable, Value>(
@@ -494,21 +632,26 @@ public struct TypeDependencyGraph {
 
 @_spi(_QualifiedLookupTests) public struct GlobalNominalTypeRef: Hashable, Sendable, CustomDebugStringConvertible {
   let name: GlobalTypeName
+  let mainDecl: Attached<NominalTypeDeclSyntax>
   let _version: Int
 
-  internal init(name: GlobalTypeName, _version: Int) {
+  internal init(name: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>, _version: Int) {
     self.name = name
+    self.mainDecl = mainDecl
     self._version = _version
   }
 
   public var debugDescription: String {
-    return "\(name.debugDescription) (v\(_version))"
+    return "\(name.debugDescription) (v\(_version), \(mainDecl.kind))"
   }
 }
 
 extension GlobalNominalTypeRef {
-  init(qualifiedName: GlobalTypeName, nominal: __shared TypeDependencyGraph.NominalType) {
-    self.init(name: qualifiedName, _version: nominal.version)
+  init(
+    name: GlobalTypeName,
+    nominal: __shared TypeDependencyGraph.NominalType
+  ) {
+    self.init(name: name, mainDecl: nominal.mainDecl.declGroup, _version: nominal.version)
   }
 }
 
@@ -527,6 +670,22 @@ extension GlobalNominalTypeRef {
   }
   init(localNominalType: Attached<NominalTypeDeclSyntax>) {
     storage = .local(localNominalType)
+  }
+
+  /// The main declaration of this nominal reference
+  ///
+  /// Note: The main declaration helps in three ways:
+  /// 1. To detect if we have a class/protocol for compositions
+  /// 2. To find generic parameters
+  /// 3. Testing if the resovled type match the expected main decl
+  @_spi(_QualifiedLookupTests)
+  public var mainDecl: Attached<NominalTypeDeclSyntax> {
+    switch storage {
+    case .global(let globalReference):
+      return globalReference.mainDecl
+    case .local(let localDecl):
+      return localDecl
+    }
   }
 }
 
@@ -635,27 +794,30 @@ extension TypeDependencyGraph {
 }
 
 extension TypeDependencyGraph {
-  // TODO: Extract out to a better place
+  // TODO: Remove
+  // // TODO: Extract out to a better place
+  // //
+  // /// Get the declaration-group parent of the given node; returns `nil`
+  // /// if no such parent exists and for top-level/local declarations.
+  // fileprivate func _declGroupScope<S: SyntaxProtocol>(
+  //   of node: Attached<S>
+  // ) -> Attached<DeclGroupSyntaxType>? {
+  //   // Ensure we have parent
+  //   guard let parent = node.parent else { return nil }
   //
-  /// Get the declaration-group parent of the given node; returns `nil`
-  /// if no such parent exists and for top-level/local declarations.
-  fileprivate func _declGroupScope<S: SyntaxProtocol>(
-    of node: Attached<S>
-  ) -> Attached<DeclGroupSyntaxType>? {
-    // Ensure we have parent
-    guard let parent = node.parent else { return nil }
-
-    // Return `nil` for local declarationns
-    guard parent.kind != .codeBlockItemList else { return nil }
-
-    // Get the parent or recurse
-    guard let declGroupParent = parent.as(DeclGroupSyntaxType.self) else {
-      return _declGroupScope(of: parent)
-    }
-    return declGroupParent
-  }
+  //   // Return `nil` for local declarationns
+  //   guard parent.kind != .codeBlockItemList else { return nil }
+  //
+  //   // Get the parent or recurse
+  //   guard let declGroupParent = parent.as(DeclGroupSyntaxType.self) else {
+  //     return _declGroupScope(of: parent)
+  //   }
+  //   return declGroupParent
+  // }
 
   enum NominalRegistrationFailure: Error {
+    case nonNestedUnderDeclGroup(Attached<DeclGroupSyntaxType>)
+
     /// The file root is not registered in the symbol table.
     case unregisteredFileRoot(SourceFileSyntax)
     /// In order to register a nested type, its parent must be registered.
@@ -723,68 +885,105 @@ extension TypeDependencyGraph {
     case cannotRegisterRedeclaration
   }
 
-  /// Registers the given nominal-type reference or return the
-  /// existing reference.
-  ///
-  /// Parameters:
-  /// - rawQualifiedName: Any qualified name, local or global
-  ///
-  /// Returns: An error if this is a redeclaration. Otherwise, assume the
-  /// `NominalTypeRef` points to the given `mainDecl`.
-  mutating func registerNominalTypeReference(
-    rawQualifiedName: TypeName,
-    mainDecl: Attached<NominalTypeDeclSyntax>,
+  // Top-scope (local or global)
+  mutating func registerNominalType(
+    topScopeMainDecl mainDecl: Attached<NominalTypeDeclSyntax>,
+    mainDeclName: Identifier,
+    mainDeclModule: ModuleName,
+    isGlobal: Bool,
     symbolTable: borrowing SymbolTable
   ) -> Result<NominalTypeRef, NominalRegistrationFailure> {
-    // Get the global name
-    let qualifiedName: GlobalTypeName
-    switch rawQualifiedName {
-    case .global(let name):
-      qualifiedName = name
-    case .local:
+    // Local types don't have extensions, so we can just return a reference.
+    guard isGlobal else {
       return .success(NominalTypeRef(localNominalType: mainDecl))
     }
 
-    // Check parent is registered, if nested
-    if let (qualifiedBaseName, member: _) = qualifiedName.baseAndMember {
-      guard let baseType = namesToTypes[qualifiedBaseName] else {
-        return .failure(NominalRegistrationFailure.parentNotRegistered(parentTypeName: qualifiedBaseName))
+    let globalTypeName = GlobalTypeName(
+      component: GlobalTypeName.Component(
+        name: mainDeclName,
+        file: mainDecl.fileRoot,
+        module: mainDeclModule,
+        symbolTable: symbolTable
+      )
+    )
+
+    return _admitNominalType(globalDecl: mainDecl, globalTypeName: globalTypeName, symbolTable: symbolTable)
+  }
+  // Nested (local or global)
+  mutating func registerNominalType(
+    nestedMainDecl mainDecl: Attached<NominalTypeDeclSyntax>,
+    mainDeclName: Identifier,
+    mainDeclModule: ModuleName,
+    declGroupBase: Attached<DeclGroupSyntaxType>,
+    baseType: NominalTypeRef,
+    symbolTable: borrowing SymbolTable
+  ) -> Result<NominalTypeRef, NominalRegistrationFailure> {
+    // Get the global reference, or return the local
+    let globalParent: GlobalNominalTypeRef
+    switch baseType.storage {
+    case .global(let globalReference):
+      globalParent = globalReference
+    case .local(let parentDecl):
+      // Local decls don't have extensions so member types must be nested
+      // in their parent decl.
+      guard parentDecl.fileRoot == mainDecl.fileRoot, parentDecl.node.range.contains(mainDecl.node.range) else {
+        return .failure(NominalRegistrationFailure.nonNestedUnderDeclGroup(Attached<DeclGroupSyntaxType>(parentDecl)))
       }
-      // At this point, we should get a declaration group
-      guard let parentDeclGroup = _declGroupScope(of: mainDecl) else {
-        return .failure(NominalRegistrationFailure.noDeclGroupParent)
-      }
-      // Check extension is bound
-      if let parentExtension = parentDeclGroup.as(ExtensionDeclSyntax.self),
-        let parentExtensionState = extensionsToState[parentExtension],
-        case .success(let extendedTypeName) = parentExtensionState.resolvedType,
-        extendedTypeName != qualifiedBaseName
-      {
-        return .failure(NominalRegistrationFailure.parentExtensionUnbound(extensionDecl: parentExtension))
-      }
-      // Check parent decl is the main decl
-      if let parentNominal = parentDeclGroup.as(NominalTypeDeclSyntax.self),
-        baseType.mainDecl.declGroup != parentNominal
-      {
-        // Note that we still register even if there are redeclarations. E.g.,
-        // in the following, we still register '_(File.swift)::A._(File.swift)::B',
-        // despite the parent '_(File.swift)::A' having redeclarations.
-        // struct A {
-        //     struct B {
-        //         func f(_: B) {} // ✅
-        //         func f(_: C) {} // ❌ error: No type 'C' in scope
-        //     }
-        // }
-        // struct A {} // ❌ error: Invalid redeclaration of 'A'
-        return .failure(NominalRegistrationFailure.cannotRegisterUnderRedeclaration)
-      }
-    } else {
-      // Otherwise, a top-level declaration is fine
+
+      // We can't extend local types; just return a reference.
+      return .success(NominalTypeRef(localNominalType: mainDecl))
     }
 
-    // TODO: Add an assertion when registering an extension-dependent nominal, that
-    //       the extension is registered
+    let globalName = globalParent.name.addingComponents([
+      GlobalTypeName.Component(
+        name: mainDeclName,
+        file: mainDecl.fileRoot,
+        module: mainDeclModule,
+        symbolTable: symbolTable
+      )
+    ])
 
+    // The parent must be bound
+    guard let baseType = namesToTypes[globalParent.name] else {
+      return .failure(NominalRegistrationFailure.parentNotRegistered(parentTypeName: globalParent.name))
+    }
+
+    // Check extension is bound
+    if let parentExtension = declGroupBase.as(ExtensionDeclSyntax.self),
+      let parentExtensionState = extensionsToState[parentExtension],
+      case .success(let extendedTypeName) = parentExtensionState.resolvedType,
+      extendedTypeName != globalParent.name
+    {
+      return .failure(NominalRegistrationFailure.parentExtensionUnbound(extensionDecl: parentExtension))
+    }
+    // Check parent decl is the main decl
+    else if let parentNominal = declGroupBase.as(NominalTypeDeclSyntax.self),
+      baseType.mainDecl.declGroup != parentNominal
+    {
+      // Note that we still register even if there are redeclarations. E.g.,
+      // in the following, we still register '_(File.swift)::A._(File.swift)::B',
+      // despite the parent '_(File.swift)::A' having redeclarations.
+      // struct A {
+      //     struct B {
+      //         func f(_: B) {} // ✅
+      //         func f(_: C) {} // ❌ error: No type 'C' in scope
+      //     }
+      // }
+      // struct A {} // ❌ error: Invalid redeclaration of 'A'
+      return .failure(NominalRegistrationFailure.cannotRegisterUnderRedeclaration)
+    }
+    return _admitNominalType(globalDecl: mainDecl, globalTypeName: globalName, symbolTable: symbolTable)
+  }
+
+  /// Admits the given nominal-type into the graph or returns the
+  /// existing reference.
+  ///
+  /// Important: Callers must validate the inputs
+  fileprivate mutating func _admitNominalType(
+    globalDecl mainDecl: Attached<NominalTypeDeclSyntax>,
+    globalTypeName: GlobalTypeName,
+    symbolTable: borrowing SymbolTable
+  ) -> Result<NominalTypeRef, NominalRegistrationFailure> {
     // Map out the main decl
     guard
       case .success(let declFileConfiguredRegions) = symbolTable.getConfiguredRegions(
@@ -795,10 +994,9 @@ extension TypeDependencyGraph {
     }
     let mappedMainDecl = MappedDeclGroup.from(declGroup: mainDecl, configuredRegions: declFileConfiguredRegions)
 
-    // If this type is new, just register and return
-    // TODO: Test following, e.g. struct A { struct B {} }; extension A { struct B {} }
+    // If already registered, ensure we have no redeclaration
     let type: NominalType
-    if let existingType = namesToTypes[qualifiedName] {
+    if let existingType = namesToTypes[globalTypeName] {
       // We don't allow redeclarations (see `.cannotRegisterRedeclaration`
       // docstring for why)
       guard existingType.mainDecl.declGroup == mainDecl else {
@@ -806,14 +1004,17 @@ extension TypeDependencyGraph {
       }
       // Return the existing type
       type = existingType
-    } else {
+    }
+    // Otherwise, register
+    else {
       // Create a new type
       let freshNominal = NominalType(mainDecl: mappedMainDecl)
-      namesToTypes[qualifiedName] = freshNominal
+      namesToTypes[globalTypeName] = freshNominal
       type = freshNominal
     }
+
     return .success(
-      NominalTypeRef(globalReference: GlobalNominalTypeRef(qualifiedName: qualifiedName, nominal: type))
+      NominalTypeRef(globalReference: GlobalNominalTypeRef(name: globalTypeName, nominal: type))
     )
   }
 
@@ -837,7 +1038,9 @@ extension TypeDependencyGraph {
     }
 
     return .success(
-      NominalTypeRef(globalReference: GlobalNominalTypeRef(qualifiedName: globalReference.name, nominal: typeState))
+      NominalTypeRef(
+        globalReference: GlobalNominalTypeRef(name: globalReference.name, nominal: typeState)
+      )
     )
   }
 }
@@ -1627,7 +1830,7 @@ extension TypeDependencyGraph {
 extension TypeDependencyGraph {
   func getGlobalNominalTypeReference(name: GlobalTypeName) -> GlobalNominalTypeRef? {
     namesToTypes[name].map({
-      GlobalNominalTypeRef(qualifiedName: name, nominal: $0)
+      GlobalNominalTypeRef(name: name, nominal: $0)
     })
   }
 
@@ -2207,7 +2410,7 @@ extension TypeDependencyGraph {
 
     return Result.success(
       (
-        globalReference: GlobalNominalTypeRef(qualifiedName: boundTypeName, nominal: boundType),
+        globalReference: GlobalNominalTypeRef(name: boundTypeName, nominal: boundType),
         mainDecl: boundType.mainDecl.declGroup
       )
     )
