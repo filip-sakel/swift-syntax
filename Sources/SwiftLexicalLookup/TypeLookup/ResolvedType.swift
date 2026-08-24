@@ -27,6 +27,7 @@ public indirect enum ResolvedType<NominalType> {
   /// E.g. `A.Type`, `((A, B).Type).Type`
   case metatype(base: ResolvedType)
 
+  /// Maps the nominal types in `nominalTypes`.
   public func mapNominals<NewNominalType>(
     _ transform: (NominalType) -> NewNominalType
   ) -> ResolvedType<NewNominalType> {
@@ -91,7 +92,7 @@ public struct GenericResolvedTypeSyntax<ResolvedType: Sendable & Hashable & Cust
   @_spi(_QualifiedLookupTests)
   public init(
     type: ResolvedType,
-    syntax: Attached<TypeLikeSyntax>,
+    syntax: Attached<TypeLikeSyntax>
   ) {
     self.type = type
     self.syntax = syntax
@@ -102,7 +103,7 @@ public struct GenericResolvedTypeSyntax<ResolvedType: Sendable & Hashable & Cust
   }
 }
 /// The default resolved type syntax: a `NominalTypeRef` and the syntax that was resolved.
-@_spi(_QualifiedLookup)
+@_spi(_QualifiedLookupTests)
 public typealias ResolvedTypeSyntax = GenericResolvedTypeSyntax<NominalTypeRef>
 
 extension ResolvedTypeSyntax {

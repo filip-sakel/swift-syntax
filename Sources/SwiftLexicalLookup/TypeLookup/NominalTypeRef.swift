@@ -14,6 +14,7 @@ import SwiftIfConfig
 import SwiftSyntax
 
 /// A global type name, `Swift::Int._(MyFileA.swift)::MyType`.
+/// Used by `TypeGraph` as unique identifier for types.
 ///
 /// ### File-Name Specifier
 ///
@@ -24,85 +25,28 @@ import SwiftSyntax
 /// from an external module should have a unique name. Also, types
 /// of the same name within the same file are invalid redeclarations.
 @_spi(_QualifiedLookupTests)
-public struct GlobalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
+public struct GlobalTypeName: Sendable, Hashable {
   public enum Qualifier: Sendable, Hashable {
     case `internal`(fileID: SyntaxIdentifier)
     case external(moduleName: Identifier)
-
-    /// Important: Only `TypeGraph` should use this initializer.
-    fileprivate init(file: SourceFileSyntax, module: Identifier, internalModule: Identifier) {
-      if module == internalModule {
-        self = GlobalTypeName.Qualifier.internal(fileID: file.id)
-      } else {
-        self = GlobalTypeName.Qualifier.external(moduleName: module)
-      }
-    }
-
-    /// Like `CustomDebugStringConvertible`'s `debugDescription` but accepts
-    /// a `describeFileID` closure to get the file names.
-    fileprivate func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
-      switch self {
-      case .internal(let fileID):
-        "_(\(describeFileID(fileID)))"
-      case .external(let moduleName):
-        "\(moduleName.name)"
-      }
-    }
   }
   /// A component of a qualified type name, external or internal. For instance,
   /// `Swift::Int` (external) and `_(FileA.swift)::MyType` (internal).
-  public struct Component: Sendable, Hashable, CustomDebugStringConvertible {
-    let qualifier: Qualifier
-    let name: Identifier
-    let debugFileMap: DebugFileMap
+  public struct Component: Sendable, Hashable {
+    private let qualifier: Qualifier
+    private let name: Identifier
+    private let debugFileMap: DebugFileMap
 
-    fileprivate init(
-      _uncheckedQualifier qualifier: GlobalTypeName.Qualifier,
-      name: Identifier,
-      debugFileMap: DebugFileMap
-    ) {
+    fileprivate init(_uncheckedQualifier qualifier: Qualifier, name: Identifier, debugFileMap: DebugFileMap) {
       self.qualifier = qualifier
       self.name = name
       self.debugFileMap = debugFileMap
-    }
-
-    /// Creates a component named `name` in the file `file` in the module `module`
-    /// with respect to the given symbol table.
-    ///
-    /// Important:
-    /// 1. The file and module must be mapped as such in the symbol table.
-    /// 2. Only `TypeGraph` should use this initializer.
-    init(
-      name: Identifier,
-      file: SourceFileSyntax,
-      module: ModuleName,
-      symbolTable: borrowing SymbolTable
-    ) {
-      assert(
-        symbolTable.moduleMap[file] == module,
-        "[SwiftLexicalLookup] Internal error: File registered under '\(symbolTable.moduleMap[file]?.name ?? "nil")', and not the given module '\(module.name)'"
-      )
-
-      self.init(
-        _uncheckedQualifier: GlobalTypeName.Qualifier(
-          file: file,
-          module: module,
-          internalModule: symbolTable.moduleName
-        ),
-        name: name,
-        debugFileMap: symbolTable.debugFileMap
-      )
-    }
-
-    public var debugDescription: String {
-      let qualifierDescription = qualifier._describe(describeFileID: debugFileMap.describeFileID(_:))
-      return "\(qualifierDescription)::\(name.name)"
     }
   }
 
   /// The type's components.
   /// Invariant: `components.count >= 1`
-  public let components: [Component]
+  public private(set) var components: [Component]
 
   /// Creates a a global type with the given components; returns `nil` if no
   /// components are provided
@@ -110,19 +54,68 @@ public struct GlobalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
     guard !_components.isEmpty else { return nil }
     self.components = _components
   }
+}
 
+// MARK: Name Construction
+
+extension GlobalTypeName.Qualifier {
+  fileprivate init(file: SourceFileSyntax, module: Identifier, internalModule: Identifier) {
+    if module == internalModule {
+      self = .internal(fileID: file.id)
+    } else {
+      self = .external(moduleName: module)
+    }
+  }
+}
+
+extension GlobalTypeName.Component {
+  /// Creates a component named `name` in the file `file` in the module `module`
+  /// with respect to the given symbol table.
+  ///
+  /// Important: The file and module must be mapped as such in the symbol table.
+  init(
+    name: Identifier,
+    file: SourceFileSyntax,
+    module: ModuleName,
+    symbolTable: borrowing SymbolTable
+  ) {
+    assert(
+      symbolTable.moduleMap[file] == module,
+      "[SwiftLexicalLookup] Internal error: File registered under '\(symbolTable.moduleMap[file]?.name ?? "nil")', and not the given module '\(module.name)'"
+    )
+
+    self.init(
+      _uncheckedQualifier: GlobalTypeName.Qualifier(
+        file: file,
+        module: module,
+        internalModule: symbolTable.moduleName
+      ),
+      name: name,
+      debugFileMap: symbolTable.debugFileMap
+    )
+  }
+}
+
+extension GlobalTypeName {
   /// Creates a a global type with the given component.
-  /// Important: Only `TypeGraph` should use this initializer.
   init(component: Component) {
-    // Force unwrap because we provide non-empty components.
-    self.init(_components: [component])!
+    // Upholds the invariant because we provide exactly one component
+    self.components = [component]
   }
 
-  var baseComponent: Component {
-    // Asserted at init
-    components.first!
+  /// Adds the given component to a type name to get the name of a nested type.
+  public func addingComponent(_ tailComponent: Component) -> GlobalTypeName {
+    var copy = self
+    // Maintains the invariant, as we're just adding a component.
+    copy.components.append(tailComponent)
+    return copy
   }
-  /// If this is not a top-level type, break it up into a base and member.
+}
+
+// MARK: Name Deconstruction
+
+extension GlobalTypeName {
+  /// Break this name up into a base name and a member, if not a top-level type.
   var baseAndMember: (base: GlobalTypeName, member: Component)? {
     var baseComponents = components
     // We have at least one component according to initializer precondition
@@ -132,24 +125,14 @@ public struct GlobalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
     }
     return (base, member)
   }
-
-  public func addingComponents(_ tailComponents: [Component]) -> GlobalTypeName {
-    // Shouldn't return `nil` because `self.components` should be nonempty
-    guard let newType = GlobalTypeName(_components: components + tailComponents) else {
-      fatalError(
-        "[SwiftLexicalLookup] Internal error: Unexpectedly got `QualifiedTypeNameNestedType` instance with empty components."
-      )
-    }
-    return newType
-  }
-
-  public var debugDescription: String {
-    return components.map(\.debugDescription).joined(separator: ".")
-  }
 }
 
+// MARK: Nominal-Type Ref
+
+/// A reference to a resolved global nominal type vended by `TypeGraph`.
+/// Contains the unique name and resolved main declaration.
 @_spi(_QualifiedLookupTests)
-public struct GlobalNominalTypeRef: Hashable, Sendable, CustomDebugStringConvertible {
+public struct GlobalNominalTypeRef: Hashable, Sendable {
   let name: GlobalTypeName
   let mainDecl: Attached<NominalTypeDeclSyntax>
   let _version: Int
@@ -159,12 +142,10 @@ public struct GlobalNominalTypeRef: Hashable, Sendable, CustomDebugStringConvert
     self.mainDecl = mainDecl
     self._version = _version
   }
-
-  public var debugDescription: String {
-    return "\(name.debugDescription) (v\(_version), \(mainDecl.kind))"
-  }
 }
 
+/// A reference to a resolved nominal type (global or local) vended by
+/// `TypeGraph`. Contains the unique name and resolved main declaration.
 @_spi(_QualifiedLookupTests)
 public struct NominalTypeRef: Hashable, Sendable {
   public enum Storage: Hashable, Sendable {
@@ -175,9 +156,11 @@ public struct NominalTypeRef: Hashable, Sendable {
 
   public let storage: Storage
 
+  /// Important: Only `TypeGraph` should use this initializer.
   init(globalReference: GlobalNominalTypeRef) {
     storage = .global(globalReference)
   }
+  /// Important: Only `TypeGraph` should use this initializer.
   init(localNominalType: Attached<NominalTypeDeclSyntax>) {
     storage = .local(localNominalType)
   }
@@ -200,8 +183,45 @@ public struct NominalTypeRef: Hashable, Sendable {
 
 // MARK: Debug
 
+extension GlobalTypeName.Qualifier {
+  /// Like `CustomDebugStringConvertible`'s `debugDescription` but accepts
+  /// a `describeFileID` closure to get the file names.
+  fileprivate func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
+    switch self {
+    case .internal(let fileID):
+      "_(\(describeFileID(fileID)))"
+    case .external(let moduleName):
+      "\(moduleName.name)"
+    }
+  }
+}
+
+extension GlobalTypeName.Component: CustomDebugStringConvertible {
+  /// E.g. '_(MyFile.swift)::MyType', 'ExternalModule::OtherType'
+  public var debugDescription: String {
+    let qualifierDescription = qualifier._describe(describeFileID: debugFileMap.describeFileID(_:))
+    return "\(qualifierDescription)::\(name.name)"
+  }
+}
+
+extension GlobalTypeName: CustomDebugStringConvertible {
+  /// E.g. '_(MyFile.swift)::MyType.ExternalModule::OtherType'
+  public var debugDescription: String {
+    return components.map(\.debugDescription).joined(separator: ".")
+  }
+}
+
+extension GlobalNominalTypeRef: CustomDebugStringConvertible {
+  /// E.g. '_(InternalFile.swift)::MyType.ExternalModule::OtherType (v0, structDecl)'
+  public var debugDescription: String {
+    return "\(name.debugDescription) (v\(_version), \(mainDecl.kind))"
+  }
+}
+
 @_spi(_QualifiedLookupTests)
 extension NominalTypeRef: CustomDebugStringConvertible {
+  /// E.g. 'struct LocalDecl {} (local)' or global
+  /// '_(InternalFile.swift)::MyType.ExternalModule::OtherType (v0, structDecl)'
   public var debugDescription: String {
     switch storage {
     case .global(let globalReference):
@@ -211,6 +231,8 @@ extension NominalTypeRef: CustomDebugStringConvertible {
     }
   }
 
+  /// E.g. a local 'struct LocalDecl {}' or global
+  /// '_(InternalFile.swift)::MyType.ExternalModule::OtherType'
   public var _succinctDescription: String {
     switch storage {
     case .global(let globalReference):
@@ -220,6 +242,7 @@ extension NominalTypeRef: CustomDebugStringConvertible {
     }
   }
 
+  /// Extracts the global-type name if a global reference. Useful for testing.
   public var globalName: GlobalTypeName? {
     guard case .global(let globalReference) = storage else { return nil }
 

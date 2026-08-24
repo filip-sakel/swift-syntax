@@ -745,7 +745,7 @@ extension TypeResolver {
         // Reasoning: We just checked for redeclarations
         case .cannotRegisterRedeclaration:
           fatalError(
-            "[ewiftLexicalLookup] Internal error: Unexpected nominal-registration error: \(registrationFailure)"
+            "[SwiftLexicalLookup] Internal error: While registering top-scope `\(nominalDecl._memberlessDescription)`: \(registrationFailure)"
           )
         }
       }
@@ -827,7 +827,7 @@ extension TypeResolver {
         // .baseNotRegistered, .baseDeclGroupUnbound -> We should have a valid base from the recursive step
         case .other(.cannotRegisterRedeclaration), .baseNotRegistered, .baseDeclGroupUnbound:
           fatalError(
-            "[ewiftLexicalLookup] Internal error: Unexpected nominal-registration error: \(registrationFailure)"
+            "[ewiftLexicalLookup] Internal error: While registering '\(baseType._succinctDescription)' > '\(nominalDecl._memberlessDescription)': \(registrationFailure)"
           )
         }
       }

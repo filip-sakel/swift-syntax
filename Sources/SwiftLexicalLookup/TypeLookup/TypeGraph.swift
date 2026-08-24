@@ -706,14 +706,14 @@ extension TypeGraph {
       return .success(NominalTypeRef(localNominalType: mainDecl))
     }
 
-    let globalName = globalParent.name.addingComponents([
+    let globalName = globalParent.name.addingComponent(
       GlobalTypeName.Component(
         name: declName,
         file: mainDecl.fileRoot,
         module: declModule,
         symbolTable: symbolTable
       )
-    ])
+    )
 
     // The parent must be bound
     guard let baseType = namesToTypes[globalParent.name] else {
@@ -982,14 +982,14 @@ extension TypeGraph {
   ) -> GlobalTypeName? {
     for (memberName, member) in members.typeMembersToDecls {
       // Construct the type the member would have
-      let potentialMemberTypeName = declGroupTypeName.addingComponents([
+      let potentialMemberTypeName = declGroupTypeName.addingComponent(
         GlobalTypeName.Component(
           name: memberName,
           file: declGroup.fileRoot,
           module: declGroupModule,
           symbolTable: symbolTable
         )
-      ])
+      )
 
       // Get the registered type and name, if it exists
       guard let memberType = namesToTypes[potentialMemberTypeName] else { continue }
@@ -1281,14 +1281,14 @@ extension TypeGraph {
     )
 
     // If there's no registered nominal type our name, we're done
-    let memberNominalTypeName = baseTypeName.addingComponents([
+    let memberNominalTypeName = baseTypeName.addingComponent(
       GlobalTypeName.Component(
         name: member.name,
         file: baseTypeDecl.fileRoot,
         module: baseTypeModule,
         symbolTable: symbolTable
       )
-    ])
+    )
     guard let memberNominal: NominalType = namesToTypes[memberNominalTypeName] else {
       return
     }
