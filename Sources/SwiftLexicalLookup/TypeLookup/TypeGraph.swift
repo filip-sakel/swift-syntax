@@ -837,24 +837,20 @@ extension TypeGraph {
 
 // MARK: - Extension Dependencies
 
-// TODO: Look into whether we can use the existing ExtensionBindingResult/Dependency type
-@_spi(_QualifiedLookupTests) public struct QualifiedLookupDependency<TypeName: Sendable>: Sendable {
+@_spi(_QualifiedLookupTests)
+public struct QualifiedLookupDependency<TypeName: Sendable>: Sendable {
   let extendedTypeName: TypeName
   let member: Identifier
   let typeDecls: [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)]
 
-  // TODO: Clean up
-  @_spi(_QualifiedLookupTests) public init(
-    // introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl,
+  @_spi(_QualifiedLookupTests)
+  public init(
     extendedTypeName: TypeName,
     member: Identifier,
-    // typeDecls: [TypeDeclSyntax]
     typeDecls: [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)]
   ) {
-    // self.introducingExtensionOrMainDecl = introducingExtensionOrMainDecl
     self.extendedTypeName = extendedTypeName
     self.member = member
-    // self.typeDecls = typeDecls
     self.typeDecls = typeDecls
   }
 }

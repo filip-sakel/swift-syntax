@@ -22,7 +22,9 @@ import SwiftSyntax
 public final class SymbolTable {
   /// The "internal" module.
   public let moduleName: ModuleName
-  /// Invariant: moduleToSources[moduleName] != nil
+  /// Invariants:
+  /// 1. moduleToSources[moduleName] != nil
+  /// 2. Each `SourceFileSyntax` is unique (across modules)
   public let moduleToSources: [ModuleName: [String: SourceFileSyntax]]
   /// The build configuration used for lookups in the symbol table's files.
   public let buildConfiguration: (any BuildConfiguration)?
@@ -140,7 +142,6 @@ extension SymbolTable {
     line: UInt = #line
   ) -> T {
     if let nestingLimit = self._logNestingLimit, logPrefix.count >= nestingLimit {
-      fflush(stdout)
       fatalError(
         "Exceeded log nesting limit of \(nestingLimit), suggesting there's an infinite loop. If you think this is a mistake, you may change the limit in `TypeQualifier`."
       )
@@ -162,8 +163,7 @@ extension SymbolTable {
     // By `moduleName` invariant
     let internalSources = moduleToSources[moduleName]!
 
-    // TODO: Check during init that each thing in the module map is a unique source file syntax
-    // and add as invariant.
+    // By `moduleToSources` uniqueness invariant
     let internalFileMap = Dictionary(
       uniqueKeysWithValues: internalSources.map({ (fileName, file) in
         (key: file.id, value: (fileName, file))
