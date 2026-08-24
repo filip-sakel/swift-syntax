@@ -51,10 +51,15 @@ public struct GenericResolvedNominalTypeReference<TypeRef: Sendable & Hashable &
     nominalTypeRef.debugDescription
   }
 }
-
 @_spi(_QualifiedLookup) public typealias ResolvedNominalTypeReference = GenericResolvedNominalTypeReference<
   NominalTypeRef
 >
+
+@_spi(_QualifiedLookupTests)
+public struct ResolvedTypeSyntax<ResolvedType: Sendable>: Sendable {
+  public let type: ResolvedType
+  public let originatingSyntax: Attached<TypeLikeSyntax>
+}
 
 extension GenericResolvedNominalTypeReference where TypeRef == NominalTypeRef {
   var _succinctDescription: String {
@@ -500,6 +505,7 @@ extension TypeResolutionFailure {
   public typealias Failure = TypeResolutionFailure<
     GlobalTypeName, ResolvedNominalTypeReference
   >
+  public typealias TypeResult<ResolvedType> = Result<ResolvedTypeSyntax<TypeReference>, Failure>
 
   let symbolTable: SymbolTable
 
