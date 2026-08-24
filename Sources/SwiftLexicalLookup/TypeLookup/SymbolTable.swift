@@ -26,8 +26,6 @@ import SwiftSyntax
 
   // private let _fileToConfiguredRegions: [SourceFileSyntax: ConfiguredRegions?]
   //
-  // TODO: Remove
-  // let configuredRegions: ConfiguredRegions?
   enum NonRegisteredFileFailure: Error {
     case unregisteredFileRoot
   }
@@ -133,9 +131,8 @@ extension SymbolTable {
 extension SymbolTable {
   func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
     guard _verbose else { return }
-    // Keep log text separately
+    // Calculate log text
     let newLine = "\(logPrefix.map({ "[\($0)]" }).joined()) \(component)\n"
-    // logText += newLine + "\n"
     // Print new line
     print(newLine)
     // TODO: Remove
