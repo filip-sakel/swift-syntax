@@ -54,7 +54,7 @@ struct TypeResolutionMatcher {
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
   enum Expectation {
     case syntaxResolution(
-      Result<MemberLookupResult<Character>, TestTypeResolutionFailure>
+      Result<ResolvedType<Character>, TestTypeResolutionFailure>
     )
     case extensionBinding(TestExtensionState)
   }
@@ -302,7 +302,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
   /// `assertExpectation` forwards type syntax here.
   private func _assertTypeSyntax(
     typeSyntax: Attached<TypeSyntax>,
-    expectedRawResult: Result<MemberLookupResult<Character>, TestTypeResolutionFailure>,
+    expectedRawResult: Result<ResolvedType<Character>, TestTypeResolutionFailure>,
     markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool,
@@ -313,7 +313,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
     }
 
     // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
-    let actualRawResult: Result<MemberLookupResult<ResolvedNominalTypeReference>, TypeResolver.Failure>
+    let actualRawResult: Result<ResolvedType<ResolvedNominalTypeReference>, TypeResolver.Failure>
     do {
       var typeResolver = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
       actualRawResult = typeResolver.resolveSyntax(typeSyntax: typeSyntax)
@@ -461,7 +461,7 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     )
   }
   mutating func appendInterpolation(
-    result: Result<MemberLookupResult<Character>, TestTypeResolutionFailure>,
+    result: Result<ResolvedType<Character>, TestTypeResolutionFailure>,
     file: StaticString = #file,
     line: UInt = #line
   ) {
@@ -475,7 +475,7 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     appendInterpolation(result: Result.failure(failure), file: file, line: line)
   }
   mutating func appendInterpolation(
-    type: MemberLookupResult<Character>,
+    type: ResolvedType<Character>,
     file: StaticString = #file,
     line: UInt = #line
   ) {
@@ -486,7 +486,7 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    appendInterpolation(type: MemberLookupResult.memberResults(markers), file: file, line: line)
+    appendInterpolation(type: ResolvedType.nominalTypes(markers), file: file, line: line)
   }
   mutating func appendInterpolation(
     nominal marker: Character,

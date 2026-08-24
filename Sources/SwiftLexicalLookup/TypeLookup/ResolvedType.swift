@@ -15,14 +15,15 @@ import SwiftSyntax
 /// The type result of structural type resolution. `Result`
 /// represents a nominal type.
 @_spi(_QualifiedLookupTests)
-public indirect enum MemberLookupResult<Result> {
+public indirect enum ResolvedType<NominalType> {
   case function(argumentCount: Int)
   case tuple(labels: [Identifier?])
-  case memberResults([Result])
+  /// Either a single type or a composition of protocols/classes.
+  case nominalTypes([NominalType])
   case anyType
-  case metatype(base: MemberLookupResult)
+  case metatype(base: ResolvedType)
 
-  public func mapMembers<NewResult>(_ transform: (Result) -> NewResult) -> MemberLookupResult<NewResult> {
+  public func mapMembers<NewResult>(_ transform: (NominalType) -> NewResult) -> ResolvedType<NewResult> {
     switch self {
     case .function(let argumentCount):
       return .function(argumentCount: argumentCount)
@@ -32,21 +33,21 @@ public indirect enum MemberLookupResult<Result> {
       return .anyType
     case .metatype(let base):
       return .metatype(base: base.mapMembers(transform))
-    case .memberResults(let results):
-      return .memberResults(results.map(transform))
+    case .nominalTypes(let results):
+      return .nominalTypes(results.map(transform))
     }
   }
 }
 
 // MARK: Conformances
 
-extension MemberLookupResult: Sendable where Result: Sendable {}
-extension MemberLookupResult: Equatable where Result: Equatable {}
-extension MemberLookupResult: Hashable where Result: Hashable {}
+extension ResolvedType: Sendable where NominalType: Sendable {}
+extension ResolvedType: Equatable where NominalType: Equatable {}
+extension ResolvedType: Hashable where NominalType: Hashable {}
 
 // MARK: Debug Description
 
-extension MemberLookupResult where Result == String {
+extension ResolvedType where NominalType == String {
   @_spi(_QualifiedLookupTests)
   public var _debugDescription: String {
     switch self {
@@ -58,14 +59,14 @@ extension MemberLookupResult where Result == String {
       return ".anyType"
     case .metatype(let base):
       return ".metatype(base: \(base.debugDescription)"
-    case .memberResults(let members):
+    case .nominalTypes(let members):
       return ".memberResults([\(members.joined(separator: ", "))])"
     }
   }
 }
 
 @_spi(_QualifiedLookupTests)
-extension MemberLookupResult: CustomDebugStringConvertible where Result: CustomDebugStringConvertible {
+extension ResolvedType: CustomDebugStringConvertible where NominalType: CustomDebugStringConvertible {
   public var debugDescription: String {
     mapMembers(\.debugDescription)._debugDescription
   }

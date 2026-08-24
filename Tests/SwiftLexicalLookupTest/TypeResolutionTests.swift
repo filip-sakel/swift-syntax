@@ -81,7 +81,7 @@ final class TypeResolutionTests: XCTestCase {
       \("🟥", name: "_(MyFile.swift)::A")
       struct A {}
 
-      func f(_: \(type: .metatype(base: .memberResults(["🟥"])))A.Type)
+      func f(_: \(type: .metatype(base: .nominalTypes(["🟥"])))A.Type)
 
       // Named opaque return types
       func g() -> <T> \(nominals: [])T { 1 }
@@ -276,7 +276,7 @@ final class TypeResolutionTests: XCTestCase {
         "MyFile.swift": """
         \(interpolation: baseSourceInterpolation)
 
-        let _: \(failure: .noTypeMember(member: memberT, in: .memberResults(["🟩"])))A.T
+        let _: \(failure: .noTypeMember(member: memberT, in: .nominalTypes(["🟩"])))A.T
         """
       ],
       buildConfiguration: flagsConfig(["FlagB"]),
@@ -465,7 +465,7 @@ final class TypeResolutionTests: XCTestCase {
 
         typealias C = \(failure: .invalidComposition([
           ("((A, B) -> Int)", .other(PartialTypeResolutionFailure.functionType)),
-          ("A", .cannotComposeNonClassOrProtocol(resolved: .memberResults(["🟥"]))),
+          ("A", .cannotComposeNonClassOrProtocol(resolved: .nominalTypes(["🟥"]))),
         ]))
         ((A, B) -> Int) & A
         """ as LexicalLookupSource
@@ -518,11 +518,11 @@ final class TypeResolutionTests: XCTestCase {
       struct B {}
 
       // Tuples, functions, and metatypes don't have type members
-      var x: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.tuple(labels: [nil, nil])))
+      var x: \(failure: .noTypeMember(member: myTypeMember, in: ResolvedType.tuple(labels: [nil, nil])))
              (A, B).MyType
       var y: \(failure: .other(PartialTypeResolutionFailure.functionType))
              ((A) -> B).MyType
-      var z: \(failure: .noTypeMember(member: myTypeMember, in: MemberLookupResult.metatype(base: .memberResults(["🟩"]))))
+      var z: \(failure: .noTypeMember(member: myTypeMember, in: ResolvedType.metatype(base: .nominalTypes(["🟩"]))))
              A.Type.MyType
       """ as LexicalLookupSource
     ])
@@ -593,7 +593,7 @@ final class TypeResolutionTests: XCTestCase {
       typealias Metatype = ProtoA.Type
       \(extensionState: GenericExtensionState(
         dependencies: [],
-        resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .metatype(base: .memberResults(["🟥"]))))
+        resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .metatype(base: .nominalTypes(["🟥"]))))
       ))
       extension Metatype {}
 
@@ -620,7 +620,7 @@ final class TypeResolutionTests: XCTestCase {
 
       \(extensionState: GenericExtensionState(
         dependencies: [],
-        resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .memberResults([
+        resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .nominalTypes([
           "🟥", "🟪"
         ])))
       ))
@@ -1044,11 +1044,11 @@ final class TypeResolutionTests: XCTestCase {
   //       //   static func makeSelf() -> \(references: "🟥")Self {}
   //       //   static func makeB() -> \(references: "🟩")B {}
   //       //
-  //       //   static func invalidRefToC() -> \(result: .memberResults([]))C {}
+  //       //   static func invalidRefToC() -> \(result: .nominalTypes([]))C {}
   //       // }
   //       //
   //       // func anonymousScope() {
-  //       //   var a: \(result: .memberResults([]))Self
+  //       //   var a: \(result: .nominalTypes([]))Self
   //       //
   //       //   🟨struct A {
   //       //     subscript(a: \(references: "🟨")A) -> \(references: "🟨")Self { a }
@@ -1059,8 +1059,8 @@ final class TypeResolutionTests: XCTestCase {
   //       // }
   //       //
   //       // \(references: "🟥")A
-  //       // \(result: .memberResults([]))B
-  //       // \(result: .memberResults([]))D
+  //       // \(result: .nominalTypes([]))B
+  //       // \(result: .nominalTypes([]))D
   //       // """ as LexicalLookupSource
   //   ])
   // }
