@@ -76,21 +76,12 @@ public struct TypeResolver {
 
   /// Gets the module of an an attached node. Assumes the file is registered;
   /// traps otherwise.
-  func extractModule<S: SyntaxProtocol>(syntax: Attached<S>) -> ModuleName {
-    guard let module = symbolTable.moduleMap[syntax.fileRoot] else {
+  func extractFileInfo<S: SyntaxProtocol>(syntax: Attached<S>) -> FileInfo {
+    guard let fileInfo = symbolTable.getFileInfo(syntax.fileRoot) else {
       // Should be checked upon entrance in `resolveSyntax`
       fatalError("[SwiftLexicalLookup] Internal error: Unexpectedly found unregistered file: ```\(syntax.fileRoot)```")
     }
-    return module
-  }
-  /// Gets the configured regions of an an attached node's file. Assumes the
-  /// file is registered; traps otherwise.
-  func extractConfiguredRegions<S: SyntaxProtocol>(syntax: Attached<S>) -> ConfiguredRegions? {
-    guard case .success(let fileConfiguredRegions) = symbolTable.getConfiguredRegions(forFile: syntax.fileRoot) else {
-      // Should be checked upon entrance in `resolveSyntax`
-      fatalError("[SwiftLexicalLookup] Internal error: Unexpectedly found unregistered file: ```\(syntax.fileRoot)```")
-    }
-    return fileConfiguredRegions
+    return fileInfo
   }
 }
 
@@ -135,14 +126,11 @@ extension TypeResolver {
     defer { visitedTypeSyntax.remove(typeSyntax) }
 
     // We assert the file root is registered in the symbol table.
-    guard
-      symbolTable.moduleMap[typeSyntax.fileRoot] != nil,
-      case .success(let fileConfiguredRegions) = symbolTable.getConfiguredRegions(forFile: typeSyntax.fileRoot)
-    else {
+    guard let fileInfo = symbolTable.getFileInfo(typeSyntax.fileRoot) else {
       return .failure(Failure.syntaxNotInSymbolTable(typeSyntax.fileRoot))
     }
     // Further, if given `configuredRegions`, ensure the given syntax is active.
-    if let fileConfiguredRegions,
+    if let fileConfiguredRegions = fileInfo.configuredRegions,
       fileConfiguredRegions.isActive(typeSyntax.node) != .active
     {
       return .failure(Failure.syntaxInDisabledRegion)
@@ -378,7 +366,7 @@ extension TypeResolver {
       // Scoped unqualified lookup in this module
       lookupResults = typeComponent.introducingSyntax.findUnqualifiedType(
         typeComponent.name,
-        configuredRegions: extractConfiguredRegions(syntax: typeComponent.introducingSyntax)
+        configuredRegions: extractFileInfo(syntax: typeComponent.introducingSyntax).configuredRegions
       )
     }
 
@@ -618,7 +606,7 @@ extension TypeResolver {
     // Perform direct type lookup and mark dependency
     //
     // First, get the module
-    let introducingModule = extractModule(syntax: memberIntroducingSyntax)
+    let introducingModule = extractFileInfo(syntax: memberIntroducingSyntax).module
     // Look up
     let memberTypeDeclsResult:
       Result<
@@ -690,18 +678,17 @@ extension TypeResolver {
     }
 
     // Extract file info
-    let file = nominalDecl.fileRoot
-    let module = extractModule(syntax: nominalDecl)
-    let declFileConfiguredRegions = extractConfiguredRegions(syntax: nominalDecl)
+    let declFile = nominalDecl.fileRoot
+    let declFileInfo = extractFileInfo(syntax: nominalDecl)
 
     switch declContext {
     case .codeBlock(let codeBlockScope):
-      let isGlobal: Bool = codeBlockScope.node == file.statements
+      let isGlobal: Bool = codeBlockScope.node == declFile.statements
 
       // Gather type decls with the same name
       var scopeTypeDecls = [TypeDeclSyntax]()
       codeBlockScope.node._visitDirectMembers(
-        configuredRegions: extractConfiguredRegions(syntax: codeBlockScope),
+        configuredRegions: extractFileInfo(syntax: codeBlockScope).configuredRegions,
         visit: { valueDecl in
           guard
             let typeDecl = valueDecl.as(TypeDeclSyntax.self),
@@ -729,8 +716,7 @@ extension TypeResolver {
         symbolTable.registerNominalType(
           topScopeMainDecl: nominalDecl,
           declName: declName,
-          declFileConfiguredRegions: declFileConfiguredRegions,
-          declModule: module,
+          declFileInfo: declFileInfo,
           isGlobal: isGlobal,
           originatingSyntax: originatingSyntax
         ) as Result<ResolvedTypeSyntax, TypeGraph.NominalRegistrationFailure>
@@ -808,8 +794,7 @@ extension TypeResolver {
         symbolTable.registerNominalType(
           nestedMainDecl: nominalDecl,
           declName: declName,
-          declFileConfiguredRegions: declFileConfiguredRegions,
-          declModule: module,
+          declFileInfo: declFileInfo,
           baseDeclGroup: declGroupParent,
           baseType: baseType,
           originatingSyntax: originatingSyntax

@@ -21,6 +21,31 @@ private import SwiftDiagnostics
 import SwiftDiagnostics
 #endif
 
+extension SymbolTable {
+  /// Sorts results in increasing order by
+  /// (a) Module name (alphabetically), (b) File id (alphabetically), and (c) File position (offset).
+  ///
+  /// Helps maintain deterministic outputs.
+  func sortDeclarations(_ typeDecls: [Attached<TypeDeclSyntax>]) -> [Attached<TypeDeclSyntax>] {
+    typeDecls.sorted(by: { a, b in
+      // Compare modules
+      let fileA = getFileInfo(a.fileRoot)!
+      let fileB = getFileInfo(b.fileRoot)!
+      guard fileA.module == fileA.module else {
+        return fileA.module.name < fileA.module.name
+      }
+
+      // If modules are equal, compare file names
+      guard fileA.name == fileB.name else {
+        return fileA.name < fileB.name
+      }
+
+      // If file names are equal, compare positions
+      return a.position < b.position
+    })
+  }
+}
+
 extension Array {
   /// Appends if the array has no duplicates using the given key
   private mutating func _indexAfterInsertingUnique<Key: Equatable, Value>(
@@ -511,7 +536,6 @@ extension TypeGraph {
     baseType: NominalTypeRef,
     memberTypeName: Identifier,
     origin: (typeSyntax: Attached<TypeLikeSyntax>, module: ModuleName),
-    moduleMap: [SourceFileSyntax: ModuleName],
     dependencyTracker: inout DependencyTracker,
     symbolTable: borrowing SymbolTable
   ) -> Result<
@@ -524,18 +548,14 @@ extension TypeGraph {
     case .global(let globalReference):
       baseTypeReference = globalReference
     case .local(let nominalTypeDecl):
-      guard
-        case .success(let declFileConfiguredRegions) = symbolTable.getConfiguredRegions(
-          forFile: nominalTypeDecl.fileRoot
-        )
-      else {
+      guard let declFileInfo = symbolTable.getFileInfo(nominalTypeDecl.fileRoot) else {
         return .failure(QualifiedTypeLookupFailure.unregisteredFileRoot(nominalTypeDecl.fileRoot))
       }
       // TODO: Directly collect members, rather than building hash map & then getting specific member
       //
       // Local decls don't have extensions (=> no dependencies generated); just
       // look into the main declaration.
-      let groupedTypeMembers = nominalTypeDecl._groupTypeMembers(configuredRegions: declFileConfiguredRegions)
+      let groupedTypeMembers = nominalTypeDecl._groupTypeMembers(configuredRegions: declFileInfo.configuredRegions)
       let typeMembers = groupedTypeMembers[memberTypeName, default: []]
       return .success(
         typeMembers.map({ (declGroupParent: Attached<DeclGroupSyntaxType>(nominalTypeDecl), typeDecl: $0) })
@@ -568,7 +588,7 @@ extension TypeGraph {
       func organizeDeclGroup(_ declGroup: MappedDeclGroup<DeclGroupSyntaxType>) {
         if declGroup.fileRoot == origin.typeSyntax.fileRoot {
           fileDecls.append(declGroup)
-        } else if moduleMap[declGroup.fileRoot] == origin.module {
+        } else if symbolTable.getFileInfo(declGroup.fileRoot)?.module == origin.module {
           otherInternalDecls.append(declGroup)
         } else {
           externalDecls.append(declGroup)
@@ -641,8 +661,7 @@ extension TypeGraph {
   mutating func registerNominalType(
     topScopeMainDecl mainDecl: Attached<NominalTypeDeclSyntax>,
     declName: Identifier,
-    declFileConfiguredRegions: ConfiguredRegions?,
-    declModule: ModuleName,
+    declFileInfo: FileInfo,
     isGlobal: Bool,
     symbolTable: borrowing SymbolTable
   ) -> Result<NominalTypeRef, NominalRegistrationFailure> {
@@ -655,14 +674,14 @@ extension TypeGraph {
       component: GlobalTypeName.Component(
         name: declName,
         file: mainDecl.fileRoot,
-        module: declModule,
+        module: declFileInfo.module,
         symbolTable: symbolTable
       )
     )
 
     return _admitNominalType(
       globalDecl: mainDecl,
-      declFileConfiguredRegions: declFileConfiguredRegions,
+      declFileConfiguredRegions: declFileInfo.configuredRegions,
       globalTypeName: globalName
     )
   }
@@ -679,8 +698,7 @@ extension TypeGraph {
   mutating func registerNominalType(
     nestedMainDecl mainDecl: Attached<NominalTypeDeclSyntax>,
     declName: Identifier,
-    declFileConfiguredRegions: ConfiguredRegions?,
-    declModule: ModuleName,
+    declFileInfo: FileInfo,
     baseDeclGroup: Attached<DeclGroupSyntaxType>,
     baseType: NominalTypeRef,
     symbolTable: borrowing SymbolTable
@@ -710,7 +728,7 @@ extension TypeGraph {
       GlobalTypeName.Component(
         name: declName,
         file: mainDecl.fileRoot,
-        module: declModule,
+        module: declFileInfo.module,
         symbolTable: symbolTable
       )
     )
@@ -749,7 +767,7 @@ extension TypeGraph {
 
     return _admitNominalType(
       globalDecl: mainDecl,
-      declFileConfiguredRegions: declFileConfiguredRegions,
+      declFileConfiguredRegions: declFileInfo.configuredRegions,
       globalTypeName: globalName
     ).mapError(NestedNominalRegistrationFailure.other)
   }
@@ -1441,7 +1459,7 @@ extension TypeGraph {
       log("Skipping already invalidated extension `\(extensionDecl._memberlessDescription)`")
       return nil
     }
-    guard let extensionDeclModule = symbolTable.moduleMap[extensionDecl.fileRoot] else {
+    guard let extensionDeclModule = symbolTable.getFileInfo(extensionDecl.fileRoot)?.module else {
       fatalError(
         "[SwiftLexicalLookup] Internal error: Unexpectedly found admitted extension `\(extensionDecl._memberlessDescription)` whose source file is unregistered in the symbol table."
       )

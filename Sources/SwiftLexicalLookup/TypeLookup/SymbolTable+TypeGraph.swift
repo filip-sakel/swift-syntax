@@ -20,12 +20,12 @@ extension SymbolTable {
     var result = [SourceFileSyntax: OrderedSet<Attached<ExtensionDeclSyntax>>]()
     for (_, files) in moduleToSources {
       for (_, file) in files {
-        guard case .success(let fileConfiguredRegions) = getConfiguredRegions(forFile: file) else {
+        guard let fileInfo = getFileInfo(file) else {
           fatalError(
             "[SwiftLexicalLookup] Internal error: Unexpectedly cannot get configured regions for registered file."
           )
         }
-        result[file] = file.findExtensions(configuredRegions: fileConfiguredRegions)
+        result[file] = file.findExtensions(configuredRegions: fileInfo.configuredRegions)
       }
     }
     return result
@@ -39,16 +39,14 @@ extension SymbolTable {
   func registerNominalType(
     topScopeMainDecl: Attached<NominalTypeDeclSyntax>,
     declName: Identifier,
-    declFileConfiguredRegions: ConfiguredRegions?,
-    declModule: ModuleName,
+    declFileInfo: FileInfo,
     isGlobal: Bool,
     originatingSyntax: Attached<TypeLikeSyntax>
   ) -> Result<ResolvedTypeSyntax, TypeGraph.NominalRegistrationFailure> {
     return typeGraph.registerNominalType(
       topScopeMainDecl: topScopeMainDecl,
       declName: declName,
-      declFileConfiguredRegions: declFileConfiguredRegions,
-      declModule: declModule,
+      declFileInfo: declFileInfo,
       isGlobal: isGlobal,
       symbolTable: self
     ).map({ nominalRef in
@@ -62,8 +60,7 @@ extension SymbolTable {
   func registerNominalType(
     nestedMainDecl: Attached<NominalTypeDeclSyntax>,
     declName: Identifier,
-    declFileConfiguredRegions: ConfiguredRegions?,
-    declModule: ModuleName,
+    declFileInfo: FileInfo,
     baseDeclGroup: Attached<DeclGroupSyntaxType>,
     baseType: ResolvedTypeSyntax,
     originatingSyntax: Attached<TypeLikeSyntax>
@@ -71,8 +68,7 @@ extension SymbolTable {
     return typeGraph.registerNominalType(
       nestedMainDecl: nestedMainDecl,
       declName: declName,
-      declFileConfiguredRegions: declFileConfiguredRegions,
-      declModule: declModule,
+      declFileInfo: declFileInfo,
       baseDeclGroup: baseDeclGroup,
       baseType: baseType.type,
       symbolTable: self
@@ -127,16 +123,13 @@ extension SymbolTable {
     verbose: Bool
   ) -> Result<BindingResult, ExtensionBindingFailure> {
     // Get extension module and its file's configured regions
-    guard
-      let module = moduleMap[extensionDecl.fileRoot],
-      case .success(let fileConfiguredRegions) = getConfiguredRegions(forFile: extensionDecl.fileRoot)
-    else {
+    guard let fileInfo = getFileInfo(extensionDecl.fileRoot) else {
       return .failure(ExtensionBindingFailure.nonRegisteredSyntaxRoot)
     }
     let admissionResult = typeGraph.admitExtension(
       extensionDecl,
-      extensionDeclModule: module,
-      extensionFileConfiguredRegions: fileConfiguredRegions,
+      extensionDeclModule: fileInfo.module,
+      extensionFileConfiguredRegions: fileInfo.configuredRegions,
       to: result,
       dependencyTracker: dependencies,
       symbolTable: self
@@ -490,9 +483,11 @@ extension SymbolTable {
     [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)],
     TypeGraph.QualifiedTypeLookupFailure
   > {
+    // Assert we have the right module
+    let fileModule = getFileInfo(introducingTypeSyntax.fileRoot)?.module
     assert(
-      moduleMap[introducingTypeSyntax.fileRoot] == introducingModule,
-      "[SwiftLexicalLookup] Internal error: Caller passed wrong module for `\(introducingTypeSyntax.trimmedDescription)`: got '\(introducingModule.name)' but expected \(moduleMap[introducingTypeSyntax.fileRoot].debugDescription)"
+      fileModule == introducingModule,
+      "[SwiftLexicalLookup] Internal error: Caller passed wrong module for `\(introducingTypeSyntax.trimmedDescription)`: got '\(introducingModule.name)' but expected \(fileModule?.name ?? "nil")"
     )
 
     // TODO: Remove
@@ -509,7 +504,6 @@ extension SymbolTable {
       baseType: baseType,
       memberTypeName: memberTypeName,
       origin: (typeSyntax: introducingTypeSyntax, module: introducingModule),
-      moduleMap: moduleMap,
       dependencyTracker: &dependencyTracker,
       symbolTable: self
     )

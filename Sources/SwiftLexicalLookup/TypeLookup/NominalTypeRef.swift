@@ -80,8 +80,8 @@ extension GlobalTypeName.Component {
     symbolTable: borrowing SymbolTable
   ) {
     assert(
-      symbolTable.moduleMap[file] == module,
-      "[SwiftLexicalLookup] Internal error: File registered under '\(symbolTable.moduleMap[file]?.name ?? "nil")', and not the given module '\(module.name)'"
+      symbolTable.getFileInfo(file)?.module == module,
+      "[SwiftLexicalLookup] Internal error: File registered under '\(symbolTable.getFileInfo(file)?.module.name ?? "nil")', and not the given module '\(module.name)'"
     )
 
     self.init(

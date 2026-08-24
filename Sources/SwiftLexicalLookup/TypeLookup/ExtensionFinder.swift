@@ -140,28 +140,25 @@ extension SymbolTable {
       // TODO: Convert to array
   ) -> OrderedSet<Attached<ExtensionDeclSyntax>> {
     func extractConfiguredRegions(file: SourceFileSyntax) -> ConfiguredRegions? {
-      switch getConfiguredRegions(forFile: file) {
-      case .success(let success):
-        return success
-      case .failure(.unregisteredFileRoot):
+      guard let fileInfo = getFileInfo(file) else {
         fatalError(
           "[SwiftLexicalLookup] Internal error: Unexpectedly couldn't find configured regions for file: \(file.trimmedDescription)"
         )
       }
+      return fileInfo.configuredRegions
     }
 
-    // TODO: This should be imported *decls*, e.g., import struct Swift.Int
-    let lookupFileConfiguredRegions = extractConfiguredRegions(file: lookupFile)
-    let imports = lookupFile.findImportDecls(using: lookupFileConfiguredRegions)
-    let importedModules = imports.flatMap({ $0.path.compactMap({ Identifier(validating: $0.name) }) })
-
-    guard let lookupModule = self.moduleMap[lookupFile] else {
+    guard let lookupFileInfo = self.getFileInfo(lookupFile) else {
       // TODO: Handle error
       fatalError(
         "[SwiftLexicalLookup] Internal error: Unexpectedly couldn't find lookup file in symbol table's module map."
       )
     }
-    guard let internalSources = moduleToSources[lookupModule] else {
+    // TODO: This should be imported *decls*, e.g., import struct Swift.Int
+    let imports = lookupFile.findImportDecls(using: lookupFileInfo.configuredRegions)
+    let importedModules = imports.flatMap({ $0.path.compactMap({ Identifier(validating: $0.name) }) })
+
+    guard let internalSources = moduleToSources[lookupFileInfo.module] else {
       // TODO: Handle error
       fatalError(
         "[SwiftLexicalLookup] Internal error: Unexpectedly couldn't find lookup file for a given lookup module."
@@ -169,7 +166,7 @@ extension SymbolTable {
     }
 
     // Look in file
-    var results = lookupFile.findExtensions(configuredRegions: lookupFileConfiguredRegions)
+    var results = lookupFile.findExtensions(configuredRegions: lookupFileInfo.configuredRegions)
     // Look in this module
     for file in internalSources.values where file != lookupFile {
       results.formUnion(file.findExtensions(configuredRegions: extractConfiguredRegions(file: file)))
