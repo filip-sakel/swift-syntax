@@ -16,14 +16,20 @@ import SwiftSyntax
 /// represents a nominal type.
 @_spi(_QualifiedLookupTests)
 public indirect enum ResolvedType<NominalType> {
+  /// E.g. `(A) -> ()`
   case function(argumentCount: Int)
+  /// E.g. `(a: A, _: B)`
   case tuple(labels: [Identifier?])
   /// Either a single type or a composition of protocols/classes.
   case nominalTypes([NominalType])
+  /// `Any` or suppressed types like `~Copyable`
   case anyType
+  /// E.g. `A.Type`, `((A, B).Type).Type`
   case metatype(base: ResolvedType)
 
-  public func mapMembers<NewResult>(_ transform: (NominalType) -> NewResult) -> ResolvedType<NewResult> {
+  public func mapNominals<NewNominalType>(
+    _ transform: (NominalType) -> NewNominalType
+  ) -> ResolvedType<NewNominalType> {
     switch self {
     case .function(let argumentCount):
       return .function(argumentCount: argumentCount)
@@ -32,7 +38,7 @@ public indirect enum ResolvedType<NominalType> {
     case .anyType:
       return .anyType
     case .metatype(let base):
-      return .metatype(base: base.mapMembers(transform))
+      return .metatype(base: base.mapNominals(transform))
     case .nominalTypes(let results):
       return .nominalTypes(results.map(transform))
     }
@@ -60,7 +66,7 @@ extension ResolvedType where NominalType == String {
     case .metatype(let base):
       return ".metatype(base: \(base.debugDescription)"
     case .nominalTypes(let members):
-      return ".memberResults([\(members.joined(separator: ", "))])"
+      return ".nominalTypes([\(members.joined(separator: ", "))])"
     }
   }
 }
@@ -68,7 +74,7 @@ extension ResolvedType where NominalType == String {
 @_spi(_QualifiedLookupTests)
 extension ResolvedType: CustomDebugStringConvertible where NominalType: CustomDebugStringConvertible {
   public var debugDescription: String {
-    mapMembers(\.debugDescription)._debugDescription
+    mapNominals(\.debugDescription)._debugDescription
   }
 }
 

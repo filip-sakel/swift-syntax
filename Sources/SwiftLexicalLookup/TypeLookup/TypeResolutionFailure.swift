@@ -200,11 +200,11 @@ extension TypeResolutionFailure {
     case .cyclicalExtensionDependency(let cycle):
       return .cyclicalExtensionDependency(cycle._map(mapName: mapName))
     case .cannotComposeNonClassOrProtocol(let type):
-      return .cannotComposeNonClassOrProtocol(resolved: type.mapMembers(mapNominal))
+      return .cannotComposeNonClassOrProtocol(resolved: type.mapNominals(mapNominal))
     case .noTypeMember(let member, let type):
-      return .noTypeMember(member: member, in: type.mapMembers(mapNominal))
+      return .noTypeMember(member: member, in: type.mapNominals(mapNominal))
     case .cannotExtendNonNominal(let nonnominal):
-      return .cannotExtendNonNominal(nonnominal: nonnominal.mapMembers(mapNominal))
+      return .cannotExtendNonNominal(nonnominal: nonnominal.mapNominals(mapNominal))
     case .invalidAliasedType(let nestedFailure):
       return .invalidAliasedType(mapNested(nestedFailure))
     case .invalidComposition(let invalidChildren):

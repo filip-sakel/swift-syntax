@@ -323,14 +323,14 @@ extension TypeResolutionMatcher: LexicalMatcher {
     var failures = [ExpectationFailure]()
     switch (expectedRawResult, actualRawResult) {
     case (.success(let expectedType), .success(let actualType)):
-      let expectedTypeDescription: String = expectedType.mapMembers({ marker -> String in
+      let expectedTypeDescription: String = expectedType.mapNominals({ marker -> String in
         guard let targetDefinition = markersToDefinitions[marker] else {
           failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
           return ""
         }
         return targetDefinition.annotation.description
       })._debugDescription
-      let actualTypeDescription: String = actualType.mapMembers({ nominalType -> String in
+      let actualTypeDescription: String = actualType.mapNominals({ nominalType -> String in
         guard let targetDefinition = syntaxToDefinitions[nominalType.type.mainDecl.node] else {
           failures.append(
             ExpectationFailure.resultReferencesUnmarkedSyntax(
