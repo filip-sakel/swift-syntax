@@ -283,6 +283,28 @@ public typealias ExtensionBindingCycle = GenericExtensionBindingCycle<
 
 // MARK: Debug
 
+@_spi(_QualifiedLookupTests)
+extension GenericDependencyCycleElement: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    "DependencyCycleElement(introducingTypeDecl: `\(introducingTypeDecl?._memberlessDescription ?? "nil")`, extensionDecl: `\(extensionDecl._memberlessDescription)`, boundType: '\(boundType.debugDescription)'"
+  }
+}
+
+@_spi(_QualifiedLookupTests)
+extension GenericExtensionBindingCycle: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    let pathDescriptions = dependencyPath.map(\.debugDescription).joined(separator: ",\n    ")
+    return """
+      ExtensionBindingCycle(
+        dependencyPath: [
+          \(pathDescriptions)
+        ],
+        dependencyMember: '\(dependencyMember.name)'
+      )"
+      """
+  }
+}
+
 extension TypeResolutionFailure where TypeName == String, NominalType == String {
   /// Debug description
   ///

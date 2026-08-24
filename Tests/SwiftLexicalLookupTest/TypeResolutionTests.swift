@@ -11,8 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 import SwiftIfConfig
-@_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) @_spi(Experimental) import SwiftLexicalLookup
-import SwiftParser
+@_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) import SwiftLexicalLookup
 import SwiftSyntax
 import XCTest
 

@@ -73,6 +73,13 @@ import SwiftSyntax
     self.moduleToSources = moduleToSources
     self.buildConfiguration = buildConfiguration
   }
+
+  public func resolveSyntax(
+    typeSyntax: Attached<TypeSyntax>
+  ) -> TypeResolver.TypeResult<ResolvedType<ResolvedTypeSyntax>> {
+    var typeResolver = TypeResolver(symbolTable: self, _verbose: _verbose)
+    return typeResolver.resolveSyntax(typeSyntax: typeSyntax)
+  }
 }
 
 extension SymbolTable {

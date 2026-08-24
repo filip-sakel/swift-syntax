@@ -11,7 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 import SwiftIfConfig
-@_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) @_spi(Experimental) import SwiftLexicalLookup
+@_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) import SwiftLexicalLookup
 import SwiftParser
 import SwiftSyntax
 import XCTest
@@ -313,11 +313,9 @@ extension TypeResolutionMatcher: LexicalMatcher {
     }
 
     // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
-    let actualRawResult: Result<ResolvedType<ResolvedTypeSyntax>, TypeResolver.Failure>
-    do {
-      var typeResolver = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
-      actualRawResult = typeResolver.resolveSyntax(typeSyntax: typeSyntax)
-    }
+    let actualRawResult: TypeResolver.TypeResult<ResolvedType<ResolvedTypeSyntax>> = symbolTable.resolveSyntax(
+      typeSyntax: typeSyntax
+    )
 
     // Assert output
     var failures = [ExpectationFailure]()
