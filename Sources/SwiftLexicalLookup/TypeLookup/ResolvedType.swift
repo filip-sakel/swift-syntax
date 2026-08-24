@@ -45,6 +45,53 @@ extension ResolvedType: Sendable where NominalType: Sendable {}
 extension ResolvedType: Equatable where NominalType: Equatable {}
 extension ResolvedType: Hashable where NominalType: Hashable {}
 
+// MARK: ResolvedTypeSyntax
+
+/// A resolved type syntax consists of a resolved type and the syntax that was resolved.
+@_spi(_QualifiedLookup)
+public struct GenericResolvedTypeSyntax<ResolvedType: Sendable & Hashable & CustomDebugStringConvertible>:
+  Sendable, CustomDebugStringConvertible
+{
+  public let type: ResolvedType
+  public let syntax: Attached<TypeLikeSyntax>
+
+  @_spi(_QualifiedLookupTests) public init(
+    type: ResolvedType,
+    syntax: Attached<TypeLikeSyntax>,
+  ) {
+    self.type = type
+    self.syntax = syntax
+  }
+
+  public var debugDescription: String {
+    type.debugDescription
+  }
+}
+/// The default resolved type syntax: a `NominalTypeRef` and the syntax that was resolved.
+@_spi(_QualifiedLookup)
+public typealias ResolvedTypeSyntax = GenericResolvedTypeSyntax<NominalTypeRef>
+
+extension GenericResolvedTypeSyntax where ResolvedType == NominalTypeRef {
+  var _succinctDescription: String {
+    switch type.storage {
+    case .global(let global):
+      return global.name.debugDescription
+    case .local(let nominalDecl):
+      return nominalDecl._memberlessDescription
+    }
+  }
+}
+
+extension ResolvedTypeSyntax {
+  /// Map from a `GlobalNominalTypeRef` to a `NominalTypeRef`
+  init(globalTypeReference: GenericResolvedTypeSyntax<GlobalNominalTypeRef>) {
+    self.init(
+      type: NominalTypeRef(globalReference: globalTypeReference.type),
+      syntax: globalTypeReference.syntax
+    )
+  }
+}
+
 // MARK: Debug Description
 
 extension ResolvedType where NominalType == String {
