@@ -21,6 +21,8 @@ private import SwiftDiagnostics
 import SwiftDiagnostics
 #endif
 
+// MARK: NominalTypeRef
+
 /// A global type name, `Swift::Int._(MyFileA.swift)::MyType`.
 ///
 /// ### File-Name Specifier
@@ -59,9 +61,6 @@ public struct GlobalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
   /// A component of a qualified type name, external or internal. For instance,
   /// `Swift::Int` (external) and `_(FileA.swift)::MyType` (internal).
   public struct Component: Sendable, Hashable, CustomDebugStringConvertible {
-    // TODO: Consider using the module identifier instead and just always
-    // keep track of the file? But is that actually useful in the compilation model?
-    // I.e. Would we be performing lookup on a different module?
     let qualifier: Qualifier
     let name: Identifier
     let debugFileMap: DebugFileMap
@@ -123,10 +122,6 @@ public struct GlobalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
   fileprivate init(component: Component) {
     // Force unwrap because we provide non-empty components.
     self.init(_components: [component])!
-
-    // TODO: Remove
-    // // Maintains the invariant of `components.component >= 1`
-    // self.components = [component]
   }
 
   var baseComponent: Component {
@@ -158,6 +153,58 @@ public struct GlobalTypeName: Sendable, Hashable, CustomDebugStringConvertible {
     return components.map(\.debugDescription).joined(separator: ".")
   }
 }
+
+@_spi(_QualifiedLookupTests)
+public struct GlobalNominalTypeRef: Hashable, Sendable, CustomDebugStringConvertible {
+  let name: GlobalTypeName
+  let mainDecl: Attached<NominalTypeDeclSyntax>
+  let _version: Int
+
+  internal init(name: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>, _version: Int) {
+    self.name = name
+    self.mainDecl = mainDecl
+    self._version = _version
+  }
+
+  public var debugDescription: String {
+    return "\(name.debugDescription) (v\(_version), \(mainDecl.kind))"
+  }
+}
+
+@_spi(_QualifiedLookupTests)
+public struct NominalTypeRef: Hashable, Sendable {
+  public enum Storage: Hashable, Sendable {
+    /// Local nominal types cannot be extended
+    case local(Attached<NominalTypeDeclSyntax>)
+    case global(GlobalNominalTypeRef)
+  }
+
+  public let storage: Storage
+
+  init(globalReference: GlobalNominalTypeRef) {
+    storage = .global(globalReference)
+  }
+  init(localNominalType: Attached<NominalTypeDeclSyntax>) {
+    storage = .local(localNominalType)
+  }
+
+  /// The main declaration of this nominal reference
+  ///
+  /// Note: The main declaration helps in three ways:
+  /// 1. To detect if we have a class/protocol for compositions
+  /// 2. To find generic parameters
+  /// 3. Testing if the resovled type match the expected main decl
+  public var mainDecl: Attached<NominalTypeDeclSyntax> {
+    switch storage {
+    case .global(let globalReference):
+      return globalReference.mainDecl
+    case .local(let localDecl):
+      return localDecl
+    }
+  }
+}
+
+// MARK: TypeGraph
 
 extension Array {
   /// Appends if the array has no duplicates using the given key
@@ -629,22 +676,6 @@ public struct TypeGraph {
 }
 @_spi(_QualifiedLookupTests) public typealias DependencyTracker = GenericDependencyTracker<GlobalTypeName>
 
-@_spi(_QualifiedLookupTests) public struct GlobalNominalTypeRef: Hashable, Sendable, CustomDebugStringConvertible {
-  let name: GlobalTypeName
-  let mainDecl: Attached<NominalTypeDeclSyntax>
-  let _version: Int
-
-  internal init(name: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>, _version: Int) {
-    self.name = name
-    self.mainDecl = mainDecl
-    self._version = _version
-  }
-
-  public var debugDescription: String {
-    return "\(name.debugDescription) (v\(_version), \(mainDecl.kind))"
-  }
-}
-
 extension GlobalNominalTypeRef {
   init(
     name: GlobalTypeName,
@@ -654,42 +685,9 @@ extension GlobalNominalTypeRef {
   }
 }
 
-// FIXME: Move to _global_ symbol-table _version
-@_spi(_QualifiedLookupTests) public struct NominalTypeRef: Hashable, Sendable {
-  @_spi(_QualifiedLookupTests) public enum Storage: Hashable, Sendable {
-    /// Local nominal types cannot be extended
-    case local(Attached<NominalTypeDeclSyntax>)
-    case global(GlobalNominalTypeRef)
-  }
-
-  @_spi(_QualifiedLookupTests) public let storage: Storage
-
-  init(globalReference: GlobalNominalTypeRef) {
-    storage = .global(globalReference)
-  }
-  init(localNominalType: Attached<NominalTypeDeclSyntax>) {
-    storage = .local(localNominalType)
-  }
-
-  /// The main declaration of this nominal reference
-  ///
-  /// Note: The main declaration helps in three ways:
-  /// 1. To detect if we have a class/protocol for compositions
-  /// 2. To find generic parameters
-  /// 3. Testing if the resovled type match the expected main decl
-  @_spi(_QualifiedLookupTests)
-  public var mainDecl: Attached<NominalTypeDeclSyntax> {
-    switch storage {
-    case .global(let globalReference):
-      return globalReference.mainDecl
-    case .local(let localDecl):
-      return localDecl
-    }
-  }
-}
-
 extension TypeGraph {
-  @_spi(_QualifiedLookupTests) public enum QualifiedTypeLookupFailure: Error {
+  @_spi(_QualifiedLookupTests)
+  public enum QualifiedTypeLookupFailure: Error {
     /// References non-registered base type
     case invalidBase
     case unregisteredFileRoot(SourceFileSyntax)
