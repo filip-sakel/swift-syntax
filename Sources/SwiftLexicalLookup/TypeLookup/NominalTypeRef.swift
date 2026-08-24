@@ -27,8 +27,8 @@ import SwiftSyntax
 @_spi(_QualifiedLookupTests)
 public struct GlobalTypeName: Sendable, Hashable {
   public enum Qualifier: Sendable, Hashable {
-    case `internal`(fileID: SyntaxIdentifier)
-    case external(moduleName: Identifier)
+    case `internal`(fileID: String)
+    case external(moduleName: String)
   }
   /// A component of a qualified type name, external or internal. For instance,
   /// `Swift::Int` (external) and `_(FileA.swift)::MyType` (internal).
@@ -59,11 +59,11 @@ public struct GlobalTypeName: Sendable, Hashable {
 // MARK: Name Construction
 
 extension GlobalTypeName.Qualifier {
-  fileprivate init(file: SourceFileSyntax, module: Identifier, internalModule: Identifier) {
-    if module == internalModule {
-      self = .internal(fileID: file.id)
+  fileprivate init(file: SourceFileSyntax, fileInfo: FileInfo, internalModule: Identifier) {
+    if fileInfo.module == internalModule {
+      self = .internal(fileID: fileInfo.name)
     } else {
-      self = .external(moduleName: module)
+      self = .external(moduleName: fileInfo.module.name)
     }
   }
 }
@@ -76,18 +76,18 @@ extension GlobalTypeName.Component {
   init(
     name: Identifier,
     file: SourceFileSyntax,
-    module: ModuleName,
+    fileInfo: FileInfo,
     symbolTable: borrowing SymbolTable
   ) {
     assert(
-      symbolTable.getFileInfo(file)?.module == module,
-      "[SwiftLexicalLookup] Internal error: File registered under '\(symbolTable.getFileInfo(file)?.module.name ?? "nil")', and not the given module '\(module.name)'"
+      symbolTable.getFileInfo(file)?.module == fileInfo.module,
+      "[SwiftLexicalLookup] Internal error: File registered under '\(String(describing: symbolTable.getFileInfo(file)))', and not the given file info '\(fileInfo)'"
     )
 
     self.init(
       _uncheckedQualifier: GlobalTypeName.Qualifier(
         file: file,
-        module: module,
+        fileInfo: fileInfo,
         internalModule: symbolTable.moduleName
       ),
       name: name,
@@ -183,15 +183,13 @@ public struct NominalTypeRef: Hashable, Sendable {
 
 // MARK: Debug
 
-extension GlobalTypeName.Qualifier {
-  /// Like `CustomDebugStringConvertible`'s `debugDescription` but accepts
-  /// a `describeFileID` closure to get the file names.
-  fileprivate func _describe(describeFileID: (SyntaxIdentifier) -> String) -> String {
+extension GlobalTypeName.Qualifier: CustomDebugStringConvertible {
+  public var debugDescription: String {
     switch self {
     case .internal(let fileID):
-      "_(\(describeFileID(fileID)))"
+      "_(\(fileID))"
     case .external(let moduleName):
-      "\(moduleName.name)"
+      "\(moduleName)"
     }
   }
 }
@@ -199,8 +197,7 @@ extension GlobalTypeName.Qualifier {
 extension GlobalTypeName.Component: CustomDebugStringConvertible {
   /// E.g. '_(MyFile.swift)::MyType', 'ExternalModule::OtherType'
   public var debugDescription: String {
-    let qualifierDescription = qualifier._describe(describeFileID: debugFileMap.describeFileID(_:))
-    return "\(qualifierDescription)::\(name.name)"
+    "\(qualifier.debugDescription)::\(name.name)"
   }
 }
 

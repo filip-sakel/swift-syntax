@@ -674,7 +674,7 @@ extension TypeGraph {
       component: GlobalTypeName.Component(
         name: declName,
         file: mainDecl.fileRoot,
-        module: declFileInfo.module,
+        fileInfo: declFileInfo,
         symbolTable: symbolTable
       )
     )
@@ -728,7 +728,7 @@ extension TypeGraph {
       GlobalTypeName.Component(
         name: declName,
         file: mainDecl.fileRoot,
-        module: declFileInfo.module,
+        fileInfo: declFileInfo,
         symbolTable: symbolTable
       )
     )
@@ -989,7 +989,7 @@ extension TypeGraph {
 extension TypeGraph {
   fileprivate func _firstRegisteredMemberName(
     declGroup: Attached<DeclGroupSyntaxType>,
-    declGroupModule: ModuleName,
+    declGroupFileInfo: FileInfo,
     declGroupTypeName: GlobalTypeName,
     members: TypeTable,
     symbolTable: SymbolTable
@@ -1000,7 +1000,7 @@ extension TypeGraph {
         GlobalTypeName.Component(
           name: memberName,
           file: declGroup.fileRoot,
-          module: declGroupModule,
+          fileInfo: declGroupFileInfo,
           symbolTable: symbolTable
         )
       )
@@ -1046,7 +1046,7 @@ extension TypeGraph {
 
   fileprivate mutating func _removeExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    extensionDeclModule: ModuleName,
+    extensionFileInfo: FileInfo,
     symbolTable: SymbolTable
   ) -> Result<ExtensionState, ExtensionRemovalFailure> {
     return withLogging(
@@ -1057,7 +1057,7 @@ extension TypeGraph {
         defer { self._introspect(symbolTable: symbolTable, onlyLogIfCorrupted: true) }
         return self.__removeExtension(
           extensionDecl,
-          extensionDeclModule: extensionDeclModule,
+          extensionFileInfo: extensionFileInfo,
           symbolTable: symbolTable
         )
       }
@@ -1068,7 +1068,7 @@ extension TypeGraph {
   /// dependents.
   fileprivate mutating func __removeExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    extensionDeclModule: ModuleName,
+    extensionFileInfo: FileInfo,
     symbolTable: SymbolTable
   ) -> Result<ExtensionState, ExtensionRemovalFailure> {
     // Get state
@@ -1088,7 +1088,7 @@ extension TypeGraph {
       //
       // Get the extension members and the type with the extension unbound
       guard
-        let extensionMembers = extendedType.boundExtensions[extensionDeclModule, default: [:]][extensionDecl]
+        let extensionMembers = extendedType.boundExtensions[extensionFileInfo.module, default: [:]][extensionDecl]
       else {
         return .failure(ExtensionRemovalFailure.resolvedButUnbound(typeName: extendedTypeName))
       }
@@ -1108,7 +1108,7 @@ extension TypeGraph {
       // Ensure all members are unregistered (only happens with nominal-type declarations)
       let memberTypeName: GlobalTypeName? = _firstRegisteredMemberName(
         declGroup: Attached<DeclGroupSyntaxType>(extensionDecl),
-        declGroupModule: extensionDeclModule,
+        declGroupFileInfo: extensionFileInfo,
         declGroupTypeName: extendedTypeName,
         members: extensionMembers,
         symbolTable: symbolTable
@@ -1154,7 +1154,10 @@ extension TypeGraph {
     case .success(let extendedTypeName):
       guard
         let newExtendedType = namesToTypes[extendedTypeName],
-        let (unboundExtendedType, _) = newExtendedType._unbindingExtension(extensionDecl, module: extensionDeclModule)
+        let (unboundExtendedType, _) = newExtendedType._unbindingExtension(
+          extensionDecl,
+          module: extensionFileInfo.module
+        )
       else {
         fatalError(
           "[SwiftLexicalLookup] Internal error: Extended type somehow went missing and/or extension was unbound."
@@ -1162,7 +1165,7 @@ extension TypeGraph {
       }
       namesToTypes[extendedTypeName] = unboundExtendedType
       log(
-        "Updating '\(extendedTypeName.debugDescription)' with new extensions: [\(unboundExtendedType.boundExtensions[extensionDeclModule, default: [:]].map(\.key._memberlessDescription).joined(separator: ", "))]"
+        "Updating '\(extendedTypeName.debugDescription)' with new extensions: [\(unboundExtendedType.boundExtensions[extensionFileInfo.module, default: [:]].map(\.key._memberlessDescription).joined(separator: ", "))]"
       )
     case .failure:
       break
@@ -1191,7 +1194,7 @@ extension TypeGraph {
   /// extensions unbound and no registered subtypes.
   fileprivate mutating func __removeNominalTypeDeclaration(
     _ nominalDecl: Attached<NominalTypeDeclSyntax>,
-    nominalDeclModule: ModuleName,
+    nominalDeclFileInfo: FileInfo,
     typeName: GlobalTypeName,
     symbolTable: SymbolTable
   ) -> Result<Void, NominalRemovalFailure> {
@@ -1229,7 +1232,7 @@ extension TypeGraph {
       let members = type.mainDecl.typeMap
       let memberTypeName: GlobalTypeName? = _firstRegisteredMemberName(
         declGroup: Attached<DeclGroupSyntaxType>(nominalDecl),
-        declGroupModule: nominalDeclModule,
+        declGroupFileInfo: nominalDeclFileInfo,
         declGroupTypeName: typeName,
         members: members,
         symbolTable: symbolTable
@@ -1248,7 +1251,7 @@ extension TypeGraph {
   mutating func _unbindMemberType(
     baseTypeName: GlobalTypeName,
     baseTypeDecl: Attached<DeclGroupSyntaxType>,
-    baseTypeModule: Identifier,
+    baseTypeFileInfo: FileInfo,
     baseType: NominalType,
     member: TypeMember,
     invalidatedExtensions: inout [ExtensionState],
@@ -1263,7 +1266,7 @@ extension TypeGraph {
         return self.__unbindMemberType(
           baseTypeName: baseTypeName,
           baseTypeDecl: baseTypeDecl,
-          baseTypeModule: baseTypeModule,
+          baseTypeFileInfo: baseTypeFileInfo,
           baseType: baseType,
           member: member,
           invalidatedExtensions: &invalidatedExtensions,
@@ -1276,7 +1279,7 @@ extension TypeGraph {
   mutating func __unbindMemberType(
     baseTypeName: GlobalTypeName,
     baseTypeDecl: Attached<DeclGroupSyntaxType>,
-    baseTypeModule: Identifier,
+    baseTypeFileInfo: FileInfo,
     baseType: NominalType,
     member: TypeMember,
     invalidatedExtensions: inout [ExtensionState],
@@ -1289,7 +1292,7 @@ extension TypeGraph {
         from: [member.name: member.decls.map(\.typeDeclSyntax)],
         introducedIn: baseTypeDecl.as(ExtensionDeclSyntax.self)
       ),
-      modifiedExtensionModule: baseTypeModule,
+      modifiedExtensionModule: baseTypeFileInfo.module,
       invalidatedExtensions: &invalidatedExtensions,
       symbolTable: symbolTable
     )
@@ -1299,7 +1302,7 @@ extension TypeGraph {
       GlobalTypeName.Component(
         name: member.name,
         file: baseTypeDecl.fileRoot,
-        module: baseTypeModule,
+        fileInfo: baseTypeFileInfo,
         symbolTable: symbolTable
       )
     )
@@ -1347,7 +1350,7 @@ extension TypeGraph {
         _unbindMemberType(
           baseTypeName: memberNominalTypeName,
           baseTypeDecl: Attached<DeclGroupSyntaxType>(memberNominal.mainDecl.declGroup),
-          baseTypeModule: baseTypeModule,
+          baseTypeFileInfo: baseTypeFileInfo,
           baseType: memberNominal,
           member: nestedMember,
           invalidatedExtensions: &invalidatedExtensions,
@@ -1378,8 +1381,8 @@ extension TypeGraph {
     for memberNominalDecl in memberNominalDecls {
       let removalResult = __removeNominalTypeDeclaration(
         memberNominalDecl,
-        // Same module since this is a nested type
-        nominalDeclModule: baseTypeModule,
+        // Same file info since this is a nested type
+        nominalDeclFileInfo: baseTypeFileInfo,
         typeName: memberNominalTypeName,
         symbolTable: symbolTable
       )
@@ -1455,7 +1458,7 @@ extension TypeGraph {
       log("Skipping already invalidated extension `\(extensionDecl._memberlessDescription)`")
       return nil
     }
-    guard let extensionDeclModule = symbolTable.getFileInfo(extensionDecl.fileRoot)?.module else {
+    guard let extensionFileInfo = symbolTable.getFileInfo(extensionDecl.fileRoot) else {
       fatalError(
         "[SwiftLexicalLookup] Internal error: Unexpectedly found admitted extension `\(extensionDecl._memberlessDescription)` whose source file is unregistered in the symbol table."
       )
@@ -1469,7 +1472,8 @@ extension TypeGraph {
         )
       }
       // Find the members
-      guard let extensionMembers = extendedType.boundExtensions[extensionDeclModule, default: [:]][extensionDecl] else {
+      guard let extensionMembers = extendedType.boundExtensions[extensionFileInfo.module, default: [:]][extensionDecl]
+      else {
         fatalError(
           "[SwiftLexicalLookup] Internal error: Extension `\(extensionDecl._memberlessDescription)` resolved to but isn't bound to type '\(extendedTypeName)'"
         )
@@ -1479,7 +1483,7 @@ extension TypeGraph {
         _unbindMemberType(
           baseTypeName: extendedTypeName,
           baseTypeDecl: Attached<DeclGroupSyntaxType>(extensionDecl),
-          baseTypeModule: extensionDeclModule,
+          baseTypeFileInfo: extensionFileInfo,
           baseType: extendedType,
           member: typeMember,
           invalidatedExtensions: &invalidatedExtensions,
@@ -1491,7 +1495,7 @@ extension TypeGraph {
     // Now that the members are gone, remove
     let removalResult = _removeExtension(
       extensionDecl,
-      extensionDeclModule: extensionDeclModule,
+      extensionFileInfo: extensionFileInfo,
       symbolTable: symbolTable
     )
     let removedExtensionState: ExtensionState
