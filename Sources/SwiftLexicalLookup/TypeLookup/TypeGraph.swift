@@ -248,13 +248,10 @@ extension Array {
 
 @_spi(_QualifiedLookupTests)
 public typealias InvalidatedExtensions = [ExtensionState]
-@_spi(_QualifiedLookupTests)
-public typealias BindingFailure = TypeResolutionFailure<GlobalTypeName, ResolvedNominalTypeReference>
 
 @_spi(_QualifiedLookupTests) public typealias BindingResult = (
-  resolvedTypeName: Result<
-    (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>),
-    BindingFailure
+  resolvedTypeName: TypeResolver.TypeResult<
+    (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
   >,
   invalidatedExtensions: InvalidatedExtensions
 )
@@ -331,7 +328,7 @@ public struct GenericExtensionState<
   }
 }
 @_spi(_QualifiedLookupTests)
-public typealias ExtensionState = GenericExtensionState<GlobalTypeName, ResolvedNominalTypeReference>
+public typealias ExtensionState = GenericExtensionState<GlobalTypeName, ResolvedTypeSyntax>
 
 @_spi(_QualifiedLookupTests) public struct TypeTable: Hashable {
   fileprivate(set) var typeMembersToDecls: [Identifier: TypeMember]
@@ -1816,9 +1813,8 @@ extension TypeGraph {
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionDeclModule: ModuleName,
     extensionFileConfiguredRegions: ConfiguredRegions?,
-    to rawResult: Result<
-      (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
-      TypeResolver.Failure
+    to rawResult: TypeResolver.TypeResult<
+      (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>)
     >,
     dependencyTracker: DependencyTracker,
     symbolTable: borrowing SymbolTable
@@ -1839,9 +1835,8 @@ extension TypeGraph {
     // We create a new type-resolution result that converts successful type
     // resolutions into failures if they cause a cycle.
     let result:
-      Result<
-        (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>),
-        TypeResolver.Failure
+      TypeResolver.TypeResult<
+        (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
       >
     switch rawResult {
     case .success(let (extendedTypeName, mainDecl)):
@@ -2345,9 +2340,8 @@ extension TypeGraph {
   /// or the binding the failure; returns `nil` for non-admitted extensions.
   func getExtensionResolvedType(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<
-    (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>),
-    BindingFailure
+  ) -> TypeResolver.TypeResult<
+    (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
   >? {
     // Get the extension's state (or `nil` if unadmitted)
     guard let extensionState = extensionsToState[extensionDecl] else { return nil }

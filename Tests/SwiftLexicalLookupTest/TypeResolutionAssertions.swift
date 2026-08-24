@@ -243,7 +243,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Evaluate the extended type
       var typeQualifier = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
-      let _: Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, TypeResolver.Failure> =
+      let _: Result<GenericResolvedTypeSyntax<GlobalNominalTypeRef>, TypeResolver.Failure> =
         typeQualifier.bindExtension(extensionDecl)
 
       // After binding, we should we have a state
@@ -281,7 +281,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
     }
     let expectedState = expectedRawState._mapTypes(mapNominal: mapMarker(marker:))
     // Get the type name
-    let actualState = actualRawState._mapTypes(mapNominal: \.nominalTypeRef._succinctDescription)
+    let actualState = actualRawState._mapTypes(mapNominal: \.type._succinctDescription)
     // Don't continue if we couldn't map the states
     guard mappingFailures.isEmpty else { return mappingFailures }
 
@@ -313,7 +313,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
     }
 
     // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
-    let actualRawResult: Result<ResolvedType<ResolvedNominalTypeReference>, TypeResolver.Failure>
+    let actualRawResult: Result<ResolvedType<ResolvedTypeSyntax>, TypeResolver.Failure>
     do {
       var typeResolver = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
       actualRawResult = typeResolver.resolveSyntax(typeSyntax: typeSyntax)
@@ -331,10 +331,10 @@ extension TypeResolutionMatcher: LexicalMatcher {
         return targetDefinition.annotation.description
       })._debugDescription
       let actualTypeDescription: String = actualType.mapMembers({ nominalType -> String in
-        guard let targetDefinition = syntaxToDefinitions[nominalType.nominalTypeRef.mainDecl.node] else {
+        guard let targetDefinition = syntaxToDefinitions[nominalType.type.mainDecl.node] else {
           failures.append(
             ExpectationFailure.resultReferencesUnmarkedSyntax(
-              syntaxDescription: nominalType.nominalTypeRef.globalName.debugDescription
+              syntaxDescription: nominalType.type.globalName.debugDescription
             )
           )
           return ""
@@ -370,7 +370,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
       // Describe the lookup failure
       let actualFailureDescription = actualFailure._map(
         mapName: \.debugDescription,
-        mapNominal: { $0.nominalTypeRef.globalName?.debugDescription ?? "" }
+        mapNominal: { $0.type.globalName?.debugDescription ?? "" }
       )._debugDescription
 
       // Check equality

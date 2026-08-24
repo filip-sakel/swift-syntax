@@ -43,7 +43,7 @@ extension SymbolTable {
     declModule: ModuleName,
     isGlobal: Bool,
     originatingSyntax: Attached<TypeLikeSyntax>
-  ) -> Result<ResolvedNominalTypeReference, TypeGraph.NominalRegistrationFailure> {
+  ) -> Result<ResolvedTypeSyntax, TypeGraph.NominalRegistrationFailure> {
     return typeGraph.registerNominalType(
       topScopeMainDecl: topScopeMainDecl,
       declName: declName,
@@ -52,9 +52,9 @@ extension SymbolTable {
       isGlobal: isGlobal,
       symbolTable: self
     ).map({ nominalRef in
-      ResolvedNominalTypeReference(
-        nominalTypeRef: nominalRef,
-        originatingSyntax: originatingSyntax
+      ResolvedTypeSyntax(
+        type: nominalRef,
+        syntax: originatingSyntax
       )
     })
   }
@@ -65,21 +65,21 @@ extension SymbolTable {
     declFileConfiguredRegions: ConfiguredRegions?,
     declModule: ModuleName,
     baseDeclGroup: Attached<DeclGroupSyntaxType>,
-    baseType: ResolvedNominalTypeReference,
+    baseType: ResolvedTypeSyntax,
     originatingSyntax: Attached<TypeLikeSyntax>
-  ) -> Result<ResolvedNominalTypeReference, TypeGraph.NestedNominalRegistrationFailure> {
+  ) -> Result<ResolvedTypeSyntax, TypeGraph.NestedNominalRegistrationFailure> {
     return typeGraph.registerNominalType(
       nestedMainDecl: nestedMainDecl,
       declName: declName,
       declFileConfiguredRegions: declFileConfiguredRegions,
       declModule: declModule,
       baseDeclGroup: baseDeclGroup,
-      baseType: baseType.nominalTypeRef,
+      baseType: baseType.type,
       symbolTable: self
     ).map({ nominalRef in
-      ResolvedNominalTypeReference(
-        nominalTypeRef: nominalRef,
-        originatingSyntax: originatingSyntax
+      ResolvedTypeSyntax(
+        type: nominalRef,
+        syntax: originatingSyntax
       )
     })
   }
@@ -100,14 +100,11 @@ extension SymbolTable {
 
   func getExtensionResolvedType(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<
-    GenericResolvedNominalTypeReference<GlobalNominalTypeRef>,
-    BindingFailure
-  >? {
+  ) -> TypeResolver.TypeResult<GenericResolvedTypeSyntax<GlobalNominalTypeRef>>? {
     typeGraph.getExtensionResolvedType(extensionDecl)?.map({ (globalReference, mainDecl) in
-      GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
-        nominalTypeRef: globalReference,
-        originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
+      GenericResolvedTypeSyntax<GlobalNominalTypeRef>(
+        type: globalReference,
+        syntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
       )
     })
   }
@@ -123,9 +120,8 @@ extension SymbolTable {
   /// TODO: Consider inlining into `_bindRequestedExtension`
   fileprivate func _admitExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    to result: Result<
-      (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
-      TypeResolver.Failure
+    to result: TypeResolver.TypeResult<
+      (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>)
     >,
     dependencies: DependencyTracker,
     verbose: Bool
@@ -271,7 +267,7 @@ extension SymbolTable {
   /// - Precondition: `extensionDecl` must be in `self.requestedExtensions`
   private func bindRequestedExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, TypeResolver.Failure> {
+  ) -> TypeResolver.TypeResult<GenericResolvedTypeSyntax<GlobalNominalTypeRef>> {
     withLogging(
       request: "Binding `\(extensionDecl._memberlessDescription)`",
       describe: \._debugDescription
@@ -298,7 +294,7 @@ extension SymbolTable {
   /// e.g. if we're resolving `extension A.B {}`, we will prob have to fully resolve `A`.
   private func _bindRequestedExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<GenericResolvedNominalTypeReference<GlobalNominalTypeRef>, TypeResolver.Failure> {
+  ) -> TypeResolver.TypeResult<GenericResolvedTypeSyntax<GlobalNominalTypeRef>> {
     // Uphold invariant
     assert(
       self.requestedExtensions.contains(extensionDecl),
@@ -308,10 +304,10 @@ extension SymbolTable {
     // TODO: Remove
     func mapToNominalTypeReference(
       _ typeInfo: (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
-    ) -> GenericResolvedNominalTypeReference<GlobalNominalTypeRef> {
-      GenericResolvedNominalTypeReference<GlobalNominalTypeRef>(
-        nominalTypeRef: typeInfo.globalReference,
-        originatingSyntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
+    ) -> GenericResolvedTypeSyntax<GlobalNominalTypeRef> {
+      GenericResolvedTypeSyntax<GlobalNominalTypeRef>(
+        type: typeInfo.globalReference,
+        syntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
       )
     }
 
@@ -340,7 +336,7 @@ extension SymbolTable {
       extensionDecl,
       // Only get the name and main decl
       to: extendedTypeResult.map({ extendedTypeReference in
-        return (extendedTypeReference.nominalTypeRef.name, extendedTypeReference.nominalTypeRef.mainDecl)
+        return (extendedTypeReference.type.name, extendedTypeReference.type.mainDecl)
       }),
       dependencies: resolver.dependencyTracker,
       verbose: _verbose
