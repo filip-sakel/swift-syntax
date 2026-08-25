@@ -771,6 +771,8 @@ final class TypeResolutionTests: XCTestCase {
 
   /// Similar to pathological n=3 above, but for any `n`
   func testPathologicalArbitrary() {
+    typealias GlobalTypeName = TypeGraph.GlobalTypeName
+
     let n = 20
     precondition(n >= 2, "Pathological case requires `n` of at least 2.")
 

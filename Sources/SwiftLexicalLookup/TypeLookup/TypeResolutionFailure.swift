@@ -161,7 +161,7 @@ extension TypeResolver {
     //   func f(_: Self) {} // <- Look up `Self` here
     // }
     // ```
-    case cyclicalExtensionDependency(GenericExtensionBindingCycle<GlobalTypeName>)
+    case cyclicalExtensionDependency(GenericExtensionBindingCycle<TypeGraph.GlobalTypeName>)
 
     /// We bind extensions to types incrementally, so a type-resolution request
     /// might be nested within an extension binding request, but it may itself
@@ -261,7 +261,7 @@ public struct GenericDependencyCycleElement<TypeName: Sendable>: Sendable {
 }
 @_spi(_QualifiedLookupTests)
 public typealias DependencyCycleElement = GenericDependencyCycleElement<
-  GlobalTypeName
+  TypeGraph.GlobalTypeName
 >
 
 @_spi(_QualifiedLookupTests)
@@ -279,7 +279,7 @@ public struct GenericExtensionBindingCycle<TypeName: Sendable>: Sendable {
 }
 @_spi(_QualifiedLookupTests)
 public typealias ExtensionBindingCycle = GenericExtensionBindingCycle<
-  GlobalTypeName
+  TypeGraph.GlobalTypeName
 >
 
 // MARK: Debug

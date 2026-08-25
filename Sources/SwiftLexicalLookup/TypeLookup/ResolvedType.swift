@@ -103,19 +103,19 @@ public struct GenericResolvedTypeSyntax<ResolvedType: Sendable & Hashable & Cust
 }
 /// The default resolved type syntax: a `NominalTypeRef` and the syntax that was resolved.
 @_spi(_QualifiedLookupTests)
-public typealias ResolvedTypeSyntax = GenericResolvedTypeSyntax<NominalTypeRef>
+public typealias ResolvedTypeSyntax = GenericResolvedTypeSyntax<TypeGraph.NominalTypeRef>
 
 extension ResolvedTypeSyntax {
   /// Map from a `GlobalNominalTypeRef` to a `NominalTypeRef`
-  init(globalTypeReference: GenericResolvedTypeSyntax<GlobalNominalTypeRef>) {
+  init(globalTypeReference: GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>) {
     self.init(
-      type: NominalTypeRef(globalReference: globalTypeReference.type),
+      type: TypeGraph.NominalTypeRef(globalReference: globalTypeReference.type),
       syntax: globalTypeReference.syntax
     )
   }
 }
 
-extension GenericResolvedTypeSyntax where ResolvedType == NominalTypeRef {
+extension GenericResolvedTypeSyntax where ResolvedType == TypeGraph.NominalTypeRef {
   var _succinctDescription: String {
     switch type.storage {
     case .global(let global):

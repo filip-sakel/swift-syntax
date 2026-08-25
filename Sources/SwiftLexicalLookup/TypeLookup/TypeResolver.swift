@@ -459,7 +459,7 @@ extension TypeResolver {
           },
           perform: {
             // Resolve extended type
-            let baseType: GenericResolvedTypeSyntax<GlobalNominalTypeRef>
+            let baseType: GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>
             switch $0.bindExtension(extensionDecl) {
             case .success(let type):
               baseType = type
@@ -627,7 +627,7 @@ extension TypeResolver {
   ///
   /// A helper for `resolveNominalTypeDecl` and `resolveMember`.
   fileprivate mutating func findNominalTypeMemberDecl(
-    resolvedNominalBaseType: NominalTypeRef,
+    resolvedNominalBaseType: TypeGraph.NominalTypeRef,
     memberName: Identifier,
     memberIntroducingSyntax: Attached<TypeLikeSyntax>
   ) -> TypeResult<(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)?> {
@@ -1125,7 +1125,7 @@ extension TypeResolver {
   /// things like extending an existential (e.g. `extension any Collection`).
   mutating func resolveExtendedTypeSyntax(
     extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> TypeResult<GenericResolvedTypeSyntax<GlobalNominalTypeRef>> {
+  ) -> TypeResult<GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>> {
     withLogging(
       request: "Extended type syntax `\(extensionDecl.extendedType.trimmedDescription)`",
       describe: \._debugDescription,
@@ -1136,7 +1136,7 @@ extension TypeResolver {
   /// Implements `resolveExtendedTypeSyntax`
   mutating func _resolveExtendedTypeSyntax(
     extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> TypeResult<GenericResolvedTypeSyntax<GlobalNominalTypeRef>> {
+  ) -> TypeResult<GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>> {
     guard _visitedTypeSyntax.isEmpty else {
       fatalError(
         "[SwiftLexicalLookup] Internal error: Resolve extended type syntax should only be called on a fresh `TypeResolver` instance."
@@ -1222,7 +1222,7 @@ extension TypeResolver {
     }
 
     // Wrap the new reference in a `ResolvedNominalTypeReference`
-    func wrapReference(_ nominalRef: NominalTypeRef) -> ResolvedTypeSyntax {
+    func wrapReference(_ nominalRef: TypeGraph.NominalTypeRef) -> ResolvedTypeSyntax {
       ResolvedTypeSyntax(
         type: nominalRef,
         syntax: typeReference.syntax
@@ -1230,11 +1230,11 @@ extension TypeResolver {
     }
 
     // Get the nominal type from the symbol table (or register accordingly)
-    let currentNominalResult: Result<NominalTypeRef, TypeGraph.NominalTypeRefUpdateFailure> =
+    let currentNominalResult: Result<TypeGraph.NominalTypeRef, TypeGraph.NominalTypeRefUpdateFailure> =
       symbolTable.typeGraph.updateNominalTypeReference(oldReference: typeReference.type)
 
     // Handle reregistration (we should diagnose reregistrations and not save them in the table)
-    let currentNominal: NominalTypeRef
+    let currentNominal: TypeGraph.NominalTypeRef
     switch currentNominalResult {
     case .success(let success):
       currentNominal = success
@@ -1266,7 +1266,7 @@ extension TypeResolver {
     // After binding all extensions, get the new nominal type
     guard
       case .success(let finalizedNominalRef) = symbolTable.typeGraph.updateNominalTypeReference(
-        oldReference: NominalTypeRef(globalReference: qualifiedGlobalRef)
+        oldReference: TypeGraph.NominalTypeRef(globalReference: qualifiedGlobalRef)
       )
     else {
       // We checked the nominal type is registered at the start.
@@ -1282,7 +1282,7 @@ extension TypeResolver {
   /// syntax as the originating syntax.
   @_spi(_QualifiedLookupTests) public mutating func bindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> TypeResult<GenericResolvedTypeSyntax<GlobalNominalTypeRef>> {
+  ) -> TypeResult<GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>> {
     withLogging(
       request: "Binding extension `\(extensionDecl._memberlessDescription)`",
       describe: \._debugDescription,
@@ -1292,7 +1292,7 @@ extension TypeResolver {
 
   fileprivate mutating func _bindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> TypeResult<GenericResolvedTypeSyntax<GlobalNominalTypeRef>> {
+  ) -> TypeResult<GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>> {
     if let alreadyBoundResult = symbolTable.getExtensionResolvedType(extensionDecl) {
       return alreadyBoundResult
     }
@@ -1309,7 +1309,7 @@ extension TypeResolver {
     }
 
     return boundTypeResult.map({ (globalReference, mainDecl) in
-      GenericResolvedTypeSyntax<GlobalNominalTypeRef>(
+      GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>(
         type: globalReference,
         syntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
       )

@@ -28,7 +28,7 @@ struct TypeResolutionMatcher {
   /// A marker and the resolved qualified name of the annotated `NominalTypeDeclSyntax`.
   struct Definition {
     let marker: Character
-    let name: GlobalTypeName?
+    let name: TypeGraph.GlobalTypeName?
   }
   /// Annotates `TypeSyntax` with a type-resolution result using markers;
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
@@ -223,7 +223,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Evaluate the extended type
       var typeQualifier = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
-      let _: Result<GenericResolvedTypeSyntax<GlobalNominalTypeRef>, TypeResolver.Failure> =
+      let _: Result<GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>, TypeResolver.Failure> =
         typeQualifier.bindExtension(extensionDecl)
 
       // After binding, we should we have a state
@@ -432,7 +432,7 @@ func assertTypeResolution(
 extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatcher {
   mutating func appendInterpolation(
     _ marker: Character,
-    name: GlobalTypeName? = nil,
+    name: TypeGraph.GlobalTypeName? = nil,
     file: StaticString = #file,
     line: UInt = #line
   ) {
@@ -495,7 +495,7 @@ extension TypeLikeSyntax: ExpressibleByStringLiteral {
 }
 
 extension ExtensionDependency {
-  init(baseType: GlobalTypeName, members: [IdentifierWrapper]) {
+  init(baseType: TypeGraph.GlobalTypeName, members: [IdentifierWrapper]) {
     let mappedMembers: [TypeMember] = members.map({ member in
       return TypeMember(name: member.identifier, decls: [])
     })
@@ -529,7 +529,7 @@ extension TestExtensionState {
   /// binding.
   init(
     dependencies: [ExtensionDependency],
-    resolvedType: Result<GlobalTypeName, TestTypeResolutionFailure>,
+    resolvedType: Result<TypeGraph.GlobalTypeName, TestTypeResolutionFailure>,
     file: StaticString = #file,
     line: UInt = #line
   ) {
@@ -549,7 +549,7 @@ extension TestExtensionState {
   }
 
   static func bound(
-    to typeName: GlobalTypeName,
+    to typeName: TypeGraph.GlobalTypeName,
     dependencies: [ExtensionDependency]
   ) -> TestExtensionState {
     TestExtensionState(dependencies: dependencies, resolvedType: .success(typeName))
@@ -557,13 +557,17 @@ extension TestExtensionState {
 
   static func invalidCycle(
     dependencies: [ExtensionDependency],
-    cycleElements: [(introducingDecl: String?, extension: String, base: GlobalTypeName)],
+    cycleElements: [(introducingDecl: String?, extension: String, base: TypeGraph.GlobalTypeName)],
     conflictingMember: IdentifierWrapper,
     file: StaticString = #file,
     line: UInt = #line
   ) -> TestExtensionState {
-    let dependencyPath: [GenericDependencyCycleElement<GlobalTypeName>] = cycleElements.map({
-      (introducingTypeDeclText, extensionDeclText, baseTypeName) -> GenericDependencyCycleElement<GlobalTypeName> in
+    let dependencyPath: [GenericDependencyCycleElement<TypeGraph.GlobalTypeName>] = cycleElements.map({
+      (
+        introducingTypeDeclText,
+        extensionDeclText,
+        baseTypeName
+      ) -> GenericDependencyCycleElement<TypeGraph.GlobalTypeName> in
       let introducingTypeDecl: TypeDeclSyntax?
       if let introducingTypeDeclText {
         let typeDeclRaw = DeclSyntax(stringLiteral: introducingTypeDeclText)
@@ -594,7 +598,7 @@ extension TestExtensionState {
       )
     })
 
-    let cycle = GenericExtensionBindingCycle<GlobalTypeName>(
+    let cycle = GenericExtensionBindingCycle<TypeGraph.GlobalTypeName>(
       dependencyPath: dependencyPath,
       dependencyMember: conflictingMember.identifier
     )
@@ -606,7 +610,7 @@ extension TestExtensionState {
   }
 }
 
-extension GlobalTypeName: ExpressibleByStringLiteral {
+extension TypeGraph.GlobalTypeName: ExpressibleByStringLiteral {
   public init(stringLiteral string: String) {
     self.init(_testName: string)
   }

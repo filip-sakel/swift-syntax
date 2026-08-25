@@ -111,11 +111,11 @@ extension Array {
 /// with any dependencies).
 @_spi(_QualifiedLookupTests)
 public struct ExtensionDependency: Sendable {
-  let dependencyTypeName: GlobalTypeName
+  let dependencyTypeName: TypeGraph.GlobalTypeName
   fileprivate(set) var members: [TypeMember]
 
   @_spi(_QualifiedLookupTests) public init(
-    dependencyTypeName: GlobalTypeName,
+    dependencyTypeName: TypeGraph.GlobalTypeName,
     members: [TypeMember]
   ) {
     self.dependencyTypeName = dependencyTypeName
@@ -128,7 +128,7 @@ public typealias InvalidatedExtensions = [ExtensionState]
 
 @_spi(_QualifiedLookupTests) public typealias BindingResult = (
   resolvedTypeName: TypeResolver.TypeResult<
-    (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
+    (globalReference: TypeGraph.GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
   >,
   invalidatedExtensions: InvalidatedExtensions
 )
@@ -145,12 +145,12 @@ public struct GenericExtensionState<
     // TODO: Remove this property
     extensionDecl: Attached<ExtensionDeclSyntax>,
     /// The resolved type must be valid in `namesToTypes`
-    resolvedType: Result<GlobalTypeName, TypeResolver.GenericFailure<NominalType>>
+    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.GenericFailure<NominalType>>
 
   @_spi(_QualifiedLookupTests) public init(
     _uncheckedDependencies dependencies: [ExtensionDependency],
     extensionDecl: Attached<ExtensionDeclSyntax>,
-    resolvedType: Result<GlobalTypeName, TypeResolver.GenericFailure<NominalType>>
+    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.GenericFailure<NominalType>>
   ) {
     self.dependencies = dependencies
     self.extensionDecl = extensionDecl
@@ -160,13 +160,13 @@ public struct GenericExtensionState<
   @_spi(_QualifiedLookupTests) public init(
     dependencies: [QualifiedLookupDependency],
     extensionDecl: Attached<ExtensionDeclSyntax>,
-    resolvedType: Result<GlobalTypeName, TypeResolver.GenericFailure<NominalType>>
+    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.GenericFailure<NominalType>>
   ) {
     // Group dependencies by base type and member name, while maintaing order
     var groupedDependencies =
       [
         (
-          key: GlobalTypeName,
+          key: TypeGraph.GlobalTypeName,
           value: [(key: Identifier, value: [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)])]
         )
       ]()
@@ -225,7 +225,7 @@ public typealias ExtensionState = GenericExtensionState<ResolvedTypeSyntax>
   }
   func collidesWithDependency(
     _ dependency: QualifiedLookupDependency,
-    whenBoundTo baseTypeName: GlobalTypeName
+    whenBoundTo baseTypeName: TypeGraph.GlobalTypeName
   ) -> Bool {
     dependency.extendedTypeName == baseTypeName && typeMembersToDecls[dependency.member] != nil
   }
@@ -419,7 +419,7 @@ public struct TypeGraph {
   }
 
   /// Updates when we register nominal types and bind extensions
-  @_spi(_QualifiedLookupTests) public var namesToTypes: [GlobalTypeName: NominalType]
+  @_spi(_QualifiedLookupTests) public var namesToTypes: [TypeGraph.GlobalTypeName: NominalType]
   // /// Updates when we register nominal types and bind extensions
   // var parentsToTypeMembers: [QualifiedTypeName: TypeTable]
   @_spi(_QualifiedLookupTests) public var extensionsToState: [Attached<ExtensionDeclSyntax>: ExtensionState]
@@ -484,9 +484,9 @@ public struct DependencyTracker {
 
   /// Add the given dependency, maintainign unique dependencies
   fileprivate mutating func _addLookupDependency(
-    baseTypeName: GlobalTypeName,
+    baseTypeName: TypeGraph.GlobalTypeName,
     memberTypeName: Identifier,
-    performLookup: (GlobalTypeName, Identifier) -> QualifiedLookupDependency
+    performLookup: (TypeGraph.GlobalTypeName, Identifier) -> QualifiedLookupDependency
   ) -> QualifiedLookupDependency {
     // Try to find existing request
     //
@@ -506,9 +506,9 @@ public struct DependencyTracker {
   }
 }
 
-extension GlobalNominalTypeRef {
+extension TypeGraph.GlobalNominalTypeRef {
   init(
-    name: GlobalTypeName,
+    name: TypeGraph.GlobalTypeName,
     nominal: __shared TypeGraph.NominalType
   ) {
     self.init(name: name, mainDecl: nominal.mainDecl.declGroup, _version: nominal.version)
@@ -533,7 +533,7 @@ extension TypeGraph {
     QualifiedTypeLookupFailure
   > {
     // Get global nominal reference
-    let baseTypeReference: GlobalNominalTypeRef
+    let baseTypeReference: TypeGraph.GlobalNominalTypeRef
     switch baseType.storage {
     case .global(let globalReference):
       baseTypeReference = globalReference
@@ -563,7 +563,7 @@ extension TypeGraph {
 
     // TODO: Consider pre-sorting extensions to make lookup faster
     func directLookup(
-      baseTypeName: GlobalTypeName,
+      baseTypeName: TypeGraph.GlobalTypeName,
       memberTypeName: Identifier
     ) -> QualifiedLookupDependency {
       // Organize declaration groups into buckets
@@ -660,8 +660,8 @@ extension TypeGraph {
       return .success(NominalTypeRef(localNominalType: mainDecl))
     }
 
-    let globalName = GlobalTypeName(
-      component: GlobalTypeName.Component(
+    let globalName = TypeGraph.GlobalTypeName(
+      component: TypeGraph.GlobalTypeName.Component(
         name: declName,
         file: mainDecl.fileRoot,
         fileInfo: declFileInfo,
@@ -680,7 +680,7 @@ extension TypeGraph {
     case other(NominalRegistrationFailure)
 
     /// In order to register a nested type, its parent must be registered.
-    case baseNotRegistered(parentTypeName: GlobalTypeName)
+    case baseNotRegistered(parentTypeName: TypeGraph.GlobalTypeName)
     /// Decl group unexpectedly isn't registered to the given base type.
     case baseDeclGroupUnbound(Attached<DeclGroupSyntaxType>)
   }
@@ -700,7 +700,7 @@ extension TypeGraph {
     )
 
     // Get the global reference, or return the local
-    let globalParent: GlobalNominalTypeRef
+    let globalParent: TypeGraph.GlobalNominalTypeRef
     switch baseType.storage {
     case .global(let globalReference):
       globalParent = globalReference
@@ -715,7 +715,7 @@ extension TypeGraph {
     }
 
     let globalName = globalParent.name.addingComponent(
-      GlobalTypeName.Component(
+      TypeGraph.GlobalTypeName.Component(
         name: declName,
         file: mainDecl.fileRoot,
         fileInfo: declFileInfo,
@@ -769,7 +769,7 @@ extension TypeGraph {
   fileprivate mutating func _admitNominalType(
     globalDecl mainDecl: Attached<NominalTypeDeclSyntax>,
     declFileConfiguredRegions: ConfiguredRegions?,
-    globalTypeName: GlobalTypeName
+    globalTypeName: TypeGraph.GlobalTypeName
   ) -> Result<NominalTypeRef, NominalRegistrationFailure> {
     // Map out the main decl
     let mappedMainDecl = MappedDeclGroup.from(declGroup: mainDecl, configuredRegions: declFileConfiguredRegions)
@@ -794,7 +794,7 @@ extension TypeGraph {
     }
 
     return .success(
-      NominalTypeRef(globalReference: GlobalNominalTypeRef(name: globalTypeName, nominal: type))
+      NominalTypeRef(globalReference: TypeGraph.GlobalNominalTypeRef(name: globalTypeName, nominal: type))
     )
   }
 
@@ -804,7 +804,7 @@ extension TypeGraph {
   }
   func updateNominalTypeReference(oldReference: NominalTypeRef) -> Result<NominalTypeRef, NominalTypeRefUpdateFailure> {
     // Extract global reference; return local reference as is
-    let globalReference: GlobalNominalTypeRef
+    let globalReference: TypeGraph.GlobalNominalTypeRef
     switch oldReference.storage {
     case .global(let reference):
       globalReference = reference
@@ -819,7 +819,7 @@ extension TypeGraph {
 
     return .success(
       NominalTypeRef(
-        globalReference: GlobalNominalTypeRef(name: globalReference.name, nominal: typeState)
+        globalReference: TypeGraph.GlobalNominalTypeRef(name: globalReference.name, nominal: typeState)
       )
     )
   }
@@ -829,13 +829,13 @@ extension TypeGraph {
 
 @_spi(_QualifiedLookupTests)
 public struct QualifiedLookupDependency: Sendable {
-  let extendedTypeName: GlobalTypeName
+  let extendedTypeName: TypeGraph.GlobalTypeName
   let member: Identifier
   let typeDecls: [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)]
 
   @_spi(_QualifiedLookupTests)
   public init(
-    extendedTypeName: GlobalTypeName,
+    extendedTypeName: TypeGraph.GlobalTypeName,
     member: Identifier,
     typeDecls: [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)]
   ) {
@@ -856,7 +856,7 @@ extension TypeGraph {
 
   struct DependencyPathElement: CustomDebugStringConvertible {
     let introducingMemberType: TypeMemberDecl?
-    let boundType: GlobalTypeName
+    let boundType: TypeGraph.GlobalTypeName
     let extensionDecl: Attached<ExtensionDeclSyntax>
     let state: ExtensionState
 
@@ -920,9 +920,9 @@ extension TypeGraph {
   fileprivate mutating func _findFirstCycleWhenBinding(
     extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionMembers: TypeTable,
-    to boundTypeName: GlobalTypeName,
+    to boundTypeName: TypeGraph.GlobalTypeName,
     extensionDependencies: [QualifiedLookupDependency],
-  ) -> Result<GenericExtensionBindingCycle<GlobalTypeName>, CycleDetectionFailure>? {
+  ) -> Result<GenericExtensionBindingCycle<TypeGraph.GlobalTypeName>, CycleDetectionFailure>? {
     let boundExtensionInfo = [
       DependencyPathElement(
         introducingMemberType: nil,
@@ -980,14 +980,14 @@ extension TypeGraph {
   fileprivate func _firstRegisteredMemberName(
     declGroup: Attached<DeclGroupSyntaxType>,
     declGroupFileInfo: FileInfo,
-    declGroupTypeName: GlobalTypeName,
+    declGroupTypeName: TypeGraph.GlobalTypeName,
     members: TypeTable,
     symbolTable: SymbolTable
-  ) -> GlobalTypeName? {
+  ) -> TypeGraph.GlobalTypeName? {
     for (memberName, member) in members.typeMembersToDecls {
       // Construct the type the member would have
       let potentialMemberTypeName = declGroupTypeName.addingComponent(
-        GlobalTypeName.Component(
+        TypeGraph.GlobalTypeName.Component(
           name: memberName,
           file: declGroup.fileRoot,
           fileInfo: declGroupFileInfo,
@@ -1020,18 +1020,18 @@ extension TypeGraph {
     /// Extension has no registered state
     case unregistered
     // case notBound(failureOrUnregistered: TypeQualifier.Failure?)
-    case resolvedToUnregistered(typeName: GlobalTypeName)
-    case resolvedButUnbound(typeName: GlobalTypeName)
-    case dependencyToUnregistered(dependencyTpeName: GlobalTypeName)
+    case resolvedToUnregistered(typeName: TypeGraph.GlobalTypeName)
+    case resolvedButUnbound(typeName: TypeGraph.GlobalTypeName)
+    case dependencyToUnregistered(dependencyTpeName: TypeGraph.GlobalTypeName)
     /// We have a dependency to a type that doesn't know we're dependent
-    case notInDependentsList(dependencyTypeName: GlobalTypeName)
+    case notInDependentsList(dependencyTypeName: TypeGraph.GlobalTypeName)
     case remainingDependents(
-      typeName: GlobalTypeName,
+      typeName: TypeGraph.GlobalTypeName,
       // TODO: Change to `Identifier`
       extensionMembers: [String],
       dependents: [TypeDependent]
     )
-    case remainingRegistredMemberType(memberTypeName: GlobalTypeName)
+    case remainingRegistredMemberType(memberTypeName: TypeGraph.GlobalTypeName)
   }
 
   fileprivate mutating func _removeExtension(
@@ -1096,7 +1096,7 @@ extension TypeGraph {
         )
       }
       // Ensure all members are unregistered (only happens with nominal-type declarations)
-      let memberTypeName: GlobalTypeName? = _firstRegisteredMemberName(
+      let memberTypeName: TypeGraph.GlobalTypeName? = _firstRegisteredMemberName(
         declGroup: Attached<DeclGroupSyntaxType>(extensionDecl),
         declGroupFileInfo: extensionFileInfo,
         declGroupTypeName: extendedTypeName,
@@ -1167,9 +1167,9 @@ extension TypeGraph {
   }
 
   enum NominalRemovalFailure: Error {
-    case unregisteredName(GlobalTypeName)
+    case unregisteredName(TypeGraph.GlobalTypeName)
     case nominalNotInRegisteredType(
-      typeName: GlobalTypeName,
+      typeName: TypeGraph.GlobalTypeName,
       actualMainDecl: Attached<NominalTypeDeclSyntax>
     )
     /// The type still has extensions bound to it.
@@ -1608,9 +1608,9 @@ extension TypeGraph {
 // MARK: Extension Binding
 
 extension TypeGraph {
-  func getGlobalNominalTypeReference(name: GlobalTypeName) -> GlobalNominalTypeRef? {
+  func getGlobalNominalTypeReference(name: GlobalTypeName) -> TypeGraph.GlobalNominalTypeRef? {
     namesToTypes[name].map({
-      GlobalNominalTypeRef(name: name, nominal: $0)
+      TypeGraph.GlobalNominalTypeRef(name: name, nominal: $0)
     })
   }
 
@@ -1657,12 +1657,13 @@ extension TypeGraph {
     // resolutions into failures if they cause a cycle.
     let result:
       TypeResolver.TypeResult<
-        (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
+        (globalReference: TypeGraph.GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
       >
     switch rawResult {
     case .success(let (extendedTypeName, mainDecl)):
       // TODO: Try to merge with cycleResult failures
-      guard let extendedTypeRef: GlobalNominalTypeRef = getGlobalNominalTypeReference(name: extendedTypeName) else {
+      guard let extendedTypeRef: TypeGraph.GlobalNominalTypeRef = getGlobalNominalTypeReference(name: extendedTypeName)
+      else {
         return .failure(ExtensionAdmissionFailure.invalidDependencyExtension(extensionState: nil))
       }
 
@@ -2135,7 +2136,7 @@ extension TypeGraph {
   func getExtensionResolvedType(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
   ) -> TypeResolver.TypeResult<
-    (globalReference: GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
+    (globalReference: TypeGraph.GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
   >? {
     // Get the extension's state (or `nil` if unadmitted)
     guard let extensionState = extensionsToState[extensionDecl] else { return nil }
@@ -2159,7 +2160,7 @@ extension TypeGraph {
 
     return Result.success(
       (
-        globalReference: GlobalNominalTypeRef(name: boundTypeName, nominal: boundType),
+        globalReference: TypeGraph.GlobalNominalTypeRef(name: boundTypeName, nominal: boundType),
         mainDecl: boundType.mainDecl.declGroup
       )
     )
