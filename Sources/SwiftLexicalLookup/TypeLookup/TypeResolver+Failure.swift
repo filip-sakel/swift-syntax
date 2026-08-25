@@ -16,12 +16,8 @@ extension TypeResolver {
   @_spi(_QualifiedLookupTests)
   public typealias Failure = GenericFailure<ResolvedTypeSyntax>
 
-  /// Tests uses markers to refer to nominal types.
   @_spi(_QualifiedLookupTests)
-  public typealias TestFailure = GenericFailure<Character>
-
-  @_spi(_QualifiedLookupTests)
-  public indirect enum GenericFailure<NominalType: CustomDebugStringConvertible & Sendable>:
+  public indirect enum GenericFailure<NominalType: NominalTypeResultProtocol>:
     Error
   {
     /// A type declaration in an outer scope has an invalid identifier.
@@ -307,14 +303,14 @@ extension GenericExtensionBindingCycle: CustomDebugStringConvertible where TypeN
   }
 }
 
-extension TypeResolver.GenericFailure where NominalType == String {
+extension TypeResolver.GenericFailure: CustomDebugStringConvertible {
   /// Debug description
   ///
   /// Namely, for syntax nodes we use `.trimmedDescription` and for `ResolvedNominalTypeReference`
   /// we simply compare the qualified type name description.
-  public var _debugDescription: String {
+  public var debugDescription: String {
     func describeNested(_ nestedFailure: Self) -> String {
-      nestedFailure._debugDescription.replacing("\n", with: "\n  ")
+      nestedFailure.debugDescription.replacing("\n", with: "\n  ")
     }
 
     switch self {
@@ -323,12 +319,12 @@ extension TypeResolver.GenericFailure where NominalType == String {
     case .noTypeInScope:
       return ".noTypeInScope"
     case .cannotComposeNonClassOrProtocol(let type):
-      return ".cannotComposeNonClassOrProtocol(\(type._debugDescription))"
+      return ".cannotComposeNonClassOrProtocol(\(type.debugDescription))"
     case .noTypeMember(let member, let type):
       return
-        ".noTypeMember(member: \(member.debugDescription), in: \(type._debugDescription))"
+        ".noTypeMember(member: \(member.debugDescription), in: \(type.debugDescription))"
     case .cannotExtendNonNominal(let nonnominal):
-      return ".cannotExtendNonNominal(nonnominal: \(nonnominal._debugDescription))"
+      return ".cannotExtendNonNominal(nonnominal: \(nonnominal.debugDescription))"
     case .extensionNotAtFileScope(let extensionDecl):
       return ".extensionNotAtFileScope(extensionDecl: `\(extensionDecl._memberlessDescription)`)"
     case .invalidAliasedType(let nestedFailure):
@@ -371,12 +367,6 @@ extension TypeResolver.GenericFailure where NominalType == String {
     case .extensionNotBoundYet:
       return ".extensionNotBoundYet"
     }
-  }
-}
-
-extension TypeResolver.GenericFailure: CustomDebugStringConvertible {
-  public var debugDescription: String {
-    _map(mapNominal: \.debugDescription)._debugDescription
   }
 }
 

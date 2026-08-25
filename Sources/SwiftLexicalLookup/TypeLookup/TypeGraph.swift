@@ -136,7 +136,7 @@ public typealias InvalidatedExtensions = [ExtensionState]
 
 @_spi(_QualifiedLookupTests)
 public struct GenericExtensionState<
-  NominalType: Sendable & CustomDebugStringConvertible
+  NominalType: NominalTypeResultProtocol
 >: Sendable {
   // Invariant: The extensions listed must be valid and successfully bound to a type in `extensionsToState`
   // Invariant: There's only one dependency per type.
@@ -1876,7 +1876,7 @@ extension GenericExtensionState: CustomDebugStringConvertible {
 }
 extension GenericExtensionState {
   @_spi(_QualifiedLookupTests)
-  public func _mapTypes<NewNominalType>(
+  public func _mapTypes<NewNominalType: NominalTypeResultProtocol>(
     mapNominal: (NominalType) -> NewNominalType,
   ) -> GenericExtensionState<NewNominalType> {
     GenericExtensionState<NewNominalType>(

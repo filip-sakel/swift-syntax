@@ -12,7 +12,7 @@
 
 import SwiftSyntax
 
-// MARK: [Global]ResolvedTypeSyntax
+// MARK: GlobalResolvedTypeSyntax
 
 extension TypeResolver {
   /// A `GlobalNominalTypeRef` and the syntax that was resolved.
@@ -25,10 +25,20 @@ extension TypeResolver {
       type.debugDescription
     }
   }
+}
 
+// MARK: GlobalResolvedTypeSyntax
+
+/// A type used by `GenericTypeResult` to represent nominal types.
+/// SwiftLexicalLookup just uses `TypeResolver.ResolvedTypeSyntax`
+/// and testing uses `Character` markers.
+@_spi(_QualifiedLookupTests)
+public protocol NominalTypeResultProtocol: CustomDebugStringConvertible, Sendable {}
+
+extension TypeResolver {
   /// A `NominalTypeRef` and the syntax that was resolved.
   @_spi(_QualifiedLookupTests)
-  public struct ResolvedTypeSyntax: CustomDebugStringConvertible, Sendable {
+  public struct ResolvedTypeSyntax: NominalTypeResultProtocol {
     public let type: TypeGraph.NominalTypeRef
     public let syntax: Attached<TypeLikeSyntax>
 
@@ -62,13 +72,10 @@ extension TypeResolver {
   @_spi(_QualifiedLookupTests)
   public typealias TypeResult = GenericTypeResult<ResolvedTypeSyntax>
 
-  @_spi(_QualifiedLookupTests)
-  public typealias TestTypeResult = GenericTypeResult<Character>
-
   /// The type result of structural type resolution. `Result`
   /// represents a nominal type.
   @_spi(_QualifiedLookupTests)
-  public indirect enum GenericTypeResult<NominalType: CustomDebugStringConvertible & Sendable>: Sendable {
+  public indirect enum GenericTypeResult<NominalType: NominalTypeResultProtocol>: Sendable {
     /// E.g. `(A) -> ()`
     case function(argumentCount: Int)
     /// E.g. `(a: A, _: B)`
@@ -106,9 +113,9 @@ extension TypeResolver {
 
 // MARK: Debug Description
 
-extension TypeResolver.GenericTypeResult where NominalType == String {
+extension TypeResolver.GenericTypeResult: CustomDebugStringConvertible {
   @_spi(_QualifiedLookupTests)
-  public var _debugDescription: String {
+  public var debugDescription: String {
     switch self {
     case .function(let argumentCount):
       return ".function(argumentCount: \(argumentCount))"
@@ -119,16 +126,9 @@ extension TypeResolver.GenericTypeResult where NominalType == String {
     case .metatype(let base):
       return ".metatype(base: \(base.debugDescription)"
     case .nominalTypes(let members):
-      return ".nominalTypes([\(members.joined(separator: ", "))])"
+      return ".nominalTypes([\(members.map(\.debugDescription).joined(separator: ", "))])"
     case .failure(let failure):
-      return ".failure(\(failure._debugDescription))"
+      return ".failure(\(failure.debugDescription))"
     }
-  }
-}
-
-@_spi(_QualifiedLookupTests)
-extension TypeResolver.GenericTypeResult: CustomDebugStringConvertible {
-  public var debugDescription: String {
-    mapNominals(\.debugDescription)._debugDescription
   }
 }
