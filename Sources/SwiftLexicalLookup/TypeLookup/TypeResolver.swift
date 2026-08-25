@@ -356,7 +356,7 @@ extension TypeResolver {
         // `codeBlock.parent` shouldn't be `nil` in a valid program because of `Attached<_>`
         return "<\(codeBlock.parent?.parent?.kind ?? .missing)>"
       }
-      return symbolTable.debugFileMap.describeFileID(sourceFileScope.node.id)
+      return extractFileInfo(syntax: sourceFileScope).name
     }
   }
 

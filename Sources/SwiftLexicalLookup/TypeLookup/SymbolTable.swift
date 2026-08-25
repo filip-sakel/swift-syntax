@@ -44,8 +44,6 @@ public final class SymbolTable {
   let _verbose: Bool = false
   let _logNestingLimit: Int? = nil
   var logPrefix = [String]()
-  /// `DebugFileMap` only has a runtime impact in DEBUG builds.
-  internal lazy var debugFileMap: DebugFileMap = _generateDebugFileMap()
 
   private init(
     moduleName: ModuleName,
@@ -152,26 +150,5 @@ extension SymbolTable {
     log("Resolved \(describe(result))", file: file, line: line)
     logPrefix.removeLast()
     return result
-  }
-}
-
-// MARK: DebugFileMap
-
-extension SymbolTable {
-  private func _generateDebugFileMap() -> DebugFileMap {
-    #if DEBUG
-    // By `moduleName` invariant
-    let internalSources = moduleToSources[moduleName]!
-
-    // By `moduleToSources` uniqueness invariant
-    let internalFileMap = Dictionary(
-      uniqueKeysWithValues: internalSources.map({ (fileName, file) in
-        (key: file.id, value: (fileName, file))
-      })
-    )
-    return DebugFileMap(_internalFileMap: internalFileMap)
-    #else
-    return DebugFileMap()
-    #endif
   }
 }
