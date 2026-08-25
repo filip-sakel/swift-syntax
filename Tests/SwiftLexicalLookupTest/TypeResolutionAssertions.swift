@@ -17,7 +17,7 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
-typealias TestResolvedType = TypeResolver.TestResolvedType
+typealias TestResolvedType = TypeResolver.TestTypeResult
 typealias TestExtensionState = GenericExtensionState<Character>
 typealias TestTypeResolutionFailure = TypeResolver.TestFailure
 
@@ -291,7 +291,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
     }
 
     // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
-    let actualType: TypeResolver.ResolvedType = symbolTable.resolveSyntax(
+    let actualType: TypeResolver.TypeResult = symbolTable.resolveSyntax(
       typeSyntax: typeSyntax
     )
 
