@@ -16,8 +16,9 @@ import SwiftSyntax
 // MARK: Extension Finder
 
 extension SymbolTable {
-  internal func _findUnresolvedExtensions() -> [SourceFileSyntax: OrderedSet<Attached<ExtensionDeclSyntax>>] {
-    var result = [SourceFileSyntax: OrderedSet<Attached<ExtensionDeclSyntax>>]()
+  /// Returns a map of each file to the file's extensions (in-order and without duplicates).
+  internal func _findUnresolvedExtensions() -> [SourceFileSyntax: [Attached<ExtensionDeclSyntax>]] {
+    var result = [SourceFileSyntax: [Attached<ExtensionDeclSyntax>]]()
     for (_, files) in moduleToSources {
       for (_, file) in files {
         guard let fileInfo = getFileInfo(file) else {
@@ -25,6 +26,7 @@ extension SymbolTable {
             "[SwiftLexicalLookup] Internal error: Unexpectedly cannot get configured regions for registered file."
           )
         }
+        // Note: findExtensions gurantees in-order and no duplicates
         result[file] = file.findExtensions(configuredRegions: fileInfo.configuredRegions)
       }
     }
@@ -164,7 +166,10 @@ extension SymbolTable {
     switch admissionResult {
     case .success(let success):
       // If successfully bound, remove from `unresolvedExtensions`
-      unresolvedExtensions[extensionDecl.fileRoot]?.remove(extensionDecl)
+      //
+      // Note: This removal takes linear time. If a file has a lot of extensions, this operation
+      // could end up being slow.
+      unresolvedExtensions[extensionDecl.fileRoot, default: []].removeAll(where: { $0 == extensionDecl })
 
       return .success(success)
     case .failure(let admissionFailure):

@@ -65,7 +65,7 @@ extension SourceFileSyntax {
 extension SourceFileSyntax {
   /// Helper visitor for `findExtensions`
   fileprivate final class _ExtensionVisitor: SyntaxVisitor {
-    var extensionDecls = OrderedSet<Attached<ExtensionDeclSyntax>>()
+    var extensionDecls = [Attached<ExtensionDeclSyntax>]()
 
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
       // Force unwrap because this visitor should be called on `SourceFileSyntax`
@@ -88,7 +88,7 @@ extension SourceFileSyntax {
   /// Same as `_ExtensionVisitor`, but only visits active nodes according to
   /// the given configured regions.
   fileprivate final class _ConfiguredExtensionVisitor: ActiveSyntaxVisitor {
-    var extensionDecls = OrderedSet<Attached<ExtensionDeclSyntax>>()
+    var extensionDecls = [Attached<ExtensionDeclSyntax>]()
 
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
       // Force unwrap because this visitor should be called on `SourceFileSyntax`
@@ -111,7 +111,9 @@ extension SourceFileSyntax {
 
   /// Finds all top-level extensions, visiting only active nodes if
   /// ``configuredRegions`` is provided.
-  func findExtensions(configuredRegions: ConfiguredRegions?) -> OrderedSet<Attached<ExtensionDeclSyntax>> {
+  ///
+  /// Returns: The file's extensions in-order and without duplicates.
+  func findExtensions(configuredRegions: ConfiguredRegions?) -> [Attached<ExtensionDeclSyntax>] {
     if let configuredRegions {
       let visitor = _ConfiguredExtensionVisitor(viewMode: .all, configuredRegions: configuredRegions)
       visitor.walk(self)
@@ -138,7 +140,7 @@ extension SymbolTable {
   func findAllExtensions(
     accessibleFrom lookupFile: SourceFileSyntax
       // TODO: Convert to array
-  ) -> OrderedSet<Attached<ExtensionDeclSyntax>> {
+  ) -> [Attached<ExtensionDeclSyntax>] {
     func extractConfiguredRegions(file: SourceFileSyntax) -> ConfiguredRegions? {
       guard let fileInfo = getFileInfo(file) else {
         fatalError(
@@ -169,7 +171,7 @@ extension SymbolTable {
     var results = lookupFile.findExtensions(configuredRegions: lookupFileInfo.configuredRegions)
     // Look in this module
     for file in internalSources.values where file != lookupFile {
-      results.formUnion(file.findExtensions(configuredRegions: extractConfiguredRegions(file: file)))
+      results.append(contentsOf: file.findExtensions(configuredRegions: extractConfiguredRegions(file: file)))
     }
     // Look for imported modules (reversed order to account for shadowing)
     for module in importedModules.reversed() {
@@ -180,7 +182,7 @@ extension SymbolTable {
         )
       }
       for file in moduleSources.values {
-        results.formUnion(file.findExtensions(configuredRegions: extractConfiguredRegions(file: file)))
+        results.append(contentsOf: file.findExtensions(configuredRegions: extractConfiguredRegions(file: file)))
       }
     }
 
