@@ -32,11 +32,13 @@ public final class SymbolTable {
   private let fileToInfo: [SourceFileSyntax: FileInfo]
 
   /// Tracks requested extensions for extension binding. Don't access
-  /// directly;
+  /// directly; use `requestedExtensions`, `appendRequestedExtension` and
+  /// `removeRequestedExtension` instead.
   ///
   /// Invariant: Should not contain duplicates
-  var requestedExtensions: [Attached<ExtensionDeclSyntax>] = []
-  // var _requestedExtensionsToIndices: [Attached<ExtensionDeclSyntax>: Int] = []
+  var _requestedExtensions: [Attached<ExtensionDeclSyntax>] = []
+  var _requestedExtensionsSet: Set<Attached<ExtensionDeclSyntax>> = []
+
   // TODO: Setters should be private
   //
   /// The extensions that have not yet been admitted to the type graph.

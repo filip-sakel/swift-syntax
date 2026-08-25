@@ -13,6 +13,27 @@
 import SwiftIfConfig
 import SwiftSyntax
 
+// MARK: Requested Extensions
+
+extension SymbolTable {
+  /// Getter
+  var requestedExtensions: [Attached<ExtensionDeclSyntax>] { _requestedExtensions }
+  /// Appends a requested extensions
+  func appendRequestedExtensions(_ elements: [Attached<ExtensionDeclSyntax>]) {
+    for element in elements {
+      // Add the extension if not already in the set.
+      if _requestedExtensionsSet.contains(element) { continue }
+      _requestedExtensions.append(element)
+    }
+  }
+  func removeFirstRequestedExtension() -> Attached<ExtensionDeclSyntax>? {
+    guard !requestedExtensions.isEmpty else { return nil }
+    let first = _requestedExtensions.removeFirst()
+    _requestedExtensionsSet.remove(first)
+    return first
+  }
+}
+
 // MARK: Extension Finder
 
 extension SymbolTable {
@@ -212,7 +233,7 @@ extension SymbolTable {
     //
     // Note: `requestedExtensions` is an `OrderedSet` so we don't introduce
     // duplicates.
-    self.requestedExtensions.append(contentsOf: extensionDecls)
+    self.appendRequestedExtensions(extensionDecls)
 
     // Ensure there's no binding request underway
     guard willBindRequests else {
@@ -240,7 +261,7 @@ extension SymbolTable {
       // requests to see that we're actively trying to bind this extension.
       defer {
         // TODO: Ensure .last and .removeLast are ok (or if we should do a queue-like approach.
-        let poppedExtension = self.requestedExtensions.removeFirst()
+        let poppedExtension = self.removeFirstRequestedExtension()
         assert(
           poppedExtension == extensionDecl,
           "[SwiftLexicalLookup] Internal error: Unexpectedly found different requested extension when popping."
@@ -273,17 +294,6 @@ extension SymbolTable {
     ) {
       $0._bindRequestedExtension(extensionDecl)
     }
-  }
-
-  /// Prepends given elements. New elements get added as expected and existing elements
-  /// get moved to the front of the list. Despite the current elements of the ordered set,
-  /// the new set will always start out with a deduplicated set of `elements`.
-  /// TODO: Remove if we have no references to this
-  func prepend<E: Hashable>(to orderedSet: inout OrderedSet<E>, contentsOf elements: [E]) {
-    let oldElements = orderedSet
-    orderedSet.removeAll(keepingCapacity: true)
-    orderedSet.append(contentsOf: elements)
-    orderedSet.append(contentsOf: oldElements)
   }
 
   /// Implements `bindRequestedExtension`
@@ -374,9 +384,7 @@ extension SymbolTable {
       "Resolved to \(extendedTypeResult); Dependencies: \(resolver.dependencyTracker.dependencies.map(\.debugDescription)); Invalidated: \(invalidatedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
     )
 
-    // TODO: Does this even work?
-    // prepend(to: &self.requestedExtensions, contentsOf: invalidatedExtensions.map(\.extensionDecl))
-    self.requestedExtensions.append(contentsOf: invalidatedExtensions.map(\.extensionDecl))
+    self.appendRequestedExtensions(invalidatedExtensions.map(\.extensionDecl))
     return resolvedType.map(mapToNominalTypeReference(_:))
 
     // FIXME: Get rid of below code or sm.
