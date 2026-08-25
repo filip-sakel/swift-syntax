@@ -52,9 +52,7 @@ public struct TypeResolver {
     return result
   }
 
-  public typealias Failure = TypeResolutionFailure<
-    GlobalTypeName, ResolvedTypeSyntax
-  >
+  public typealias Failure = TypeResolutionFailure<ResolvedTypeSyntax>
   public typealias TypeResult<ResolvedType> = Result<ResolvedType, Failure>
 
   let symbolTable: SymbolTable

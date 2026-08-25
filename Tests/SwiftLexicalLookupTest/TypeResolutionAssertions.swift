@@ -17,29 +17,8 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
-typealias TestExtensionState = GenericExtensionState<TestTypeName, Character>
-typealias TestTypeResolutionFailure = TypeResolutionFailure<TestTypeName, Character>
-
-/// A QualifiedTypeNameGlobalType represented as a `String`.
-/// Provides a CustomDebugStringConvertible conformance without quotes.
-struct TestTypeName: Hashable, ExpressibleByStringLiteral, CustomDebugStringConvertible {
-  let value: String
-  init(stringLiteral value: String) {
-    self.value = value
-  }
-
-  static func == (a: Self, b: Self) -> Bool {
-    a.value.description == b.value.description
-  }
-
-  func hash(into hasher: inout Hasher) {
-    hasher.combine(value.description)
-  }
-
-  var debugDescription: String {
-    value.description
-  }
-}
+typealias TestExtensionState = GenericExtensionState<Character>
+typealias TestTypeResolutionFailure = TypeResolutionFailure<Character>
 
 /// Asserts the given annotated `TypeSyntax` resolves to the right `NominalTypeDeclSyntax`
 /// and qualified name. Also asserts `ExtensionDeclSyntax`-binding produces the expected
@@ -375,13 +354,11 @@ extension TypeResolutionMatcher: LexicalMatcher {
         return nominalDecl.annotation.description
       }
       let expectedFailureDescription = expectedFailure._map(
-        mapName: \.debugDescription,
         mapNominal: markerToQualifiedName(marker:)
       )._debugDescription
 
       // Describe the lookup failure
       let actualFailureDescription = actualFailure._map(
-        mapName: \.debugDescription,
         mapNominal: { $0.type.globalName?.debugDescription ?? "" }
       )._debugDescription
 
@@ -517,9 +494,13 @@ extension TypeLikeSyntax: ExpressibleByStringLiteral {
   }
 }
 
-struct ExtensionDependency {
-  let baseType: TestTypeName
-  let members: [IdentifierWrapper]
+extension ExtensionDependency {
+  init(baseType: GlobalTypeName, members: [IdentifierWrapper]) {
+    let mappedMembers: [TypeMember] = members.map({ member in
+      return TypeMember(name: member.identifier, decls: [])
+    })
+    self.init(dependencyTypeName: baseType, members: mappedMembers)
+  }
 }
 
 struct IdentifierWrapper: ExpressibleByStringLiteral {
@@ -548,7 +529,7 @@ extension TestExtensionState {
   /// binding.
   init(
     dependencies: [ExtensionDependency],
-    resolvedType: Result<TestTypeName, TestTypeResolutionFailure>,
+    resolvedType: Result<GlobalTypeName, TestTypeResolutionFailure>,
     file: StaticString = #file,
     line: UInt = #line
   ) {
@@ -560,12 +541,7 @@ extension TestExtensionState {
     let mockExtension = Attached(sourceFile.children(ofType: ExtensionDeclSyntax.self)[0])!
 
     self.init(
-      _uncheckedDependencies: dependencies.map({
-        let mappedMembers: [TypeMember] = $0.members.map({ member in
-          return TypeMember(name: member.identifier, decls: [])
-        })
-        return GenericExtensionDependency<TestTypeName>(dependencyTypeName: $0.baseType, members: mappedMembers)
-      }),
+      _uncheckedDependencies: dependencies,
       // Extension decl won't be checked
       extensionDecl: mockExtension,
       resolvedType: resolvedType
@@ -573,7 +549,7 @@ extension TestExtensionState {
   }
 
   static func bound(
-    to typeName: TestTypeName,
+    to typeName: GlobalTypeName,
     dependencies: [ExtensionDependency]
   ) -> TestExtensionState {
     TestExtensionState(dependencies: dependencies, resolvedType: .success(typeName))
@@ -581,13 +557,13 @@ extension TestExtensionState {
 
   static func invalidCycle(
     dependencies: [ExtensionDependency],
-    cycleElements: [(introducingDecl: String?, extension: String, base: TestTypeName)],
+    cycleElements: [(introducingDecl: String?, extension: String, base: GlobalTypeName)],
     conflictingMember: IdentifierWrapper,
     file: StaticString = #file,
     line: UInt = #line
   ) -> TestExtensionState {
-    let dependencyPath: [GenericDependencyCycleElement<TestTypeName>] = cycleElements.map({
-      (introducingTypeDeclText, extensionDeclText, baseTypeName) -> GenericDependencyCycleElement<TestTypeName> in
+    let dependencyPath: [GenericDependencyCycleElement<GlobalTypeName>] = cycleElements.map({
+      (introducingTypeDeclText, extensionDeclText, baseTypeName) -> GenericDependencyCycleElement<GlobalTypeName> in
       let introducingTypeDecl: TypeDeclSyntax?
       if let introducingTypeDeclText {
         let typeDeclRaw = DeclSyntax(stringLiteral: introducingTypeDeclText)
@@ -618,7 +594,7 @@ extension TestExtensionState {
       )
     })
 
-    let cycle = GenericExtensionBindingCycle<TestTypeName>(
+    let cycle = GenericExtensionBindingCycle<GlobalTypeName>(
       dependencyPath: dependencyPath,
       dependencyMember: conflictingMember.identifier
     )

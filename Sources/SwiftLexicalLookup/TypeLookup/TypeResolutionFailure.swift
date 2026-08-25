@@ -13,7 +13,7 @@
 import SwiftSyntax
 
 @_spi(_QualifiedLookupTests)
-public indirect enum TypeResolutionFailure<TypeName: Sendable, NominalType: Sendable>:
+public indirect enum TypeResolutionFailure<NominalType: Sendable>:
   Error
 {
   /// A type declaration in an outer scope has an invalid identifier.
@@ -153,7 +153,7 @@ public indirect enum TypeResolutionFailure<TypeName: Sendable, NominalType: Send
   //   func f(_: Self) {} // <- Look up `Self` here
   // }
   // ```
-  case cyclicalExtensionDependency(GenericExtensionBindingCycle<TypeName>)
+  case cyclicalExtensionDependency(GenericExtensionBindingCycle<GlobalTypeName>)
 
   /// We bind extensions to types incrementally, so a type-resolution request
   /// might be nested within an extension binding request, but it may itself
@@ -166,12 +166,11 @@ public indirect enum TypeResolutionFailure<TypeName: Sendable, NominalType: Send
 }
 
 extension TypeResolutionFailure {
-  public func _map<NewTypeName, NewNominalType>(
-    mapName: (TypeName) -> NewTypeName,
+  public func _map<NewNominalType>(
     mapNominal: (NominalType) -> NewNominalType
-  ) -> TypeResolutionFailure<NewTypeName, NewNominalType> {
-    func mapNested(_ nestedFailure: Self) -> TypeResolutionFailure<NewTypeName, NewNominalType> {
-      nestedFailure._map(mapName: mapName, mapNominal: mapNominal)
+  ) -> TypeResolutionFailure<NewNominalType> {
+    func mapNested(_ nestedFailure: Self) -> TypeResolutionFailure<NewNominalType> {
+      nestedFailure._map(mapNominal: mapNominal)
     }
 
     switch self {
@@ -198,7 +197,7 @@ extension TypeResolutionFailure {
       return .extensionNotBoundYet
     // Actual maps
     case .cyclicalExtensionDependency(let cycle):
-      return .cyclicalExtensionDependency(cycle._map(mapName: mapName))
+      return .cyclicalExtensionDependency(cycle)
     case .cannotComposeNonClassOrProtocol(let type):
       return .cannotComposeNonClassOrProtocol(resolved: type.mapNominals(mapNominal))
     case .noTypeMember(let member, let type):
@@ -268,13 +267,6 @@ public struct GenericExtensionBindingCycle<TypeName: Sendable>: Sendable {
     self.dependencyPath = dependencyPath
     self.dependencyMember = dependencyMember
   }
-
-  fileprivate func _map<NewTypeName>(mapName: (TypeName) -> NewTypeName) -> GenericExtensionBindingCycle<NewTypeName> {
-    GenericExtensionBindingCycle<NewTypeName>(
-      dependencyPath: dependencyPath.map({ $0._map(mapName: mapName) }),
-      dependencyMember: dependencyMember
-    )
-  }
 }
 @_spi(_QualifiedLookupTests)
 public typealias ExtensionBindingCycle = GenericExtensionBindingCycle<
@@ -305,7 +297,7 @@ extension GenericExtensionBindingCycle: CustomDebugStringConvertible where TypeN
   }
 }
 
-extension TypeResolutionFailure where TypeName == String, NominalType == String {
+extension TypeResolutionFailure where NominalType == String {
   /// Debug description
   ///
   /// Namely, for syntax nodes we use `.trimmedDescription` and for `ResolvedNominalTypeReference`
@@ -373,9 +365,9 @@ extension TypeResolutionFailure where TypeName == String, NominalType == String 
 }
 
 extension TypeResolutionFailure: CustomDebugStringConvertible
-where TypeName: CustomDebugStringConvertible, NominalType: CustomDebugStringConvertible {
+where NominalType: CustomDebugStringConvertible {
   public var debugDescription: String {
-    _map(mapName: \.debugDescription, mapNominal: \.debugDescription)._debugDescription
+    _map(mapNominal: \.debugDescription)._debugDescription
   }
 }
 

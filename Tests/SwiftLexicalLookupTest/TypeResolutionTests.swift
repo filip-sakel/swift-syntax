@@ -789,7 +789,7 @@ final class TypeResolutionTests: XCTestCase {
     // Link to the last type
     lookupSource.appendInterpolation(
       extensionState: .bound(
-        to: TestTypeName(stringLiteral: "_(File.swift)::T_0"),
+        to: GlobalTypeName(stringLiteral: "_(File.swift)::T_0"),
         dependencies: []
       )
     )
@@ -805,10 +805,10 @@ final class TypeResolutionTests: XCTestCase {
     for i in stride(from: n, to: 1, by: -1) {
       lookupSource.appendInterpolation(
         extensionState: .bound(
-          to: TestTypeName(stringLiteral: "_(File.swift)::T_\(i-1)"),
+          to: GlobalTypeName(stringLiteral: "_(File.swift)::T_\(i-1)"),
           dependencies: [
             ExtensionDependency(
-              baseType: TestTypeName(stringLiteral: "_(File.swift)::T_\(i)"),
+              baseType: GlobalTypeName(stringLiteral: "_(File.swift)::T_\(i)"),
               members: [
                 "Prev",
                 // 'T_{i-1}'
@@ -829,17 +829,17 @@ final class TypeResolutionTests: XCTestCase {
     }
 
     // Introduce (and check for) the cycle
-    var cycleElements: [(introducingDecl: String?, extension: String, base: TestTypeName)] = (0..<n - 1).map({ i in
+    var cycleElements: [(introducingDecl: String?, extension: String, base: GlobalTypeName)] = (0..<n - 1).map({ i in
       (
         introducingDecl: "typealias Prev = T_\(i)", extension: "extension T_\(i+2).Prev {}",
-        base: TestTypeName(stringLiteral: "_(File.swift)::T_\(i+1)")
+        base: GlobalTypeName(stringLiteral: "_(File.swift)::T_\(i+1)")
       )
     })
     cycleElements.append(
       (
         introducingDecl: "typealias Prev = T_\(n-1)" as String?,
         extension: "extension T_0.Last {}",
-        base: TestTypeName(stringLiteral: "_(File.swift)::T_\(n)")
+        base: GlobalTypeName(stringLiteral: "_(File.swift)::T_\(n)")
       )
     )
     lookupSource.appendInterpolation(
