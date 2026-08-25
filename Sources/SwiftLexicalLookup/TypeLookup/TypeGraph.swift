@@ -204,7 +204,7 @@ public struct GenericExtensionState<
   }
 }
 @_spi(_QualifiedLookupTests)
-public typealias ExtensionState = GenericExtensionState<ResolvedTypeSyntax>
+public typealias ExtensionState = GenericExtensionState<TypeResolver.ResolvedTypeSyntax>
 
 @_spi(_QualifiedLookupTests) public struct TypeTable: Hashable {
   fileprivate(set) var typeMembersToDecls: [Identifier: TypeMember]

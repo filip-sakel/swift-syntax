@@ -466,7 +466,7 @@ extension TypeResolver {
           },
           perform: {
             // Resolve extended type
-            let baseType: GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>
+            let baseType: GloballyResolvedTypeSyntax
             switch $0.bindExtension(extensionDecl) {
             case .success(let type):
               baseType = type
@@ -1136,7 +1136,7 @@ extension TypeResolver {
   /// things like extending an existential (e.g. `extension any Collection`).
   mutating func resolveExtendedTypeSyntax(
     extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> TypeResult<GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>> {
+  ) -> Result<GloballyResolvedTypeSyntax, Failure> {
     withLogging(
       request: "Extended type syntax `\(extensionDecl.extendedType.trimmedDescription)`",
       describe: \._debugDescription,
@@ -1147,7 +1147,7 @@ extension TypeResolver {
   /// Implements `resolveExtendedTypeSyntax`
   mutating func _resolveExtendedTypeSyntax(
     extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> TypeResult<GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>> {
+  ) -> Result<GloballyResolvedTypeSyntax, Failure> {
     guard _visitedTypeSyntax.isEmpty else {
       fatalError(
         "[SwiftLexicalLookup] Internal error: Resolve extended type syntax should only be called on a fresh `TypeResolver` instance."
@@ -1185,7 +1185,7 @@ extension TypeResolver {
       }
       // Return global reference
       return .success(
-        GenericResolvedTypeSyntax(
+        GloballyResolvedTypeSyntax(
           type: globalNominalRef,
           syntax: nominalType.syntax
         )
@@ -1288,7 +1288,7 @@ extension TypeResolver {
   /// syntax as the originating syntax.
   @_spi(_QualifiedLookupTests) public mutating func bindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> TypeResult<GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>> {
+  ) -> Result<GloballyResolvedTypeSyntax, Failure> {
     withLogging(
       request: "Binding extension `\(extensionDecl._memberlessDescription)`",
       describe: \._debugDescription,
@@ -1298,7 +1298,7 @@ extension TypeResolver {
 
   fileprivate mutating func _bindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> TypeResult<GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>> {
+  ) -> Result<GloballyResolvedTypeSyntax, Failure> {
     if let alreadyBoundResult = symbolTable.getExtensionResolvedType(extensionDecl) {
       return alreadyBoundResult
     }
@@ -1315,7 +1315,7 @@ extension TypeResolver {
     }
 
     return boundTypeResult.map({ (globalReference, mainDecl) in
-      GenericResolvedTypeSyntax<TypeGraph.GlobalNominalTypeRef>(
+      GloballyResolvedTypeSyntax(
         type: globalReference,
         syntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
       )

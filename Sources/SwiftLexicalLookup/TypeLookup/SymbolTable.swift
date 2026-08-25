@@ -115,7 +115,7 @@ extension SymbolTable {
 extension SymbolTable {
   public func resolveSyntax(
     typeSyntax: Attached<TypeSyntax>
-  ) -> ResolvedType {
+  ) -> TypeResolver.ResolvedType {
     var typeResolver = TypeResolver(symbolTable: self, _verbose: _verbose)
     return typeResolver.resolveSyntax(typeSyntax: typeSyntax)
   }
