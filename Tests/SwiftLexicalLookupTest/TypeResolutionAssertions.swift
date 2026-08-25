@@ -33,7 +33,7 @@ struct TypeResolutionMatcher {
   /// Annotates `TypeSyntax` with a type-resolution result using markers;
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
   enum Expectation {
-    case syntaxResolution(ResolvedType<Character>)
+    case syntaxResolution(TestResolvedType)
     case extensionBinding(TestExtensionState)
   }
 
@@ -279,7 +279,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
   /// `assertExpectation` forwards type syntax here.
   private func _assertTypeSyntax(
     typeSyntax: Attached<TypeSyntax>,
-    expectedType: ResolvedType<Character>,
+    expectedType: TestResolvedType,
     markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool,
@@ -290,7 +290,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
     }
 
     // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
-    let actualType: ResolvedType<ResolvedTypeSyntax> = symbolTable.resolveSyntax(
+    let actualType: ResolvedType = symbolTable.resolveSyntax(
       typeSyntax: typeSyntax
     )
 
@@ -492,7 +492,7 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     )
   }
   mutating func appendInterpolation(
-    type: ResolvedType<Character>,
+    type: TestResolvedType,
     file: StaticString = #file,
     line: UInt = #line
   ) {
@@ -503,14 +503,14 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    appendInterpolation(type: ResolvedType.failure(failure), file: file, line: line)
+    appendInterpolation(type: TestResolvedType.failure(failure), file: file, line: line)
   }
   mutating func appendInterpolation(
     nominals markers: [Character],
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    appendInterpolation(type: ResolvedType.nominalTypes(markers), file: file, line: line)
+    appendInterpolation(type: TestResolvedType.nominalTypes(markers), file: file, line: line)
   }
   mutating func appendInterpolation(
     nominal marker: Character,

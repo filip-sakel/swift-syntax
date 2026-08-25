@@ -12,10 +12,16 @@
 
 import SwiftSyntax
 
+@_spi(_QualifiedLookupTests)
+public typealias ResolvedType = GenericResolvedType<ResolvedTypeSyntax>
+
+@_spi(_QualifiedLookupTests)
+public typealias TestResolvedType = GenericResolvedType<Character>
+
 /// The type result of structural type resolution. `Result`
 /// represents a nominal type.
 @_spi(_QualifiedLookupTests)
-public indirect enum ResolvedType<NominalType: CustomDebugStringConvertible & Sendable>: Sendable {
+public indirect enum GenericResolvedType<NominalType: CustomDebugStringConvertible & Sendable>: Sendable {
   /// E.g. `(A) -> ()`
   case function(argumentCount: Int)
   /// E.g. `(a: A, _: B)`
@@ -25,14 +31,14 @@ public indirect enum ResolvedType<NominalType: CustomDebugStringConvertible & Se
   /// `Any` or suppressed types like `~Copyable`
   case anyType
   /// E.g. `A.Type`, `((A, B).Type).Type`
-  case metatype(base: ResolvedType)
+  case metatype(base: GenericResolvedType)
   // E.g. no type `A` in scope
   case failure(TypeResolver.GenericFailure<NominalType>)
 
   /// Maps the nominal types in `nominalTypes`.
   public func mapNominals<NewNominalType>(
     _ transform: (NominalType) -> NewNominalType
-  ) -> ResolvedType<NewNominalType> {
+  ) -> GenericResolvedType<NewNominalType> {
     switch self {
     case .function(let argumentCount):
       return .function(argumentCount: argumentCount)
@@ -52,7 +58,7 @@ public indirect enum ResolvedType<NominalType: CustomDebugStringConvertible & Se
 
 // MARK: Debug Description
 
-extension ResolvedType where NominalType == String {
+extension GenericResolvedType where NominalType == String {
   @_spi(_QualifiedLookupTests)
   public var _debugDescription: String {
     switch self {
@@ -73,7 +79,7 @@ extension ResolvedType where NominalType == String {
 }
 
 @_spi(_QualifiedLookupTests)
-extension ResolvedType: CustomDebugStringConvertible {
+extension GenericResolvedType: CustomDebugStringConvertible {
   public var debugDescription: String {
     mapNominals(\.debugDescription)._debugDescription
   }

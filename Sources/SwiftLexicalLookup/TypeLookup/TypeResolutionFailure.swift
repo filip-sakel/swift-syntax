@@ -45,13 +45,13 @@ extension TypeResolver {
     /// Only protocol, class and composition types can form compositions.
     ///
     /// I.e. We don't allow structs/enums/actors, functions, tuples.
-    case cannotComposeNonClassOrProtocol(resolved: ResolvedType<NominalType>)
-    case noTypeMember(member: ImplicitTypeReferenceComponent, in: ResolvedType<NominalType>)
+    case cannotComposeNonClassOrProtocol(resolved: GenericResolvedType<NominalType>)
+    case noTypeMember(member: ImplicitTypeReferenceComponent, in: GenericResolvedType<NominalType>)
 
     /// We can only extend structs/enums/classes/actors/protocols
     ///
     /// I.e. We can't extend tuples, functions, protocol compositions, metatypes, etc.
-    case cannotExtendNonNominal(nonnominal: ResolvedType<NominalType>)
+    case cannotExtendNonNominal(nonnominal: GenericResolvedType<NominalType>)
     /// Extensions may only appear at file scope (top-level).
     /// ```swift
     /// func f() {

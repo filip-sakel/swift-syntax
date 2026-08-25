@@ -517,11 +517,11 @@ final class TypeResolutionTests: XCTestCase {
       struct B {}
 
       // Tuples, functions, and metatypes don't have type members
-      var x: \(failure: .noTypeMember(member: myTypeMember, in: ResolvedType.tuple(labels: [nil, nil])))
+      var x: \(failure: .noTypeMember(member: myTypeMember, in: .tuple(labels: [nil, nil])))
              (A, B).MyType
       var y: \(failure: .other(PartialTypeResolutionFailure.functionType))
              ((A) -> B).MyType
-      var z: \(failure: .noTypeMember(member: myTypeMember, in: ResolvedType.metatype(base: .nominalTypes(["🟩"]))))
+      var z: \(failure: .noTypeMember(member: myTypeMember, in: .metatype(base: .nominalTypes(["🟩"]))))
              A.Type.MyType
       """ as LexicalLookupSource
     ])
