@@ -127,8 +127,9 @@ public struct ExtensionDependency: Sendable {
 public typealias InvalidatedExtensions = [ExtensionState]
 
 @_spi(_QualifiedLookupTests) public typealias BindingResult = (
-  resolvedTypeName: TypeResolver.TypeResult<
-    (globalReference: TypeGraph.GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
+  resolvedTypeName: Result<
+    (globalReference: TypeGraph.GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>),
+    TypeResolver.Failure
   >,
   invalidatedExtensions: InvalidatedExtensions
 )
@@ -1634,8 +1635,9 @@ extension TypeGraph {
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionDeclModule: ModuleName,
     extensionFileConfiguredRegions: ConfiguredRegions?,
-    to rawResult: TypeResolver.TypeResult<
-      (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>)
+    to rawResult: Result<
+      (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
+      TypeResolver.Failure
     >,
     dependencyTracker: DependencyTracker,
     symbolTable: borrowing SymbolTable
@@ -1656,8 +1658,9 @@ extension TypeGraph {
     // We create a new type-resolution result that converts successful type
     // resolutions into failures if they cause a cycle.
     let result:
-      TypeResolver.TypeResult<
-        (globalReference: TypeGraph.GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
+      Result<
+        (globalReference: TypeGraph.GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>),
+        TypeResolver.Failure
       >
     switch rawResult {
     case .success(let (extendedTypeName, mainDecl)):
@@ -2135,8 +2138,9 @@ extension TypeGraph {
   /// or the binding the failure; returns `nil` for non-admitted extensions.
   func getExtensionResolvedType(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> TypeResolver.TypeResult<
-    (globalReference: TypeGraph.GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
+  ) -> Result<
+    (globalReference: TypeGraph.GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>),
+    TypeResolver.Failure
   >? {
     // Get the extension's state (or `nil` if unadmitted)
     guard let extensionState = extensionsToState[extensionDecl] else { return nil }

@@ -51,8 +51,6 @@ public struct TypeResolver {
     return result
   }
 
-  public typealias TypeResult<ResolvedType> = Result<ResolvedType, Failure>
-
   let symbolTable: SymbolTable
 
   /// The ordered type syntax we visited; only access through
@@ -699,7 +697,7 @@ extension TypeResolver {
     nominalDecl: Attached<NominalTypeDeclSyntax>,
     declContext: DeclContext,
     originatingSyntax: Attached<TypeLikeSyntax>
-  ) -> TypeResult<ResolvedTypeSyntax> {
+  ) -> Result<ResolvedTypeSyntax, Failure> {
     assert(
       declContext.syntax.range.contains(nominalDecl.node.range),
       "[SwiftLexicalLookup] Internal error: Decl context doesn't contain declaration."
@@ -1207,7 +1205,7 @@ extension TypeResolver {
   /// extensions bound.
   @_spi(_QualifiedLookupTests) public mutating func resolveType(
     typeReference: ResolvedTypeSyntax
-  ) -> TypeResult<ResolvedTypeSyntax> {
+  ) -> Result<ResolvedTypeSyntax, Failure> {
     withLogging(
       request: "Extended nominal`\(typeReference._succinctDescription)`",
       describe: \._debugDescription,
@@ -1218,7 +1216,7 @@ extension TypeResolver {
   /// Implements `resolveNominalType`
   fileprivate mutating func _resolveType(
     typeReference: ResolvedTypeSyntax
-  ) -> TypeResult<ResolvedTypeSyntax> {
+  ) -> Result<ResolvedTypeSyntax, Failure> {
     // Skip extension binding for local declarations.
     //
     // For instance, there's no way to extend `A` in `func f() { struct A {} }`

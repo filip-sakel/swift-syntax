@@ -116,8 +116,9 @@ extension SymbolTable {
   /// TODO: Consider inlining into `_bindRequestedExtension`
   fileprivate func _admitExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    to result: TypeResolver.TypeResult<
-      (qualifiedName: TypeGraph.GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>)
+    to result: Result<
+      (qualifiedName: TypeGraph.GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
+      TypeResolver.Failure
     >,
     dependencies: DependencyTracker,
     verbose: Bool
