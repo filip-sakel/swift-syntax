@@ -133,12 +133,31 @@ extension GlobalTypeName.Component {
 }
 
 extension GlobalTypeName {
+  /// Construct a `GlobalTypeName` whose `debugDescription` is the given string
+  /// for testing. Any use outside of testing is unchecked and may result in
+  /// crashes.
   @_spi(_QualifiedLookupTests)
-  public init(_testComponents components: [Component]) {
-    guard let instance = GlobalTypeName(_components: components) else {
-      fatalError("GlobalTypeName must have at least one component.")
+  public init(_testName string: String, file: StaticString = #file, line: UInt = #line) {
+    // This is very hacky but basically an external module + a type name will
+    // print verbatim with a '::' between them. So, split the string at '::'
+    // (which every global name has), and use the first part as the qualifier
+    // and the tail as the "name".
+    guard let firstQualifierSeparatorRange = string.firstRange(of: "::") else {
+      fatalError("GlobalTypeName '\(string)' must have at least one qualifier separator '::'.")
     }
-    self = instance
+    let (firstQualifier, tail) = (
+      string[..<firstQualifierSeparatorRange.lowerBound].description,
+      string[firstQualifierSeparatorRange.upperBound...].description
+    )
+    self.init(component: Component(_testQualifier: Qualifier.external(moduleName: firstQualifier), name: tail))
+
+    // Ensure we round-trip correctly
+    precondition(
+      self.debugDescription == string,
+      "Unexpectedly parsed global type name '\(string)' wrong.",
+      file: file,
+      line: line
+    )
   }
 }
 
