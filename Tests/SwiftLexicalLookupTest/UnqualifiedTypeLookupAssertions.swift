@@ -257,19 +257,3 @@ extension GenericUnqualifiedTypeLookupResult where Scope == Character? {
     )
   }
 }
-
-extension TypeResolver.ImplicitTypeReference {
-  // Initializer accepting `TypeSyntax` so we can
-  // use string literals for the syntax.
-  init(
-    module: Identifier? = nil,
-    name: Identifier,
-    typeSyntax: Attached<TypeSyntax>
-  ) {
-    self.init(
-      module: module,
-      name: name,
-      introducingSyntax: Attached<TypeLikeSyntax>(typeSyntax)
-    )
-  }
-}

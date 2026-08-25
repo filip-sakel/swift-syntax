@@ -16,8 +16,6 @@ import SwiftSyntax
 import XCTest
 
 final class TypeResolutionTests: XCTestCase {
-  typealias ImplicitTypeReference = TypeResolver.ImplicitTypeReference
-
   func testSimpleCase() {
     assertTypeResolution(
       [
@@ -238,9 +236,9 @@ final class TypeResolutionTests: XCTestCase {
         compilerVersion: VersionTuple(6, 2)
       )
     }
-    let memberT = ImplicitTypeReference(
+    let memberT = TypeReference(
       name: Identifier(canonicalName: "T"),
-      typeSyntax: "T"
+      introducingSyntax: "T"
     )
 
     // We'll look up `A.T` with different flags
@@ -502,9 +500,9 @@ final class TypeResolutionTests: XCTestCase {
   // MARK: Non-Nominal Members
   func testNonNominalMembers() {
     // A member "MyType"
-    let myTypeMember = ImplicitTypeReference(
+    let myTypeMember = TypeReference(
       name: "MyType",
-      typeSyntax: "MyType"
+      introducingSyntax: "MyType"
     )
     assertTypeResolution([
       "MyFile.swift": """

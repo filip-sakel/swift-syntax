@@ -42,7 +42,7 @@ extension TypeResolver {
     ///
     /// I.e. We don't allow structs/enums/actors, functions, tuples.
     case cannotComposeNonClassOrProtocol(resolved: GenericTypeResult<NominalType>)
-    case noTypeMember(member: ImplicitTypeReference, in: GenericTypeResult<NominalType>)
+    case noTypeMember(member: TypeReference, in: GenericTypeResult<NominalType>)
 
     /// We can only extend structs/enums/classes/actors/protocols
     ///
