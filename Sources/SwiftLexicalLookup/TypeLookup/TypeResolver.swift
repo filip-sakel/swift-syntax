@@ -57,8 +57,56 @@ public struct TypeResolver {
 
   let symbolTable: SymbolTable
 
-  var visitedTypeSyntax: OrderedSet<Attached<TypeSyntax>> = []
-  var dependencyTracker: DependencyTracker = DependencyTracker()
+  /// The ordered type syntax we visited; only access through
+  /// `insertVisitedTypeSyntax` and `removeVisitedTypeSyntax`.
+  private var _visitedTypeSyntax: [Attached<TypeSyntax>] = []
+  /// The set of type syntax we visited; only access through
+  /// `insertVisitedTypeSyntax` and `removeVisitedTypeSyntax`.
+  private var _visitedTypeSyntaxToIndex: [Attached<TypeSyntax>: Int] = [:]
+  /// Marks the type syntax as visited, or returns the already-visited type syntax
+  /// if there's a cycle. Make sure to add a matching `removeVisitedTypeSyntax`.
+  private mutating func insertVisitedTypeSyntax(_ typeSyntax: Attached<TypeSyntax>) -> [TypeSyntax]? {
+    // If we've already seen this syntax, there's a cycle so return it
+    if let existingIndex = _visitedTypeSyntaxToIndex[typeSyntax] {
+      // We might have valid references before the actual cycle; chop those off
+      // to isolate the cycle.
+      //
+      // E.g.:
+      //   typealias A = B
+      //   typealias B = A
+      //   func f(_: A) // <- Lookup here
+      // Starting from `A`, `visitedTypeSyntax` would be:
+      //   [
+      //     A // from f(_: A),
+      //     B // from typealias A = B
+      //     A // from typealias B = A
+      //   ]
+      // And we isolate to the cycle [B, A]
+      return _visitedTypeSyntax[existingIndex...].map(\.node)
+    }
+    // Add this syntax to the hash map and the array
+    _visitedTypeSyntaxToIndex[typeSyntax] = _visitedTypeSyntax.count
+    _visitedTypeSyntax.append(typeSyntax)
+    return nil
+  }
+  private mutating func removeVisitedTypeSyntax(
+    _ typeSyntax: Attached<TypeSyntax>,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) {
+    // Get the syntax's index, or trap
+    guard let index = _visitedTypeSyntaxToIndex[typeSyntax] else {
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Unexpectedly asked to remove non-visited `\(typeSyntax.debugDescription)`.",
+        file: file,
+        line: line
+      )
+    }
+    // Remove
+    _visitedTypeSyntax.remove(at: index)
+    _visitedTypeSyntaxToIndex[typeSyntax] = nil
+  }
+  private(set) var dependencyTracker: DependencyTracker = DependencyTracker()
 
   let _verbose: Bool
   /// The number of `withLogging` calls we can nest. Useful for debugging infinite loops
@@ -101,27 +149,11 @@ extension TypeResolver {
     typeSyntax: Attached<TypeSyntax>
   ) -> TypeResult<ResolvedType<ResolvedTypeSyntax>> {
     // Ensure we're not forming a cycle
-    if let existingSyntaxIndex = visitedTypeSyntax.firstIndex(of: typeSyntax) {
-      // We might have valid references before the actual cycle; chop those off
-      // to isolate the cycle.
-      //
-      // E.g.:
-      //   typealias A = B
-      //   typealias B = A
-      //   func f(_: A) // <- Lookup here
-      // Starting from `A`, `visitedTypeSyntax` would be:
-      //   [
-      //     A // from f(_: A),
-      //     B // from typealias A = B
-      //     A // from typealias B = A
-      //   ]
-      // And we isolate to the cycle [B, A]
-      let isolatedCycle = Array(visitedTypeSyntax[existingSyntaxIndex...])
-      return .failure(Failure.cyclicalTypeReference(cycle: isolatedCycle.map(\.node)))
+    if let cycle = insertVisitedTypeSyntax(typeSyntax) {
+      return .failure(Failure.cyclicalTypeReference(cycle: cycle))
     }
     // Append this type syntax
-    visitedTypeSyntax.append(typeSyntax)
-    defer { visitedTypeSyntax.remove(typeSyntax) }
+    defer { removeVisitedTypeSyntax(typeSyntax) }
 
     // We assert the file root is registered in the symbol table.
     guard let fileInfo = symbolTable.getFileInfo(typeSyntax.fileRoot) else {
@@ -1107,7 +1139,7 @@ extension TypeResolver {
   mutating func _resolveExtendedTypeSyntax(
     extensionDecl: Attached<ExtensionDeclSyntax>
   ) -> TypeResult<GenericResolvedTypeSyntax<GlobalNominalTypeRef>> {
-    guard visitedTypeSyntax == [] else {
+    guard _visitedTypeSyntax.isEmpty else {
       fatalError(
         "[SwiftLexicalLookup] Internal error: Resolve extended type syntax should only be called on a fresh `TypeResolver` instance."
       )
