@@ -85,21 +85,22 @@ public struct TypeResolver {
     _visitedTypeSyntax.append(typeSyntax)
     return nil
   }
-  private mutating func removeVisitedTypeSyntax(
+  private mutating func removeLastVisitedTypeSyntax(
     _ typeSyntax: Attached<TypeSyntax>,
     file: StaticString = #file,
     line: UInt = #line
   ) {
+    let expectedIndex = _visitedTypeSyntax.count - 1
     // Get the syntax's index, or trap
-    guard let index = _visitedTypeSyntaxToIndex[typeSyntax] else {
+    guard _visitedTypeSyntaxToIndex[typeSyntax] == expectedIndex else {
       fatalError(
-        "[SwiftLexicalLookup] Internal error: Unexpectedly asked to remove non-visited `\(typeSyntax.debugDescription)`.",
+        "[SwiftLexicalLookup] Internal error: Unexpectedly asked to remove non-visited/non-last `\(typeSyntax.debugDescription)` with visited \(_visitedTypeSyntax).",
         file: file,
         line: line
       )
     }
     // Remove
-    _visitedTypeSyntax.remove(at: index)
+    _visitedTypeSyntax.remove(at: expectedIndex)
     _visitedTypeSyntaxToIndex[typeSyntax] = nil
   }
   private(set) var dependencyTracker: DependencyTracker = DependencyTracker()
@@ -149,7 +150,7 @@ extension TypeResolver {
       return .failure(Failure.cyclicalTypeReference(cycle: cycle))
     }
     // Append this type syntax
-    defer { removeVisitedTypeSyntax(typeSyntax) }
+    defer { removeLastVisitedTypeSyntax(typeSyntax) }
 
     // We assert the file root is registered in the symbol table.
     guard let fileInfo = symbolTable.getFileInfo(typeSyntax.fileRoot) else {
