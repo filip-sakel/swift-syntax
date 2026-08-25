@@ -63,8 +63,10 @@ extension TypeResolver {
     ///   func f(_: A) {} // No diagnostic here
     case invalidAliasedType(Self)
     case invalidComposition([(TypeSyntax, Self)])
-    // TODO: Get rid of this
-    case other(any Error)
+    /// An error in partial-type resolution where further type-resolution
+    /// steps don't make sense. For instance, we can't parse a wildcard type
+    /// or an identifier type syntax with an invalid identifier.
+    case partialTypeResolutionFailure(PartialTypeResolutionFailure)
 
     /// We defer generic parameters/associated types to the type checker.
     case genericParameterOrAssociatedType
@@ -187,8 +189,8 @@ extension TypeResolver.GenericFailure {
       return .noTypeInScope
     case .extensionNotAtFileScope(let extensionDecl):
       return .extensionNotAtFileScope(extensionDecl: extensionDecl)
-    case .other(let otherFailure):
-      return .other(otherFailure)
+    case .partialTypeResolutionFailure(let partialResolutionFailure):
+      return .partialTypeResolutionFailure(partialResolutionFailure)
     case .genericParameterOrAssociatedType:
       return .genericParameterOrAssociatedType
     case .ambiguousTypeDecl(let ambiguousDecls):
@@ -338,8 +340,8 @@ extension TypeResolver.GenericFailure: CustomDebugStringConvertible {
         return "  \(childSyntax.trimmedDescription): \(describeNested(childFailure))"
       }).joined(separator: ",\n")
       return ".invalidComposition([\(invalidChildrenDescription)])"
-    case .other(let otherFailure):
-      return ".other(\(String(reflecting: otherFailure)))"
+    case .partialTypeResolutionFailure(let partialResolutionFailure):
+      return ".partialTypeResolutionFailure(\(partialResolutionFailure.debugDescription))"
     case .genericParameterOrAssociatedType:
       return ".genericParameterOrAssociatedType"
     case .invalidMembers(let invalidMembers):
@@ -388,7 +390,7 @@ extension TypeResolver.Failure {
     // No nested ``TypeQualifierFailure`` => nil
     case .invalidNameToken(_), .noTypeInScope, .cannotComposeNonClassOrProtocol(_),
       .noTypeMember(member: _, in: _), .cannotExtendNonNominal(nonnominal: _),
-      .extensionNotAtFileScope(extensionDecl: _), .other(_),
+      .extensionNotAtFileScope(extensionDecl: _), .partialTypeResolutionFailure(_),
       .genericParameterOrAssociatedType, .ambiguousTypeDecl(_),
       .syntaxNotInSymbolTable, .syntaxInDisabledRegion, .extensionNotBoundYet,
       // Extension cycles are distinct

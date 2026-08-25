@@ -13,6 +13,8 @@
 import SwiftIfConfig
 import SwiftSyntax
 
+// MARK: GlobalTypeName
+
 extension TypeGraph {
   /// A global type name, `Swift::Int._(MyFileA.swift)::MyType`.
   /// Used by `TypeGraph` as unique identifier for types.
@@ -122,18 +124,6 @@ extension TypeGraph.GlobalTypeName {
   }
 }
 
-// MARK: Test Hooks
-
-extension TypeGraph.GlobalTypeName.Component {
-  @_spi(_QualifiedLookupTests)
-  public init(_testQualifier qualifier: TypeGraph.GlobalTypeName.Qualifier, name: String) {
-    self.init(
-      qualifier: qualifier,
-      name: name
-    )
-  }
-}
-
 extension TypeGraph.GlobalTypeName {
   /// Construct a `GlobalTypeName` whose `debugDescription` is the given string
   /// for testing. Any use outside of testing is unchecked and may result in
@@ -163,7 +153,7 @@ extension TypeGraph.GlobalTypeName {
   }
 }
 
-// MARK: Nominal-Type Ref
+// MARK: Type Ref
 
 extension TypeGraph {
   /// A reference to a resolved global nominal type vended by `TypeGraph`.
@@ -284,5 +274,17 @@ extension TypeGraph.TypeRef: CustomDebugStringConvertible {
     guard case .global(let globalReference) = storage else { return nil }
 
     return globalReference.name
+  }
+}
+
+// MARK: Test Hooks
+
+extension TypeGraph.GlobalTypeName.Component {
+  @_spi(_QualifiedLookupTests)
+  public init(_testQualifier qualifier: TypeGraph.GlobalTypeName.Qualifier, name: String) {
+    self.init(
+      qualifier: qualifier,
+      name: name
+    )
   }
 }

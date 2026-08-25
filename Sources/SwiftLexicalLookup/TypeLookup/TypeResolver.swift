@@ -170,7 +170,7 @@ extension TypeResolver {
       return TypeResult.anyType
     case .success(.tuple(let labels)):
       return .tuple(labels: labels)
-    case .success(.typeIdentifier(.success(let component))):
+    case .success(.typeIdentifier(let component)):
       return resolveUnqualifiedReference(typeComponent: component)
     case .success(.metatype(let baseTypeSyntax)):
       let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax)
@@ -181,7 +181,7 @@ extension TypeResolver {
       default:
         return TypeResult.metatype(base: baseTypeResult)
       }
-    case .success(.member(let baseTypeSyntax, .success(let memberComponent))):
+    case .success(.member(let baseTypeSyntax, let memberComponent)):
       let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax)
       return resolveMember(baseType: baseTypeResult, typeMember: memberComponent)
     case .success(.composition(let childTypes)):
@@ -197,10 +197,7 @@ extension TypeResolver {
       }
       return reduceComposition(syntaxToTypes)
     case .failure(let failure):
-      return .failure(Failure.other(failure))
-    case .success(.member(base: _, .failure(let nameFailure))),
-      .success(.typeIdentifier(.failure(let nameFailure))):
-      return .failure(Failure.other(nameFailure))
+      return .failure(Failure.partialTypeResolutionFailure(failure))
     }
   }
 

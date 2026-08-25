@@ -26,6 +26,7 @@ extension SymbolTable {
       _requestedExtensions.append(element)
     }
   }
+  /// Removes the first requested extension if it exists, or returns `nil`.
   func removeFirstRequestedExtension() -> Attached<ExtensionDeclSyntax>? {
     guard !requestedExtensions.isEmpty else { return nil }
     let first = _requestedExtensions.removeFirst()

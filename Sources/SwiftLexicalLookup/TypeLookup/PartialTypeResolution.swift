@@ -32,11 +32,11 @@ public enum PartiallyResolvedType {
   case metatype(base: Attached<TypeSyntax>)
   /// A bare type identifier, such as 'A', 'Self', '`Self`', '`Any`',
   /// 'Module::A', or 'Module::Any'.
-  case typeIdentifier(Result<TypeReference, InvalidTypeIdentifierFailure>)
+  case typeIdentifier(TypeReference)
   case tuple(labels: [Identifier?])
   case member(
     base: Attached<TypeSyntax>,
-    memberComponent: Result<TypeReference, InvalidTypeIdentifierFailure>
+    memberComponent: TypeReference
   )
   /// A composition of type syntax.
   ///
@@ -85,11 +85,10 @@ public enum PartialTypeResolutionFailure: Error {
   case wildcardType
   /// We report unknown supressed types, e.g., `~CustomStringConvertible`
   case unknownSuppressedType
-}
 
-@_spi(_QualifiedLookupTests)
-public struct InvalidTypeIdentifierFailure: Error {
-  public init() {}
+  /// The type identifier of this `IdentifierTypeSyntax` or `MemberTypeSyntax`
+  /// is invalid.
+  case invalidTypeIdentifier
 }
 
 // MARK: Helpers
@@ -137,7 +136,7 @@ private func _parseModuleAndIdentifier(
   moduleNameToken: TokenSyntax?,
   name: Identifier?,
   typeSyntax: Attached<TypeSyntax>
-) -> Result<TypeReference, InvalidTypeIdentifierFailure> {
+) -> Result<TypeReference, PartialTypeResolutionFailure> {
   switch (moduleNameToken.map({ Identifier(validating: $0) }), name) {
   // Valid cases are:
   // (a) no module, valid name
@@ -149,7 +148,7 @@ private func _parseModuleAndIdentifier(
   // Invalid cases
   // (c) invalid name/module
   case (_, nil), (nil?, _):
-    return .failure(InvalidTypeIdentifierFailure())
+    return .failure(.invalidTypeIdentifier)
   }
 }
 
@@ -275,7 +274,7 @@ extension Attached where Node: TypeSyntaxProtocol {
         name: name,
         typeSyntax: _castChild(TypeSyntax(identifierType))
       )
-      return Result.success(PartiallyResolvedType.typeIdentifier(parsedResult))
+      return parsedResult.map(PartiallyResolvedType.typeIdentifier)
     case .memberType(let memberType):
       // Resolve base type
       //
@@ -318,9 +317,9 @@ extension Attached where Node: TypeSyntaxProtocol {
         name: name,
         typeSyntax: _castChild(TypeSyntax(memberType))
       )
-      return Result.success(
-        PartiallyResolvedType.member(base: _castChild(memberType.baseType), memberComponent: parsedResult)
-      )
+      return parsedResult.map({
+        PartiallyResolvedType.member(base: _castChild(memberType.baseType), memberComponent: $0)
+      })
 
     // Base cases that don't produce types
     case .namedOpaqueReturnType, .classRestrictionType:
@@ -339,31 +338,31 @@ extension Attached where Node: TypeSyntaxProtocol {
     case .optionalType(let optionalType):
       return Result.success(
         PartiallyResolvedType.typeIdentifier(
-          Result.success(._optionalType(type: _castChild(TypeSyntax(optionalType))))
+          ._optionalType(type: _castChild(TypeSyntax(optionalType)))
         )
       )
     case .implicitlyUnwrappedOptionalType(let implicitlyUnwrappedOptionalType):
       return Result.success(
         PartiallyResolvedType.typeIdentifier(
-          Result.success(._optionalType(type: _castChild(TypeSyntax(implicitlyUnwrappedOptionalType))))
+          ._optionalType(type: _castChild(TypeSyntax(implicitlyUnwrappedOptionalType)))
         )
       )
     case .arrayType(let arrayType):
       return Result.success(
         PartiallyResolvedType.typeIdentifier(
-          Result.success(._arrayType(type: _castChild(TypeSyntax(arrayType))))
+          ._arrayType(type: _castChild(TypeSyntax(arrayType)))
         )
       )
     case .inlineArrayType(let inlineArrayType):
       return Result.success(
         PartiallyResolvedType.typeIdentifier(
-          Result.success(._inlineArrayType(type: _castChild(TypeSyntax(inlineArrayType))))
+          ._inlineArrayType(type: _castChild(TypeSyntax(inlineArrayType)))
         )
       )
     case .dictionaryType(let dictionaryType):
       return Result.success(
         PartiallyResolvedType.typeIdentifier(
-          Result.success(._dictionaryType(type: _castChild(TypeSyntax(dictionaryType))))
+          ._dictionaryType(type: _castChild(TypeSyntax(dictionaryType)))
         )
       )
 
@@ -400,12 +399,6 @@ extension Result where Success: CustomDebugStringConvertible, Failure: CustomDeb
   }
 }
 
-extension InvalidTypeIdentifierFailure: CustomDebugStringConvertible {
-  public var debugDescription: String {
-    "InvalidTypeIdentifierFailure()"
-  }
-}
-
 extension PartialTypeResolutionFailure: CustomDebugStringConvertible {
   public var debugDescription: String {
     switch self {
@@ -413,6 +406,7 @@ extension PartialTypeResolutionFailure: CustomDebugStringConvertible {
     case .missingType: return ".missingType"
     case .unknownSuppressedType: return ".unknownSuppressedType"
     case .wildcardType: return ".wildcardType"
+    case .invalidTypeIdentifier: return ".invalidTypeIdentifier"
     }
   }
 }
@@ -422,14 +416,14 @@ extension PartiallyResolvedType: CustomDebugStringConvertible {
     switch self {
     case .anyType:
       return ".anyType"
-    case .typeIdentifier(let typeIdentifierResult):
-      return ".typeIdentifier(\(typeIdentifierResult._debugDescription))"
+    case .typeIdentifier(let component):
+      return ".typeIdentifier(\(component.debugDescription))"
     case .tuple(let labels):
       return ".tuple([\(labels.map({ $0?.name ?? "nil" }).joined(separator: ", "))])"
     case .metatype(let base):
       return ".metatype(base: `\(base.trimmedDescription)`)"
     case .member(let base, let memberComponent):
-      return ".member(base: `\(base.trimmedDescription)`, memberComponent: \(memberComponent._debugDescription))"
+      return ".member(base: `\(base.trimmedDescription)`, memberComponent: \(memberComponent.debugDescription))"
     case .composition(let children):
       return ".composition([\(children.map(\.trimmedDescription))])"
     }
