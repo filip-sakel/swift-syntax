@@ -27,6 +27,7 @@ import SwiftSyntax
 @_spi(_QualifiedLookupTests)
 public struct GlobalTypeName: Sendable, Hashable {
   public enum Qualifier: Sendable, Hashable {
+    // E.g. 'File.swift' or 'Subdirectory/OtherFile.swift'
     case `internal`(fileID: String)
     case external(moduleName: String)
   }
@@ -34,14 +35,7 @@ public struct GlobalTypeName: Sendable, Hashable {
   /// `Swift::Int` (external) and `_(FileA.swift)::MyType` (internal).
   public struct Component: Sendable, Hashable {
     private let qualifier: Qualifier
-    private let name: Identifier
-    private let debugFileMap: DebugFileMap
-
-    fileprivate init(_uncheckedQualifier qualifier: Qualifier, name: Identifier, debugFileMap: DebugFileMap) {
-      self.qualifier = qualifier
-      self.name = name
-      self.debugFileMap = debugFileMap
-    }
+    private let name: String
   }
 
   /// The type's components.
@@ -85,13 +79,12 @@ extension GlobalTypeName.Component {
     )
 
     self.init(
-      _uncheckedQualifier: GlobalTypeName.Qualifier(
+      qualifier: GlobalTypeName.Qualifier(
         file: file,
         fileInfo: fileInfo,
         internalModule: symbolTable.moduleName
       ),
-      name: name,
-      debugFileMap: symbolTable.debugFileMap
+      name: name.name
     )
   }
 }
@@ -124,6 +117,28 @@ extension GlobalTypeName {
       return nil
     }
     return (base, member)
+  }
+}
+
+// MARK: Test Hooks
+
+extension GlobalTypeName.Component {
+  @_spi(_QualifiedLookupTests)
+  public init(_testQualifier qualifier: GlobalTypeName.Qualifier, name: String) {
+    self.init(
+      qualifier: qualifier,
+      name: name
+    )
+  }
+}
+
+extension GlobalTypeName {
+  @_spi(_QualifiedLookupTests)
+  public init(_testComponents components: [Component]) {
+    guard let instance = GlobalTypeName(_components: components) else {
+      fatalError("GlobalTypeName must have at least one component.")
+    }
+    self = instance
   }
 }
 
@@ -197,7 +212,7 @@ extension GlobalTypeName.Qualifier: CustomDebugStringConvertible {
 extension GlobalTypeName.Component: CustomDebugStringConvertible {
   /// E.g. '_(MyFile.swift)::MyType', 'ExternalModule::OtherType'
   public var debugDescription: String {
-    "\(qualifier.debugDescription)::\(name.name)"
+    "\(qualifier.debugDescription)::\(name)"
   }
 }
 

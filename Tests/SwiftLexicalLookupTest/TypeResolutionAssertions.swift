@@ -10,6 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+import RegexBuilder
 import SwiftIfConfig
 @_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) import SwiftLexicalLookup
 import SwiftParser
@@ -321,13 +322,6 @@ extension TypeResolutionMatcher: LexicalMatcher {
     var failures = [ExpectationFailure]()
     switch (expectedRawResult, actualRawResult) {
     case (.success(let expectedType), .success(let actualType)):
-      let expectedTypeDescription: String = expectedType.mapNominals({ marker -> String in
-        guard let targetDefinition = markersToDefinitions[marker] else {
-          failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
-          return ""
-        }
-        return targetDefinition.annotation.description
-      })._debugDescription
       let actualTypeDescription: String = actualType.mapNominals({ nominalType -> String in
         guard let targetDefinition = syntaxToDefinitions[nominalType.type.mainDecl.node] else {
           failures.append(
@@ -335,6 +329,26 @@ extension TypeResolutionMatcher: LexicalMatcher {
               syntaxDescription: nominalType.type.globalName.debugDescription
             )
           )
+          return ""
+        }
+        // Ensure we got the right name
+        let actualName = nominalType.type.globalName?.debugDescription
+        if let expectedName = targetDefinition.annotation.name, actualName != expectedName {
+          failures.append(
+            ExpectationFailure.other(
+              failure:
+                "Expected name '\(expectedName)' for type marked '\(targetDefinition.annotation.marker)' but got '\(actualName?.debugDescription ?? "nil")'."
+            )
+          )
+          return ""
+        }
+
+        return targetDefinition.annotation.description
+      })._debugDescription
+
+      let expectedTypeDescription: String = expectedType.mapNominals({ marker -> String in
+        guard let targetDefinition = markersToDefinitions[marker] else {
+          failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
           return ""
         }
         return targetDefinition.annotation.description
@@ -351,6 +365,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
           )
         )
       }
+
     case (.failure(let expectedFailure), .failure(let actualFailure)):
       // Describe the expected failure
       func markerToQualifiedName(marker: Character) -> String {
@@ -613,5 +628,85 @@ extension TestExtensionState {
       dependencies: dependencies,
       resolvedType: Result.failure(TestTypeResolutionFailure.cyclicalExtensionDependency(cycle))
     )
+  }
+}
+
+extension GlobalTypeName: ExpressibleByStringLiteral {
+  public init(stringLiteral string: String) {
+    let componentCapture = TryCapture<(Substring, Component)>(
+      {
+        ChoiceOf<(Substring, Qualifier?, Qualifier?)> {
+          Regex<(Substring, Qualifier)> {
+            "_("
+            Capture<(Substring, Qualifier)>(
+              Regex({
+                OneOrMore<Substring>(.word)
+                ".swift"
+              }),
+              transform: { (fileName: Substring) -> Qualifier in
+                Qualifier.internal(fileID: fileName.description)
+              }
+            )
+            ")"
+          }
+
+          Regex<(Substring, Qualifier)> {
+            Capture<(Substring, Qualifier)>(
+              CharacterClass.word,
+              transform: { (moduleName: Substring) -> Qualifier in
+                Qualifier.external(moduleName: moduleName.description)
+              }
+            )
+          }
+        }
+
+        Capture(
+          CharacterClass.word,
+          transform: { (name: Substring) in
+            name.description
+          }
+        )
+      },
+      transform: { (_, qualifier: Qualifier?, _, name: String?) in
+        guard let qualifier, let name else {
+          return nil
+        }
+        return Component(_testQualifier: qualifier, name: name)
+      }
+    )
+    // let tailComponentCapture = Regex<(Substring, Component)> {
+    //   "."
+    //   componentCapture
+    // }
+    // let regex = Regex {
+    //   componentCapture
+    //     ZeroOrMore<(Substring, [Component])> {
+    //       tailComponentCapture
+    //     }
+    //   )
+    // }
+
+    var components = [Component]()
+    var substring = string[...]
+    while !substring.isEmpty {
+      guard let match = substring.firstMatch(of: componentCapture) else {
+        fatalError("Can't parse last portion of GlobalTypeName \(substring)")
+      }
+      substring = substring[match.range.upperBound...]
+      components.append(match.output.1)
+    }
+
+    self.init(_testComponents: components)
+
+    // let components = string.split(separator: ".").map({ componentString -> Component in
+    //   // Parse the qualifier and name
+    //   let qualifierAndName = componentString.split(separator: "::")
+    //   guard qualifierAndName.count != 2 else {
+    //     fatalError("Type name '\(string)' needs to have exactly two '::' separator.")
+    //   }
+    //   let (qualifier, name) = (qualifierAndName[0], qualifierAndName[1])
+    //   // Detect if this is internal by whether
+    //   return Component(_testQualifier: qualifierAndName[0].debugDescription, isInternal: true, name: "")
+    // })
   }
 }
