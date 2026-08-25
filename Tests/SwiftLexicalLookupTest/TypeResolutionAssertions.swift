@@ -655,6 +655,7 @@ extension TestExtensionState {
   }
 }
 
+@_spi(_QualifiedLookupTests)
 extension TypeGraph.GlobalTypeName: ExpressibleByStringLiteral {
   public init(stringLiteral string: String) {
     self.init(_testName: string)

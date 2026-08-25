@@ -171,7 +171,7 @@ extension TypeResolver {
     case .success(.tuple(let labels)):
       return .tuple(labels: labels)
     case .success(.typeIdentifier(.success(let component))):
-      return resolveUnqualifiedReference(typeComponent: ImplicitTypeReferenceComponent(from: component))
+      return resolveUnqualifiedReference(typeComponent: ImplicitTypeReference(from: component))
     case .success(.metatype(let baseTypeSyntax)):
       let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax)
       // Wrap the base type/failure and return
@@ -183,7 +183,7 @@ extension TypeResolver {
       }
     case .success(.member(let baseTypeSyntax, .success(let memberComponent))):
       let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax)
-      return resolveMember(baseType: baseTypeResult, typeMember: ImplicitTypeReferenceComponent(from: memberComponent))
+      return resolveMember(baseType: baseTypeResult, typeMember: ImplicitTypeReference(from: memberComponent))
     case .success(.composition(let childTypes)):
       var syntaxToTypes = [
         (
@@ -326,7 +326,7 @@ extension TypeResolver {
   ///
   /// Note: We don't resolve generic parameters.
   fileprivate mutating func resolveUnqualifiedReference(
-    typeComponent: ImplicitTypeReferenceComponent
+    typeComponent: ImplicitTypeReference
   ) -> TypeResult {
     return withLogging(
       request: "Type reference `\(typeComponent.debugDescription)`",
@@ -363,7 +363,7 @@ extension TypeResolver {
 
   /// Implements `resolveUnqualifiedReference`
   fileprivate mutating func _resolveUnqualifiedReference(
-    typeComponent: ImplicitTypeReferenceComponent
+    typeComponent: ImplicitTypeReference
   ) -> TypeResult {
     // Perfom unqualified lookup up to find the base type's declaration
     //
@@ -936,7 +936,7 @@ extension TypeResolver {
   /// the appropriate error.
   fileprivate mutating func resolveMember(
     baseType: TypeResult,
-    typeMember: ImplicitTypeReferenceComponent
+    typeMember: ImplicitTypeReference
   ) -> TypeResult {
     // Describe the base type(s)
     let baseDescription: String
@@ -960,7 +960,7 @@ extension TypeResolver {
   /// Implements `resolveMember`
   fileprivate mutating func _resolveMember(
     baseType: TypeResult,
-    typeMember: ImplicitTypeReferenceComponent
+    typeMember: ImplicitTypeReference
   ) -> TypeResult {
     // Extract nominal type or composition thereof
     let baseTypes: [ResolvedTypeSyntax]

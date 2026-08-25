@@ -104,18 +104,15 @@ extension SymbolTable {
   }
 }
 
-@_spi(_QualifiedLookupTests) public enum ExtensionBindingFailure: Error {
-  /// Either root isn't a source file, or said source file isn't registered
-  case nonRegisteredSyntaxRoot
-
-  case admissionFailure(TypeGraph.ExtensionAdmissionFailure)
-}
-
 // MARK: Extension Binding
 
 extension SymbolTable {
-  typealias InvalidatedExtensions = OrderedSet<ExtensionDeclSyntax>
-  typealias ExtensionBindingFailure = SwiftLexicalLookup.ExtensionBindingFailure
+  @_spi(_QualifiedLookupTests) public enum ExtensionBindingFailure: Error {
+    /// Either root isn't a source file, or said source file isn't registered
+    case nonRegisteredSyntaxRoot
+
+    case admissionFailure(TypeGraph.ExtensionAdmissionFailure)
+  }
 
   func getExtensionResolvedType(
     _ extensionDecl: Attached<ExtensionDeclSyntax>

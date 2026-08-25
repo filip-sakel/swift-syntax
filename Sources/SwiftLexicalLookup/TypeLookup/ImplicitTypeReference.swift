@@ -12,33 +12,37 @@
 
 import SwiftSyntax
 
-/// A type reference component consists of an optional module selector, the
-/// identifier of the type, and the type-like syntax generating the reference.
-@_spi(_QualifiedLookupTests) public struct ImplicitTypeReferenceComponent: Sendable, CustomDebugStringConvertible {
-  let module: Identifier?
-  let name: Identifier
-  let introducingSyntax: Attached<TypeLikeSyntax>
+extension TypeResolver {
+  /// Like `TypeReference` but the syntax is `TypeSyntax` instead of `TypeLikeSyntax`.
+  /// Contains an optional module selector, the type-name identifier, and the
+  /// type-like syntax generating the reference.
+  @_spi(_QualifiedLookupTests) public struct ImplicitTypeReference: Sendable, CustomDebugStringConvertible {
+    let module: Identifier?
+    let name: Identifier
+    let introducingSyntax: Attached<TypeLikeSyntax>
 
-  internal init(module: Identifier? = nil, name: Identifier, introducingSyntax: Attached<TypeLikeSyntax>) {
-    self.module = module
-    self.name = name
-    self.introducingSyntax = introducingSyntax
-  }
-
-  @_spi(_QualifiedLookupTests) public init(from sourceComponent: TypeReference) {
-    self.module = sourceComponent.module
-    self.name = sourceComponent.name
-    self.introducingSyntax = Attached<TypeLikeSyntax>(sourceComponent.introducingSyntax)
-  }
-
-  public var debugDescription: String {
-    let modulePrefix: String
-    if let module {
-      modulePrefix = "\(module)::"
-    } else {
-      modulePrefix = ""
+    @_spi(_QualifiedLookupTests)
+    public init(module: Identifier? = nil, name: Identifier, introducingSyntax: Attached<TypeLikeSyntax>) {
+      self.module = module
+      self.name = name
+      self.introducingSyntax = introducingSyntax
     }
 
-    return "\(modulePrefix)\(name.name)"
+    internal init(from sourceComponent: TypeReference) {
+      self.module = sourceComponent.module
+      self.name = sourceComponent.name
+      self.introducingSyntax = Attached<TypeLikeSyntax>(sourceComponent.introducingSyntax)
+    }
+
+    public var debugDescription: String {
+      let modulePrefix: String
+      if let module {
+        modulePrefix = "\(module)::"
+      } else {
+        modulePrefix = ""
+      }
+
+      return "\(modulePrefix)\(name.name)"
+    }
   }
 }
