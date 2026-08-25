@@ -33,9 +33,7 @@ struct TypeResolutionMatcher {
   /// Annotates `TypeSyntax` with a type-resolution result using markers;
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
   enum Expectation {
-    case syntaxResolution(
-      Result<ResolvedType<Character>, TestTypeResolutionFailure>
-    )
+    case syntaxResolution(ResolvedType<Character>)
     case extensionBinding(TestExtensionState)
   }
 
@@ -170,7 +168,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
     verbose: Bool
   ) -> [ExpectationFailure] {
     switch expectation.annotation {
-    case .syntaxResolution(let expectedResult):
+    case .syntaxResolution(let expectedType):
       guard let typeSyntax = expectation.syntax.as(TypeSyntax.self) else {
         fatalError(
           "[SwiftLexicalLookup] Internal test error: Expected syntax-resolution queries to find 'TypeSyntax' nodes, but got '\(expectation.syntax.kind)'."
@@ -180,7 +178,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
       return _assertTypeSyntax(
         // Force unwrap because we parsed this from `lookupSources`
         typeSyntax: Attached(typeSyntax)!,
-        expectedRawResult: expectedResult,
+        expectedType: expectedType,
         markersToDefinitions: markersToDefinitions,
         syntaxToDefinitions: syntaxToDefinitions,
         verbose: verbose
@@ -281,7 +279,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
   /// `assertExpectation` forwards type syntax here.
   private func _assertTypeSyntax(
     typeSyntax: Attached<TypeSyntax>,
-    expectedRawResult: Result<ResolvedType<Character>, TestTypeResolutionFailure>,
+    expectedType: ResolvedType<Character>,
     markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool,
@@ -292,93 +290,137 @@ extension TypeResolutionMatcher: LexicalMatcher {
     }
 
     // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
-    let actualRawResult: TypeResolver.TypeResult<ResolvedType<ResolvedTypeSyntax>> = symbolTable.resolveSyntax(
+    let actualType: ResolvedType<ResolvedTypeSyntax> = symbolTable.resolveSyntax(
       typeSyntax: typeSyntax
     )
 
     // Assert output
     var failures = [ExpectationFailure]()
-    switch (expectedRawResult, actualRawResult) {
-    case (.success(let expectedType), .success(let actualType)):
-      let actualTypeDescription: String = actualType.mapNominals({ nominalType -> String in
-        guard let targetDefinition = syntaxToDefinitions[nominalType.type.mainDecl.node] else {
-          failures.append(
-            ExpectationFailure.resultReferencesUnmarkedSyntax(
-              syntaxDescription: nominalType.type.globalName.debugDescription
-            )
+    let actualTypeDescription: String = actualType.mapNominals({ nominalType -> String in
+      guard let targetDefinition = syntaxToDefinitions[nominalType.type.mainDecl.node] else {
+        failures.append(
+          ExpectationFailure.resultReferencesUnmarkedSyntax(
+            syntaxDescription: nominalType.type.globalName.debugDescription
           )
-          return ""
-        }
-        // Ensure we got the right name
-        let actualName = nominalType.type.globalName?.debugDescription
-        if let expectedName = targetDefinition.annotation.name?.debugDescription, actualName != expectedName {
-          failures.append(
-            ExpectationFailure.other(
-              failure:
-                "Expected name '\(expectedName)' for type marked '\(targetDefinition.annotation.marker)' but got '\(actualName?.debugDescription ?? "nil")'."
-            )
-          )
-          return ""
-        }
-
-        return targetDefinition.annotation.description
-      })._debugDescription
-
-      let expectedTypeDescription: String = expectedType.mapNominals({ marker -> String in
-        guard let targetDefinition = markersToDefinitions[marker] else {
-          failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
-          return ""
-        }
-        return targetDefinition.annotation.description
-      })._debugDescription
-
-      // Give up if markers are undefined (i.e. we already have failures)
-      guard failures.isEmpty else { break }
-
-      if expectedTypeDescription != actualTypeDescription {
+        )
+        return ""
+      }
+      // Ensure we got the right name
+      let actualName = nominalType.type.globalName?.debugDescription
+      if let expectedName = targetDefinition.annotation.name?.debugDescription, actualName != expectedName {
         failures.append(
           ExpectationFailure.other(
             failure:
-              "Resolved-type mismatch. Expected: \(expectedTypeDescription)\nBut got:  \(actualTypeDescription)"
+              "Expected name '\(expectedName)' for type marked '\(targetDefinition.annotation.marker)' but got '\(actualName?.debugDescription ?? "nil")'."
           )
         )
+        return ""
       }
 
-    case (.failure(let expectedFailure), .failure(let actualFailure)):
-      // Describe the expected failure
-      func markerToQualifiedName(marker: Character) -> String {
-        guard let nominalDecl = markersToDefinitions[marker] else {
-          failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
-          return "_"
-        }
-        return nominalDecl.annotation.description
-      }
-      let expectedFailureDescription = expectedFailure._map(
-        mapNominal: markerToQualifiedName(marker:)
-      )._debugDescription
+      return targetDefinition.annotation.description
+    })._debugDescription
 
-      // Describe the lookup failure
-      let actualFailureDescription = actualFailure._map(
-        mapNominal: { $0.type.globalName?.debugDescription ?? "" }
-      )._debugDescription
-
-      // Check equality
-      if expectedFailureDescription != actualFailureDescription {
-        failures.append(
-          ExpectationFailure.other(
-            failure:
-              "Failure mismatch.\nExpected: '\(expectedFailureDescription)'.\nBut got:  '\(actualFailureDescription)'"
-          )
-        )
+    let expectedTypeDescription: String = expectedType.mapNominals({ marker -> String in
+      guard let targetDefinition = markersToDefinitions[marker] else {
+        failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
+        return ""
       }
-    default:
+      return targetDefinition.annotation.description
+    })._debugDescription
+
+    // Give up if markers are undefined (i.e. we already have failures)
+    guard failures.isEmpty else { return failures }
+
+    if expectedTypeDescription != actualTypeDescription {
       failures.append(
         ExpectationFailure.other(
           failure:
-            "Lookup didn't succeed/fail as expected. Expected '\(expectedRawResult)'. Got: '\(actualRawResult)'"
+            "Resolved-type mismatch. Expected: \(expectedTypeDescription)\nBut got:  \(actualTypeDescription)"
         )
       )
     }
+    // TODO: Remove
+    // switch (expectedRawResult, actualRawResult) {
+    // case (.success(let expectedType), .success(let actualType)):
+    //   let actualTypeDescription: String = actualType.mapNominals({ nominalType -> String in
+    //     guard let targetDefinition = syntaxToDefinitions[nominalType.type.mainDecl.node] else {
+    //       failures.append(
+    //         ExpectationFailure.resultReferencesUnmarkedSyntax(
+    //           syntaxDescription: nominalType.type.globalName.debugDescription
+    //         )
+    //       )
+    //       return ""
+    //     }
+    //     // Ensure we got the right name
+    //     let actualName = nominalType.type.globalName?.debugDescription
+    //     if let expectedName = targetDefinition.annotation.name?.debugDescription, actualName != expectedName {
+    //       failures.append(
+    //         ExpectationFailure.other(
+    //           failure:
+    //             "Expected name '\(expectedName)' for type marked '\(targetDefinition.annotation.marker)' but got '\(actualName?.debugDescription ?? "nil")'."
+    //         )
+    //       )
+    //       return ""
+    //     }
+    //
+    //     return targetDefinition.annotation.description
+    //   })._debugDescription
+    //
+    //   let expectedTypeDescription: String = expectedType.mapNominals({ marker -> String in
+    //     guard let targetDefinition = markersToDefinitions[marker] else {
+    //       failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
+    //       return ""
+    //     }
+    //     return targetDefinition.annotation.description
+    //   })._debugDescription
+    //
+    //   // Give up if markers are undefined (i.e. we already have failures)
+    //   guard failures.isEmpty else { break }
+    //
+    //   if expectedTypeDescription != actualTypeDescription {
+    //     failures.append(
+    //       ExpectationFailure.other(
+    //         failure:
+    //           "Resolved-type mismatch. Expected: \(expectedTypeDescription)\nBut got:  \(actualTypeDescription)"
+    //       )
+    //     )
+    //   }
+    //
+    // case (.failure(let expectedFailure), .failure(let actualFailure)):
+    //   // Describe the expected failure
+    //   func markerToQualifiedName(marker: Character) -> String {
+    //     guard let nominalDecl = markersToDefinitions[marker] else {
+    //       failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
+    //       return "_"
+    //     }
+    //     return nominalDecl.annotation.description
+    //   }
+    //   let expectedFailureDescription = expectedFailure._map(
+    //     mapNominal: markerToQualifiedName(marker:)
+    //   )._debugDescription
+    //
+    //   // Describe the lookup failure
+    //   let actualFailureDescription = actualFailure._map(
+    //     mapNominal: { $0.type.globalName?.debugDescription ?? "" }
+    //   )._debugDescription
+    //
+    //   // Check equality
+    //   if expectedFailureDescription != actualFailureDescription {
+    //     failures.append(
+    //       ExpectationFailure.other(
+    //         failure:
+    //           "Failure mismatch.\nExpected: '\(expectedFailureDescription)'.\nBut got:  '\(actualFailureDescription)'"
+    //       )
+    //     )
+    //   }
+    // default:
+    //   failures.append(
+    //     ExpectationFailure.other(
+    //       failure:
+    //         "Lookup didn't succeed/fail as expected. Expected '\(expectedRawResult)'. Got: '\(actualRawResult)'"
+    //     )
+    //   )
+    // }
     return failures
   }
 }
@@ -450,25 +492,18 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     )
   }
   mutating func appendInterpolation(
-    result: Result<ResolvedType<Character>, TestTypeResolutionFailure>,
+    type: ResolvedType<Character>,
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    appendInterpolation(expects: [TypeResolutionMatcher.Expectation.syntaxResolution(result)], file: file, line: line)
+    appendInterpolation(expects: [TypeResolutionMatcher.Expectation.syntaxResolution(type)], file: file, line: line)
   }
   mutating func appendInterpolation(
     failure: TestTypeResolutionFailure,
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    appendInterpolation(result: Result.failure(failure), file: file, line: line)
-  }
-  mutating func appendInterpolation(
-    type: ResolvedType<Character>,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) {
-    appendInterpolation(result: Result.success(type), file: file, line: line)
+    appendInterpolation(type: ResolvedType.failure(failure), file: file, line: line)
   }
   mutating func appendInterpolation(
     nominals markers: [Character],

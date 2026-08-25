@@ -134,10 +134,10 @@ public struct TypeResolver {
 extension TypeResolver {
   public mutating func resolveSyntax(
     typeSyntax: Attached<TypeSyntax>
-  ) -> TypeResult<ResolvedType<ResolvedTypeSyntax>> {
+  ) -> ResolvedType<ResolvedTypeSyntax> {
     withLogging(
       request: "Resolve syntax `\(typeSyntax.trimmedDescription)`",
-      describe: \._debugDescription,
+      describe: \.debugDescription,
       perform: { $0._resolveSyntax(typeSyntax: typeSyntax) }
     )
   }
@@ -145,7 +145,7 @@ extension TypeResolver {
   /// Implements `resolveSyntax`
   public mutating func _resolveSyntax(
     typeSyntax: Attached<TypeSyntax>
-  ) -> TypeResult<ResolvedType<ResolvedTypeSyntax>> {
+  ) -> ResolvedType<ResolvedTypeSyntax> {
     // Ensure we're not forming a cycle
     if let cycle = insertVisitedTypeSyntax(typeSyntax) {
       return .failure(Failure.cyclicalTypeReference(cycle: cycle))
@@ -168,19 +168,19 @@ extension TypeResolver {
     let partialType: Result<PartiallyResolvedType, PartialTypeResolutionFailure> = typeSyntax.partiallyResolve()
     switch partialType {
     case .success(.anyType):
-      return Result.success(ResolvedType.anyType)
+      return ResolvedType.anyType
     case .success(.tuple(let labels)):
-      return Result.success(.tuple(labels: labels))
+      return .tuple(labels: labels)
     case .success(.typeIdentifier(.success(let component))):
       return resolveUnqualifiedReference(typeComponent: ImplicitTypeReferenceComponent(from: component))
     case .success(.metatype(let baseTypeSyntax)):
       let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax)
       // Wrap the base type/failure and return
       switch baseTypeResult {
-      case .success(let baseType):
-        return Result.success(ResolvedType.metatype(base: baseType))
       case .failure(let baseFailure):
-        return Result.failure(Failure.invalidBaseType(baseFailure))
+        return .failure(Failure.invalidBaseType(baseFailure))
+      default:
+        return ResolvedType.metatype(base: baseTypeResult)
       }
     case .success(.member(let baseTypeSyntax, .success(let memberComponent))):
       let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax)
@@ -189,7 +189,7 @@ extension TypeResolver {
       var syntaxToTypes = [
         (
           childSyntax: Attached<TypeSyntax>,
-          childResult: Result<ResolvedType<ResolvedTypeSyntax>, Failure>
+          childResult: ResolvedType<ResolvedTypeSyntax>
         )
       ]()
       for childTypeSyntax in childTypes {
@@ -198,10 +198,10 @@ extension TypeResolver {
       }
       return reduceComposition(syntaxToTypes)
     case .failure(let failure):
-      return Result.failure(Failure.other(failure))
+      return .failure(Failure.other(failure))
     case .success(.member(base: _, .failure(let nameFailure))),
       .success(.typeIdentifier(.failure(let nameFailure))):
-      return Result.failure(Failure.other(nameFailure))
+      return .failure(Failure.other(nameFailure))
     }
   }
 
@@ -209,9 +209,9 @@ extension TypeResolver {
   func reduceComposition(
     _ syntaxToTypes: [(
       childSyntax: Attached<TypeSyntax>,
-      childResult: Result<ResolvedType<ResolvedTypeSyntax>, Failure>
+      childResult: ResolvedType<ResolvedTypeSyntax>
     )]
-  ) -> TypeResult<ResolvedType<ResolvedTypeSyntax>> {
+  ) -> ResolvedType<ResolvedTypeSyntax> {
     // Collect valid types and failures
     var anyTypeCounter = 0
     var types = [ResolvedTypeSyntax]()
@@ -219,7 +219,7 @@ extension TypeResolver {
     for (childTypeSyntax, childTypeResult) in syntaxToTypes {
       switch childTypeResult {
       // Only nominals are valid in compositions
-      case .success(.nominalTypes(let nominals)):
+      case .nominalTypes(let nominals):
         if _checkNominalInCompositionIsClassOrProtocol {
           switch (nominals.count, nominals.first?.type.mainDecl.kind) {
           // If we have one nominal, check it's a protocol or class.
@@ -249,7 +249,7 @@ extension TypeResolver {
           types.append(nominal)
         }
       // Tuples/function
-      case .success(.function(let argumentCount)):
+      case .function(let argumentCount):
         failures.append(
           (
             childSyntax: childTypeSyntax.node,
@@ -258,7 +258,7 @@ extension TypeResolver {
             )
           )
         )
-      case .success(.tuple(let labels)):
+      case .tuple(let labels):
         failures.append(
           (
             childSyntax: childTypeSyntax.node,
@@ -267,7 +267,7 @@ extension TypeResolver {
             )
           )
         )
-      case .success(.metatype(let base)):
+      case .metatype(let base):
         failures.append(
           (
             childSyntax: childTypeSyntax.node,
@@ -277,7 +277,7 @@ extension TypeResolver {
       // `Any` doesn't contribute any types but IS valid
       // E.g. `Codable & Any` ✅
       // But: `Codable & Int.Type` ❌
-      case .success(.anyType):
+      case .anyType:
         anyTypeCounter += 1
       // Ignore if this particular type didn't contain the type member.
       // E.g.
@@ -298,7 +298,7 @@ extension TypeResolver {
 
     // Stop even if we only have one failure
     guard failures.isEmpty else {
-      return Result.failure(Failure.invalidComposition(failures))
+      return .failure(Failure.invalidComposition(failures))
     }
 
     // We get `anyType` only when all the child types are `any`,
@@ -308,10 +308,10 @@ extension TypeResolver {
     // for instance, `Int.Type` returns an empty array which
     // doesn't equal the `Any` type.
     if anyTypeCounter > 0, anyTypeCounter == syntaxToTypes.count {
-      return Result.success(ResolvedType.anyType)
+      return ResolvedType.anyType
     }
 
-    return Result.success(ResolvedType.nominalTypes(types))
+    return ResolvedType.nominalTypes(types)
   }
 }
 
@@ -328,10 +328,10 @@ extension TypeResolver {
   /// Note: We don't resolve generic parameters.
   fileprivate mutating func resolveUnqualifiedReference(
     typeComponent: ImplicitTypeReferenceComponent
-  ) -> TypeResult<ResolvedType<ResolvedTypeSyntax>> {
+  ) -> ResolvedType<ResolvedTypeSyntax> {
     return withLogging(
       request: "Type reference `\(typeComponent.debugDescription)`",
-      describe: \._debugDescription,
+      describe: \.debugDescription,
       perform: { $0._resolveUnqualifiedReference(typeComponent: typeComponent) }
     )
   }
@@ -365,7 +365,7 @@ extension TypeResolver {
   /// Implements `resolveUnqualifiedReference`
   fileprivate mutating func _resolveUnqualifiedReference(
     typeComponent: ImplicitTypeReferenceComponent
-  ) -> TypeResult<ResolvedType<ResolvedTypeSyntax>> {
+  ) -> ResolvedType<ResolvedTypeSyntax> {
     // Perfom unqualified lookup up to find the base type's declaration
     //
     // e.g.
@@ -407,7 +407,7 @@ extension TypeResolver {
       // `lookForSelectedMember` is false if we can return the enclosing type
       // itself; true if we need to perform qualified lookup and return a type
       // member.
-      let enclosingTypeResult: Result<ResolvedType<ResolvedTypeSyntax>, Failure>
+      let enclosingTypeResult: ResolvedType<ResolvedTypeSyntax>
       let lookForSelectedMember: Bool
 
       // TODO: Use withLogging
@@ -438,10 +438,17 @@ extension TypeResolver {
         // One of the lookup results will be to look for `A` in `extension Int`.
         // The enclosing type is `Swift::Int.(MyFile.swift)::A`. Then, to find `A.B` we'll
         // just append `.A` to the member chain. Hence, we look for `.A.B` in `Swift::Int`
-        enclosingTypeResult = resolveDeclGroup(
+        let declGroupResult: Result<ResolvedTypeSyntax, Failure> = resolveDeclGroup(
           declGroup: declGroupParent,
           originatingSyntax: typeComponent.introducingSyntax
-        ).map({ ResolvedType.nominalTypes([$0]) })
+        )
+        // Set the enclosing type
+        switch declGroupResult {
+        case .success(let nominalType):
+          enclosingTypeResult = .nominalTypes([nominalType])
+        case .failure(let failure):
+          enclosingTypeResult = .failure(failure)
+        }
         // To find the member
         lookForSelectedMember = !lookForSelf
 
@@ -487,7 +494,7 @@ extension TypeResolver {
         }
 
         // We don't resolve generic parameters (same as ``resolveTypeDecl``).
-        enclosingTypeResult = Result.failure(.genericParameterOrAssociatedType)
+        enclosingTypeResult = .failure(.genericParameterOrAssociatedType)
         lookForSelectedMember = false
       case .lookInModule:
         // TODO: Handle
@@ -496,54 +503,51 @@ extension TypeResolver {
 
       // Whether we have to look for a member or not, we can't succeed without
       // knowing the enclosing type
+      // TODO: Defer these failures for `resolveMember` to handle
       let enclosingType: ResolvedType<ResolvedTypeSyntax>
       switch (enclosingTypeResult, lookForSelectedMember) {
-      case (.success(let result), _):
-        enclosingType = result
       // Continue to next scope if unqualified lookup didn't find the type in this scope
       case (.failure(.noTypeInScope), _):
         continue
       // Return failure directly if we're not looking for the selected member
       case (.failure(let failure), false):
-        return Result.failure(failure)
+        return .failure(failure)
       // Otherwise, wrap in a '.invalidBaseType'
       case (.failure(let failure), true):
-        return Result.failure(Failure.invalidBaseType(failure))
+        return .failure(Failure.invalidBaseType(failure))
+      // Forward success
+      case (let result, _):
+        enclosingType = result
       }
 
       // If we don't have to look for a member, return
-      if !lookForSelectedMember { return Result.success(enclosingType) }
+      if !lookForSelectedMember { return enclosingType }
 
       // Look for the member
-      let memberTypeResult: Result<ResolvedType<ResolvedTypeSyntax>, Failure> = resolveMember(
-        baseType: Result.success(enclosingType),
+      let memberType: ResolvedType<ResolvedTypeSyntax> = resolveMember(
+        baseType: enclosingType,
         typeMember: typeComponent
       )
 
-      // Get the type member
-      let memberType: ResolvedType<ResolvedTypeSyntax>
-      switch memberTypeResult {
-      case .success(let result):
-        memberType = result
-      // Continue like above
-      case .failure(.noTypeMember):
-        continue
+      // Skip if we got `.noTypeMember`
+      //
       // Note: `resolveMember` wraps the underlying error in ``Failure.invalidMembers``
-      case .failure(let failure):
-        return Result.failure(failure)
+      if case .failure(.noTypeMember) = memberType {
+        // Continue like above
+        continue
       }
 
-      return Result.success(memberType)
+      return memberType
     }
 
     // No type matched
-    return Result.failure(Failure.noTypeInScope)
+    return .failure(Failure.noTypeInScope)
   }
 
   fileprivate mutating func resolveDeclGroup(
     declGroup: Attached<DeclGroupSyntaxType>,
     originatingSyntax: Attached<TypeLikeSyntax>
-  ) -> TypeResult<ResolvedTypeSyntax> {
+  ) -> Result<ResolvedTypeSyntax, Failure> {
     withLogging(
       request: "Decl group `\(declGroup._memberlessDescription)`",
       describe: \._debugDescription,
@@ -576,7 +580,7 @@ extension TypeResolver {
   fileprivate mutating func _resolveDeclGroup(
     declGroup: Attached<DeclGroupSyntaxType>,
     originatingSyntax: Attached<TypeLikeSyntax>
-  ) -> TypeResult<ResolvedTypeSyntax> {
+  ) -> Result<ResolvedTypeSyntax, Failure> {
     let declContext: DeclContext = _findDeclContext(ofDeclGroup: declGroup)
 
     log("Found decl context `\(_describeDeclContext(declContext))` containing `\(declGroup._memberlessDescription)`")
@@ -609,7 +613,7 @@ extension TypeResolver {
     nominalDecl: Attached<NominalTypeDeclSyntax>,
     declContext: DeclContext,
     originatingSyntax: Attached<TypeLikeSyntax>
-  ) -> TypeResult<ResolvedTypeSyntax> {
+  ) -> Result<ResolvedTypeSyntax, Failure> {
     withLogging(
       request: "Nominal `\(nominalDecl._memberlessDescription)`",
       describe: \._debugDescription,
@@ -630,7 +634,7 @@ extension TypeResolver {
     resolvedNominalBaseType: TypeGraph.NominalTypeRef,
     memberName: Identifier,
     memberIntroducingSyntax: Attached<TypeLikeSyntax>
-  ) -> TypeResult<(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)?> {
+  ) -> Result<(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)?, Failure> {
     // Perform direct type lookup and mark dependency
     //
     // First, get the module
@@ -858,10 +862,10 @@ extension TypeResolver {
     typeDecl: Attached<TypeDeclSyntax>,
     declContext: DeclContext,
     originatingSyntax: Attached<TypeLikeSyntax>
-  ) -> TypeResult<ResolvedType<ResolvedTypeSyntax>> {
+  ) -> ResolvedType<ResolvedTypeSyntax> {
     withLogging(
       request: "Decl \(typeDecl.kind) `\(typeDecl.node.name.trimmedDescription)`",
-      describe: \._debugDescription,
+      describe: \.debugDescription,
       perform: {
         $0._resolveTypeDecl(typeDecl: typeDecl, declContext: declContext, originatingSyntax: originatingSyntax)
       }
@@ -873,7 +877,7 @@ extension TypeResolver {
     typeDecl: Attached<TypeDeclSyntax>,
     declContext: DeclContext,
     originatingSyntax: Attached<TypeLikeSyntax>
-  ) -> TypeResult<ResolvedType<ResolvedTypeSyntax>> {
+  ) -> ResolvedType<ResolvedTypeSyntax> {
     assert(
       declContext.syntax.range.contains(typeDecl.node.range),
       "[SwiftLexicalLookup] Internal error: Decl context doesn't contain declaration."
@@ -883,36 +887,42 @@ extension TypeResolver {
     // associated types and generic parameters
     if let nominalTypeDecl = typeDecl.as(NominalTypeDeclSyntax.self) {
       // Resolve the main nominal-type decl and wrap it in `MemberLookupResult.memberResults`
-      return resolveNominalTypeDecl(
+      let nominalTypeResult: Result<ResolvedTypeSyntax, Failure> = resolveNominalTypeDecl(
         nominalDecl: nominalTypeDecl,
         declContext: declContext,
         originatingSyntax: originatingSyntax
-      ).map({ ResolvedType.nominalTypes([$0]) })
+      )
+      switch nominalTypeResult {
+      case .success(let nominalType):
+        return ResolvedType.nominalTypes([nominalType])
+      case .failure(let failure):
+        return ResolvedType.failure(failure)
+      }
     } else if let typeAlias = typeDecl.as(TypeAliasDeclSyntax.self) {
       let aliasedTypeSyntax = typeAlias.node.initializer.value
       log(
         "Found aliased type `\(aliasedTypeSyntax)`"
       )
 
-      let aliasedResult: Result<ResolvedType<ResolvedTypeSyntax>, Failure> = resolveSyntax(
+      let aliasedResult: ResolvedType<ResolvedTypeSyntax> = resolveSyntax(
         typeSyntax: typeAlias.initializerValue
       )
       // Wrap in a failure unless we're part of a cycle
       switch aliasedResult {
-      case .success(let success):
-        return Result.success(success)
       case .failure(let failure):
         // If we're part of the cycle, return the cycle
         if let nestedCycle = failure.nestedCycle, nestedCycle.contains(aliasedTypeSyntax) {
-          return Result.failure(Failure.cyclicalTypeReference(cycle: nestedCycle))
+          return .failure(Failure.cyclicalTypeReference(cycle: nestedCycle))
         }
         // Wrapping the failure indicates the type alias itself isn't the
         // problem; the referenced type is the problem (diagnosed separately).
-        return Result.failure(Failure.invalidAliasedType(failure))
+        return .failure(Failure.invalidAliasedType(failure))
+      case let success:
+        return success
       }
     } else { /* else if it's an associated type or generic parameter */
       // No members for generic parameters and associated types
-      return Result.failure(Failure.genericParameterOrAssociatedType)
+      return .failure(Failure.genericParameterOrAssociatedType)
     }
   }
 }
@@ -926,61 +936,56 @@ extension TypeResolver {
   /// Note: The base type might have redeclarations, in which case we return
   /// the appropriate error.
   fileprivate mutating func resolveMember(
-    baseType: Result<ResolvedType<ResolvedTypeSyntax>, Failure>,
+    baseType: ResolvedType<ResolvedTypeSyntax>,
     typeMember: ImplicitTypeReferenceComponent
-  ) -> TypeResult<ResolvedType<ResolvedTypeSyntax>> {
+  ) -> ResolvedType<ResolvedTypeSyntax> {
     // Describe the base type(s)
     let baseDescription: String
     switch baseType {
-    case .success(ResolvedType.nominalTypes(let baseTypes)):
+    case ResolvedType.nominalTypes(let baseTypes):
       baseDescription = baseTypes.map(\.type._succinctDescription).joined(separator: " & ")
-    case .success(_):
-      baseDescription = "<non-nominal>"
     case .failure:
       baseDescription = "<failure>"
+    default:
+      baseDescription = "<non-nominal>"
     }
 
     return withLogging(
       request:
         "Member `\(baseDescription)` > `\(typeMember.debugDescription)`",
-      describe: \._debugDescription,
+      describe: \.debugDescription,
       perform: { $0._resolveMember(baseType: baseType, typeMember: typeMember) }
     )
   }
 
   /// Implements `resolveMember`
   fileprivate mutating func _resolveMember(
-    baseType: Result<ResolvedType<ResolvedTypeSyntax>, Failure>,
+    baseType: ResolvedType<ResolvedTypeSyntax>,
     typeMember: ImplicitTypeReferenceComponent
-  ) -> TypeResult<ResolvedType<ResolvedTypeSyntax>> {
-    // Get base type(s), or throw (can't resolve anything without the base)
-    let rawBaseType: ResolvedType<ResolvedTypeSyntax>
-    switch baseType {
-    case .success(let success): rawBaseType = success
-    case .failure(let failure): return Result.failure(failure)
-    }
-
+  ) -> ResolvedType<ResolvedTypeSyntax> {
     // Extract nominal type or composition thereof
     let baseTypes: [ResolvedTypeSyntax]
-    switch rawBaseType {
+    switch baseType {
     // Accept nominals (count == 1) or compositions (count > 1).
     //
     // 'Compositions' of count == 0 (e.g. `Int.Type`) have no nominal types
     // and are automatically diagnosed at the end of the function.
     case .nominalTypes(let types):
       baseTypes = types
-    case ResolvedType.anyType:
-      return Result.failure(Failure.noTypeMember(member: typeMember, in: ResolvedType.anyType))
-    case ResolvedType.function(let argumentCount):
-      return Result.failure(
+    case .anyType:
+      return .failure(Failure.noTypeMember(member: typeMember, in: ResolvedType.anyType))
+    case .function(let argumentCount):
+      return .failure(
         Failure.noTypeMember(member: typeMember, in: ResolvedType.function(argumentCount: argumentCount))
       )
-    case ResolvedType.tuple(let labels):
-      return Result.failure(Failure.noTypeMember(member: typeMember, in: ResolvedType.tuple(labels: labels)))
-    case ResolvedType.metatype(let base):
-      return Result.failure(
+    case .tuple(let labels):
+      return .failure(Failure.noTypeMember(member: typeMember, in: ResolvedType.tuple(labels: labels)))
+    case .metatype(let base):
+      return .failure(
         Failure.noTypeMember(member: typeMember, in: ResolvedType.metatype(base: base))
       )
+    case .failure(let failure):
+      return ResolvedType.failure(failure)
     }
 
     // Perform qualified type lookup and mark the dependencies
@@ -1019,13 +1024,13 @@ extension TypeResolver {
       defer {
         logPrefix.removeLast()
         switch memberResult {
+        case Result.success(nil):
+          // No results; continue in case next one has a result.
+          break
         case Result.success((let memberTypeDecl, let memberResult)?):
           // Add if not already added
           guard visitedDecls.insert(memberTypeDecl).inserted else { break }
           declsAndResults.append((memberTypeDecl, memberResult))
-        case Result.success(nil):
-          // No results; continue in case next one has a result.
-          break
         case Result.failure(let failure):
           failures.append((typeMember.introducingSyntax, failure))
         }
@@ -1066,11 +1071,17 @@ extension TypeResolver {
       }
 
       // Resolve this type declaration and add it to the results
-      memberResult = resolveTypeDecl(
+      let typeDeclResult: ResolvedType<ResolvedTypeSyntax> = resolveTypeDecl(
         typeDecl: memberTypeDecl,
         declContext: DeclContext.declGroup(memberDeclGroupParent),
         originatingSyntax: typeMember.introducingSyntax
-      ).map({ result in Optional((typeDecl: memberTypeDecl, result: result)) })
+      )
+      // Surface any failures
+      if case .failure(let failure) = typeDeclResult {
+        memberResult = .failure(failure)
+        continue
+      }
+      memberResult = .success((typeDecl: memberTypeDecl, result: typeDeclResult))
     }
 
     // If there are failures, give up.
@@ -1086,7 +1097,7 @@ extension TypeResolver {
     //   typealias Composition = ValidProto & Any
     //   let a: Composition.IntAlias = "" // ❌ Cannot value of type 'String' to specified type 'Int'
     guard failures.isEmpty else {
-      return Result.failure(
+      return .failure(
         Failure.invalidMembers(failures.map({ (typeSyntax, failure) in (typeSyntax.node, failure) }))
       )
     }
@@ -1095,7 +1106,7 @@ extension TypeResolver {
     // E.g. `(Any & Sendable).MyType` yields no results for either `Any.MyType` or
     //   `Sendable.MyType`; hence, `MyType` isn't a member of `Any & Sendable`.
     guard let (_, firstResult) = declsAndResults.first else {
-      return Result.failure(
+      return .failure(
         Failure.noTypeMember(
           member: typeMember,
           in: ResolvedType.nominalTypes(nominalBaseTypes)
@@ -1104,12 +1115,12 @@ extension TypeResolver {
     }
     // TODO: Ensure we're properly shadowing and not giving false-positive errors
     guard declsAndResults.count == 1 else {
-      return Result.failure(
+      return .failure(
         Failure.ambiguousTypeDecl(declsAndResults.map(\.decl.node))
       )
     }
 
-    return Result.success(firstResult)
+    return firstResult
   }
 }
 
@@ -1152,17 +1163,9 @@ extension TypeResolver {
       return .failure(Failure.extensionNotAtFileScope(extensionDecl: extensionDecl.node))
     }
 
-    let resolvedTypeResult = resolveSyntax(
+    let resolvedType: ResolvedType<ResolvedTypeSyntax> = resolveSyntax(
       typeSyntax: extensionDecl.extendedType
     )
-    // Throw if syntax resolution fails
-    let resolvedType: ResolvedType<ResolvedTypeSyntax>
-    switch resolvedTypeResult {
-    case .success(let result):
-      resolvedType = result
-    case .failure(let failure):
-      return .failure(failure)
-    }
 
     // Extract a nominal type
     switch resolvedType {
@@ -1190,6 +1193,9 @@ extension TypeResolver {
     // Functions/tuples/`Any`/metatypes aren't nominal
     case .function, .tuple, .anyType, .metatype:
       return .failure(.cannotExtendNonNominal(nonnominal: resolvedType))
+    // Forward failures
+    case .failure(let failure):
+      return .failure(failure)
     }
   }
 }

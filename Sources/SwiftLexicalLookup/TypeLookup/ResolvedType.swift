@@ -15,7 +15,7 @@ import SwiftSyntax
 /// The type result of structural type resolution. `Result`
 /// represents a nominal type.
 @_spi(_QualifiedLookupTests)
-public indirect enum ResolvedType<NominalType: Sendable>: Sendable {
+public indirect enum ResolvedType<NominalType: CustomDebugStringConvertible & Sendable>: Sendable {
   /// E.g. `(A) -> ()`
   case function(argumentCount: Int)
   /// E.g. `(a: A, _: B)`
@@ -26,6 +26,8 @@ public indirect enum ResolvedType<NominalType: Sendable>: Sendable {
   case anyType
   /// E.g. `A.Type`, `((A, B).Type).Type`
   case metatype(base: ResolvedType)
+  // E.g. no type `A` in scope
+  case failure(TypeResolver.GenericFailure<NominalType>)
 
   /// Maps the nominal types in `nominalTypes`.
   public func mapNominals<NewNominalType>(
@@ -42,14 +44,11 @@ public indirect enum ResolvedType<NominalType: Sendable>: Sendable {
       return .metatype(base: base.mapNominals(transform))
     case .nominalTypes(let results):
       return .nominalTypes(results.map(transform))
+    case .failure(let failure):
+      return .failure(failure._map(mapNominal: transform))
     }
   }
 }
-
-// MARK: Conformances
-
-extension ResolvedType: Equatable where NominalType: Equatable {}
-extension ResolvedType: Hashable where NominalType: Hashable {}
 
 // MARK: Debug Description
 
@@ -67,12 +66,14 @@ extension ResolvedType where NominalType == String {
       return ".metatype(base: \(base.debugDescription)"
     case .nominalTypes(let members):
       return ".nominalTypes([\(members.joined(separator: ", "))])"
+    case .failure(let failure):
+      return ".failure(\(failure._debugDescription))"
     }
   }
 }
 
 @_spi(_QualifiedLookupTests)
-extension ResolvedType: CustomDebugStringConvertible where NominalType: CustomDebugStringConvertible {
+extension ResolvedType: CustomDebugStringConvertible {
   public var debugDescription: String {
     mapNominals(\.debugDescription)._debugDescription
   }

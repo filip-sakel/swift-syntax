@@ -175,6 +175,7 @@ extension TypeResolver {
 }
 
 extension TypeResolver.GenericFailure {
+  @_spi(_QualifiedLookupTests)
   public func _map<NewNominalType>(
     mapNominal: (NominalType) -> NewNominalType
   ) -> TypeResolver.GenericFailure<NewNominalType> {
