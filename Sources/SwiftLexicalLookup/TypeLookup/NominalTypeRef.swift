@@ -169,7 +169,7 @@ extension TypeGraph {
   /// A reference to a resolved global nominal type vended by `TypeGraph`.
   /// Contains the unique name and resolved main declaration.
   @_spi(_QualifiedLookupTests)
-  public struct GlobalNominalTypeRef: Hashable, Sendable {
+  public struct GlobalTypeRef: Hashable, Sendable {
     let name: GlobalTypeName
     let mainDecl: Attached<NominalTypeDeclSyntax>
     let _version: Int
@@ -186,17 +186,17 @@ extension TypeGraph {
   /// A reference to a resolved nominal type (global or local) vended by
   /// `TypeGraph`. Contains the unique name and resolved main declaration.
   @_spi(_QualifiedLookupTests)
-  public struct NominalTypeRef: Hashable, Sendable {
+  public struct TypeRef: Hashable, Sendable {
     public enum Storage: Hashable, Sendable {
       /// Local nominal types cannot be extended
       case local(Attached<NominalTypeDeclSyntax>)
-      case global(TypeGraph.GlobalNominalTypeRef)
+      case global(TypeGraph.GlobalTypeRef)
     }
 
     public let storage: Storage
 
     /// Important: Only `TypeGraph` should use this initializer.
-    init(globalReference: TypeGraph.GlobalNominalTypeRef) {
+    init(globalReference: TypeGraph.GlobalTypeRef) {
       storage = .global(globalReference)
     }
     /// Important: Only `TypeGraph` should use this initializer.
@@ -248,7 +248,7 @@ extension TypeGraph.GlobalTypeName: CustomDebugStringConvertible {
   }
 }
 
-extension TypeGraph.GlobalNominalTypeRef: CustomDebugStringConvertible {
+extension TypeGraph.GlobalTypeRef: CustomDebugStringConvertible {
   /// E.g. '_(InternalFile.swift)::MyType.ExternalModule::OtherType (v0, structDecl)'
   public var debugDescription: String {
     return "\(name.debugDescription) (v\(_version), \(mainDecl.kind))"
@@ -256,7 +256,7 @@ extension TypeGraph.GlobalNominalTypeRef: CustomDebugStringConvertible {
 }
 
 @_spi(_QualifiedLookupTests)
-extension TypeGraph.NominalTypeRef: CustomDebugStringConvertible {
+extension TypeGraph.TypeRef: CustomDebugStringConvertible {
   /// E.g. 'struct LocalDecl {} (local)' or global
   /// '_(InternalFile.swift)::MyType.ExternalModule::OtherType (v0, structDecl)'
   public var debugDescription: String {

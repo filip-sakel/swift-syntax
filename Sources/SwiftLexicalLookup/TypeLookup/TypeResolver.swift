@@ -629,7 +629,7 @@ extension TypeResolver {
   ///
   /// A helper for `resolveNominalTypeDecl` and `resolveMember`.
   fileprivate mutating func findNominalTypeMemberDecl(
-    resolvedNominalBaseType: TypeGraph.NominalTypeRef,
+    resolvedNominalBaseType: TypeGraph.TypeRef,
     memberName: Identifier,
     memberIntroducingSyntax: Attached<TypeLikeSyntax>
   ) -> Result<(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)?, Failure> {
@@ -1226,7 +1226,7 @@ extension TypeResolver {
     }
 
     // Wrap the new reference in a `ResolvedNominalTypeReference`
-    func wrapReference(_ nominalRef: TypeGraph.NominalTypeRef) -> ResolvedTypeSyntax {
+    func wrapReference(_ nominalRef: TypeGraph.TypeRef) -> ResolvedTypeSyntax {
       ResolvedTypeSyntax(
         type: nominalRef,
         syntax: typeReference.syntax
@@ -1234,11 +1234,11 @@ extension TypeResolver {
     }
 
     // Get the nominal type from the symbol table (or register accordingly)
-    let currentNominalResult: Result<TypeGraph.NominalTypeRef, TypeGraph.NominalTypeRefUpdateFailure> =
+    let currentNominalResult: Result<TypeGraph.TypeRef, TypeGraph.NominalTypeRefUpdateFailure> =
       symbolTable.typeGraph.updateNominalTypeReference(oldReference: typeReference.type)
 
     // Handle reregistration (we should diagnose reregistrations and not save them in the table)
-    let currentNominal: TypeGraph.NominalTypeRef
+    let currentNominal: TypeGraph.TypeRef
     switch currentNominalResult {
     case .success(let success):
       currentNominal = success
@@ -1270,7 +1270,7 @@ extension TypeResolver {
     // After binding all extensions, get the new nominal type
     guard
       case .success(let finalizedNominalRef) = symbolTable.typeGraph.updateNominalTypeReference(
-        oldReference: TypeGraph.NominalTypeRef(globalReference: qualifiedGlobalRef)
+        oldReference: TypeGraph.TypeRef(globalReference: qualifiedGlobalRef)
       )
     else {
       // We checked the nominal type is registered at the start.

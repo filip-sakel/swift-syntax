@@ -297,7 +297,7 @@ extension SymbolTable {
 
     // TODO: Remove
     func mapToNominalTypeReference(
-      _ typeInfo: (globalReference: TypeGraph.GlobalNominalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
+      _ typeInfo: (globalReference: TypeGraph.GlobalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
     ) -> TypeResolver.GloballyResolvedTypeSyntax {
       TypeResolver.GloballyResolvedTypeSyntax(
         type: typeInfo.globalReference,
@@ -475,7 +475,7 @@ extension SymbolTable {
 
 extension SymbolTable {
   func findMemberType(
-    baseType: TypeGraph.NominalTypeRef,
+    baseType: TypeGraph.TypeRef,
     memberTypeName: Identifier,
     introducingTypeSyntax: Attached<TypeLikeSyntax>,
     introducingModule: ModuleName,

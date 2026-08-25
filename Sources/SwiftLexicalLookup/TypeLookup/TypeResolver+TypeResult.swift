@@ -18,7 +18,7 @@ extension TypeResolver {
   /// A `GlobalNominalTypeRef` and the syntax that was resolved.
   @_spi(_QualifiedLookupTests)
   public struct GloballyResolvedTypeSyntax: CustomDebugStringConvertible, Sendable {
-    public let type: TypeGraph.GlobalNominalTypeRef
+    public let type: TypeGraph.GlobalTypeRef
     public let syntax: Attached<TypeLikeSyntax>
 
     public var debugDescription: String {
@@ -39,7 +39,7 @@ extension TypeResolver {
   /// A `NominalTypeRef` and the syntax that was resolved.
   @_spi(_QualifiedLookupTests)
   public struct ResolvedTypeSyntax: NominalTypeResultProtocol {
-    public let type: TypeGraph.NominalTypeRef
+    public let type: TypeGraph.TypeRef
     public let syntax: Attached<TypeLikeSyntax>
 
     public var debugDescription: String {
@@ -60,7 +60,7 @@ extension TypeResolver.ResolvedTypeSyntax {
   /// Map from a `GlobalNominalTypeRef` to a `NominalTypeRef`
   init(global: TypeResolver.GloballyResolvedTypeSyntax) {
     self.init(
-      type: TypeGraph.NominalTypeRef(globalReference: global.type),
+      type: TypeGraph.TypeRef(globalReference: global.type),
       syntax: global.syntax
     )
   }
