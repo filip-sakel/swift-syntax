@@ -18,7 +18,7 @@ import SwiftSyntax
 import XCTest
 
 typealias TestExtensionState = GenericExtensionState<Character>
-typealias TestTypeResolutionFailure = TypeResolutionFailure<Character>
+typealias TestTypeResolutionFailure = TypeResolver.TestFailure
 
 /// Asserts the given annotated `TypeSyntax` resolves to the right `NominalTypeDeclSyntax`
 /// and qualified name. Also asserts `ExtensionDeclSyntax`-binding produces the expected

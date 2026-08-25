@@ -145,12 +145,12 @@ public struct GenericExtensionState<
     // TODO: Remove this property
     extensionDecl: Attached<ExtensionDeclSyntax>,
     /// The resolved type must be valid in `namesToTypes`
-    resolvedType: Result<GlobalTypeName, TypeResolutionFailure<NominalType>>
+    resolvedType: Result<GlobalTypeName, TypeResolver.GenericFailure<NominalType>>
 
   @_spi(_QualifiedLookupTests) public init(
     _uncheckedDependencies dependencies: [ExtensionDependency],
     extensionDecl: Attached<ExtensionDeclSyntax>,
-    resolvedType: Result<GlobalTypeName, TypeResolutionFailure<NominalType>>
+    resolvedType: Result<GlobalTypeName, TypeResolver.GenericFailure<NominalType>>
   ) {
     self.dependencies = dependencies
     self.extensionDecl = extensionDecl
@@ -160,7 +160,7 @@ public struct GenericExtensionState<
   @_spi(_QualifiedLookupTests) public init(
     dependencies: [QualifiedLookupDependency],
     extensionDecl: Attached<ExtensionDeclSyntax>,
-    resolvedType: Result<GlobalTypeName, TypeResolutionFailure<NominalType>>
+    resolvedType: Result<GlobalTypeName, TypeResolver.GenericFailure<NominalType>>
   ) {
     // Group dependencies by base type and member name, while maintaing order
     var groupedDependencies =

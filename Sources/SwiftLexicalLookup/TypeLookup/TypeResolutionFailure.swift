@@ -12,164 +12,173 @@
 
 import SwiftSyntax
 
-@_spi(_QualifiedLookupTests)
-public indirect enum TypeResolutionFailure<NominalType: Sendable>:
-  Error
-{
-  /// A type declaration in an outer scope has an invalid identifier.
-  ///
-  /// E.g.
-  /// ```swift
-  /// struct { // ❌ Invalid identifier
-  ///   let _: Self // <- Lookup here
-  /// }
-  /// ```
-  case invalidNameToken(TokenSyntax)
+extension TypeResolver {
+  @_spi(_QualifiedLookupTests)
+  public typealias Failure = GenericFailure<ResolvedTypeSyntax>
 
-  /// Cannot find the given type identifier in scope (using unqualified lookup).
-  ///
-  /// E.g.,
-  /// ```
-  /// func f(_: A) {} // ❌ error: cannot find type 'A' in scope
-  /// ```
-  case noTypeInScope
+  /// Tests uses markers to refer to nominal types.
+  @_spi(_QualifiedLookupTests)
+  public typealias TestFailure = GenericFailure<Character>
 
-  /// Only protocol, class and composition types can form compositions.
-  ///
-  /// I.e. We don't allow structs/enums/actors, functions, tuples.
-  case cannotComposeNonClassOrProtocol(resolved: ResolvedType<NominalType>)
-  case noTypeMember(member: ImplicitTypeReferenceComponent, in: ResolvedType<NominalType>)
+  @_spi(_QualifiedLookupTests)
+  public indirect enum GenericFailure<NominalType: CustomDebugStringConvertible & Sendable>:
+    Error
+  {
+    /// A type declaration in an outer scope has an invalid identifier.
+    ///
+    /// E.g.
+    /// ```swift
+    /// struct { // ❌ Invalid identifier
+    ///   let _: Self // <- Lookup here
+    /// }
+    /// ```
+    case invalidNameToken(TokenSyntax)
 
-  /// We can only extend structs/enums/classes/actors/protocols
-  ///
-  /// I.e. We can't extend tuples, functions, protocol compositions, metatypes, etc.
-  case cannotExtendNonNominal(nonnominal: ResolvedType<NominalType>)
-  /// Extensions may only appear at file scope (top-level).
-  /// ```swift
-  /// func f() {
-  ///   struct A {}
-  ///   extension A {} // ❌
-  /// }
-  /// ```
-  case extensionNotAtFileScope(extensionDecl: ExtensionDeclSyntax)
-  /// Child has error, so we can't qualify this type but we can't offer a useful diagnostic either.
-  ///
-  /// E.g.
-  ///   typealias A = Encodable & Int.Type // ❌ error: non-protocol, non-class type 'Int.Type' cannot be used within a protocol-constrained type
-  ///   func f(_: A) {} // No diagnostic here
-  case invalidAliasedType(Self)
-  case invalidComposition([(TypeSyntax, Self)])
-  // TODO: Get rid of this
-  case other(any Error)
+    /// Cannot find the given type identifier in scope (using unqualified lookup).
+    ///
+    /// E.g.,
+    /// ```
+    /// func f(_: A) {} // ❌ error: cannot find type 'A' in scope
+    /// ```
+    case noTypeInScope
 
-  /// We defer generic parameters/associated types to the type checker.
-  case genericParameterOrAssociatedType
+    /// Only protocol, class and composition types can form compositions.
+    ///
+    /// I.e. We don't allow structs/enums/actors, functions, tuples.
+    case cannotComposeNonClassOrProtocol(resolved: ResolvedType<NominalType>)
+    case noTypeMember(member: ImplicitTypeReferenceComponent, in: ResolvedType<NominalType>)
 
-  /// Type members (obtained through qualified lookup) had errors
-  ///
-  /// E.g.
-  /// ```swift
-  /// protocol A { typealias T = Undefined }
-  /// class B<Generic> { typealias T = Generic }
-  ///
-  /// func f(_: (A & B).T)
-  /// ```
-  case invalidMembers([(TypeLikeSyntax, Self)])
+    /// We can only extend structs/enums/classes/actors/protocols
+    ///
+    /// I.e. We can't extend tuples, functions, protocol compositions, metatypes, etc.
+    case cannotExtendNonNominal(nonnominal: ResolvedType<NominalType>)
+    /// Extensions may only appear at file scope (top-level).
+    /// ```swift
+    /// func f() {
+    ///   struct A {}
+    ///   extension A {} // ❌
+    /// }
+    /// ```
+    case extensionNotAtFileScope(extensionDecl: ExtensionDeclSyntax)
+    /// Child has error, so we can't qualify this type but we can't offer a useful diagnostic either.
+    ///
+    /// E.g.
+    ///   typealias A = Encodable & Int.Type // ❌ error: non-protocol, non-class type 'Int.Type' cannot be used within a protocol-constrained type
+    ///   func f(_: A) {} // No diagnostic here
+    case invalidAliasedType(Self)
+    case invalidComposition([(TypeSyntax, Self)])
+    // TODO: Get rid of this
+    case other(any Error)
 
-  /// The base type which we need to derive a qualified name is invalid.
-  ///
-  /// Causes:
-  /// 1. Nested in invalid nominal type declaration, e.g.:
-  ///    ```swift
-  ///    struct { // ❌ error: expected identifier in struct declaration
-  ///      typealias A = Int
-  ///      func f(a: A) {
-  ///        let n: Int = a + "" // ✅ Compiler doesn't diagnose
-  ///      }
-  ///    }
-  ///    ```
-  ///    Note that if we use an invalid name like `struct 555`, the compiler
-  ///    will interpret the name as the backtick-escaped '`555`' to offer
-  ///    better diagnostics.
-  /// 2. Nested in extension whose type doesn't resolve to a nominal type
-  ///
-  ///    This failure happens when unqualified lookup wants to return the
-  ///    extended type or a member/generic parameter of the extended type.
-  ///    E.g.:
-  ///
-  ///    ```swift
-  ///    extension UndefinedType { // ❌ error: cannot find 'UndefinedType' in scope
-  ///      func f(a: AlsoUndefined) {} // ✅ Compiler doesn't diagnose
-  ///    }
-  ///    extension UndefinedType {
-  ///      typealias T = Int
-  ///      func f(a: T) -> Int {} // ❌ error: cannot find type 'T' in scope
-  ///    }
-  ///    ```
-  case invalidBaseType(Self)
+    /// We defer generic parameters/associated types to the type checker.
+    case genericParameterOrAssociatedType
 
-  /// Name lookup found multiple type redeclarations so references to that
-  /// type name are ambiguous; not necessarily an error, we just defer to
-  /// the type checker for disambiguation.
-  ///
-  /// For example:
-  ///   typealias A = Bool
-  ///   typealias A = Int
-  ///   typealias A = String
-  ///
-  ///   let a: A // ❌ error: 'A' is ambiguous for type lookup
-  case ambiguousTypeDecl([TypeDeclSyntax])
+    /// Type members (obtained through qualified lookup) had errors
+    ///
+    /// E.g.
+    /// ```swift
+    /// protocol A { typealias T = Undefined }
+    /// class B<Generic> { typealias T = Generic }
+    ///
+    /// func f(_: (A & B).T)
+    /// ```
+    case invalidMembers([(TypeLikeSyntax, Self)])
 
-  /// All evaluated syntax must have a ``SourceFileSyntax`` root that's
-  /// registered in the provided symbol table.
-  case syntaxNotInSymbolTable(SourceFileSyntax)
+    /// The base type which we need to derive a qualified name is invalid.
+    ///
+    /// Causes:
+    /// 1. Nested in invalid nominal type declaration, e.g.:
+    ///    ```swift
+    ///    struct { // ❌ error: expected identifier in struct declaration
+    ///      typealias A = Int
+    ///      func f(a: A) {
+    ///        let n: Int = a + "" // ✅ Compiler doesn't diagnose
+    ///      }
+    ///    }
+    ///    ```
+    ///    Note that if we use an invalid name like `struct 555`, the compiler
+    ///    will interpret the name as the backtick-escaped '`555`' to offer
+    ///    better diagnostics.
+    /// 2. Nested in extension whose type doesn't resolve to a nominal type
+    ///
+    ///    This failure happens when unqualified lookup wants to return the
+    ///    extended type or a member/generic parameter of the extended type.
+    ///    E.g.:
+    ///
+    ///    ```swift
+    ///    extension UndefinedType { // ❌ error: cannot find 'UndefinedType' in scope
+    ///      func f(a: AlsoUndefined) {} // ✅ Compiler doesn't diagnose
+    ///    }
+    ///    extension UndefinedType {
+    ///      typealias T = Int
+    ///      func f(a: T) -> Int {} // ❌ error: cannot find type 'T' in scope
+    ///    }
+    ///    ```
+    case invalidBaseType(Self)
 
-  /// Cannot resolve type syntax nested inside a disabled `#if`
-  /// (given the symbol table's configured regions).
-  case syntaxInDisabledRegion
+    /// Name lookup found multiple type redeclarations so references to that
+    /// type name are ambiguous; not necessarily an error, we just defer to
+    /// the type checker for disambiguation.
+    ///
+    /// For example:
+    ///   typealias A = Bool
+    ///   typealias A = Int
+    ///   typealias A = String
+    ///
+    ///   let a: A // ❌ error: 'A' is ambiguous for type lookup
+    case ambiguousTypeDecl([TypeDeclSyntax])
 
-  /// A type syntax that resolves to its own definition.
-  ///
-  /// E.g.
-  /// ```swift
-  /// typealias A = B
-  /// typealias B = A
-  /// ```
-  ///
-  /// The cycle consists of all the type syntax reference we resolved
-  /// to get to the cycle (minus the starting syntax).
-  case cyclicalTypeReference(cycle: [TypeSyntax])
+    /// All evaluated syntax must have a ``SourceFileSyntax`` root that's
+    /// registered in the provided symbol table.
+    case syntaxNotInSymbolTable(SourceFileSyntax)
 
-  // The type resolution depends on a cyclical extension: an extension that
-  // introduces type members on which its own resolution depends.
-  //
-  // E.g.
-  // ```swift
-  // struct A {}
-  // extension A { typealias B = A }
-  // extension A.B {
-  //   struct A {}
-  //
-  //   func f(_: Self) {} // <- Look up `Self` here
-  // }
-  // ```
-  case cyclicalExtensionDependency(GenericExtensionBindingCycle<GlobalTypeName>)
+    /// Cannot resolve type syntax nested inside a disabled `#if`
+    /// (given the symbol table's configured regions).
+    case syntaxInDisabledRegion
 
-  /// We bind extensions to types incrementally, so a type-resolution request
-  /// might be nested within an extension binding request, but it may itself
-  /// make an extension-binding request. In that case, the nested type resolution
-  /// fails and we mark the dependency. *Users should not see this error.*
-  ///
-  /// TODO: Find use case where this actually happens; currently, only `bindExtension`
-  /// emits this error.
-  case extensionNotBoundYet
+    /// A type syntax that resolves to its own definition.
+    ///
+    /// E.g.
+    /// ```swift
+    /// typealias A = B
+    /// typealias B = A
+    /// ```
+    ///
+    /// The cycle consists of all the type syntax reference we resolved
+    /// to get to the cycle (minus the starting syntax).
+    case cyclicalTypeReference(cycle: [TypeSyntax])
+
+    // The type resolution depends on a cyclical extension: an extension that
+    // introduces type members on which its own resolution depends.
+    //
+    // E.g.
+    // ```swift
+    // struct A {}
+    // extension A { typealias B = A }
+    // extension A.B {
+    //   struct A {}
+    //
+    //   func f(_: Self) {} // <- Look up `Self` here
+    // }
+    // ```
+    case cyclicalExtensionDependency(GenericExtensionBindingCycle<GlobalTypeName>)
+
+    /// We bind extensions to types incrementally, so a type-resolution request
+    /// might be nested within an extension binding request, but it may itself
+    /// make an extension-binding request. In that case, the nested type resolution
+    /// fails and we mark the dependency. *Users should not see this error.*
+    ///
+    /// TODO: Find use case where this actually happens; currently, only `bindExtension`
+    /// emits this error.
+    case extensionNotBoundYet
+  }
 }
 
-extension TypeResolutionFailure {
+extension TypeResolver.GenericFailure {
   public func _map<NewNominalType>(
     mapNominal: (NominalType) -> NewNominalType
-  ) -> TypeResolutionFailure<NewNominalType> {
-    func mapNested(_ nestedFailure: Self) -> TypeResolutionFailure<NewNominalType> {
+  ) -> TypeResolver.GenericFailure<NewNominalType> {
+    func mapNested(_ nestedFailure: Self) -> TypeResolver.GenericFailure<NewNominalType> {
       nestedFailure._map(mapNominal: mapNominal)
     }
 
@@ -297,13 +306,13 @@ extension GenericExtensionBindingCycle: CustomDebugStringConvertible where TypeN
   }
 }
 
-extension TypeResolutionFailure where NominalType == String {
+extension TypeResolver.GenericFailure where NominalType == String {
   /// Debug description
   ///
   /// Namely, for syntax nodes we use `.trimmedDescription` and for `ResolvedNominalTypeReference`
   /// we simply compare the qualified type name description.
   public var _debugDescription: String {
-    func describeNested(_ nestedFailure: TypeResolutionFailure) -> String {
+    func describeNested(_ nestedFailure: Self) -> String {
       nestedFailure._debugDescription.replacing("\n", with: "\n  ")
     }
 
@@ -364,8 +373,7 @@ extension TypeResolutionFailure where NominalType == String {
   }
 }
 
-extension TypeResolutionFailure: CustomDebugStringConvertible
-where NominalType: CustomDebugStringConvertible {
+extension TypeResolver.GenericFailure: CustomDebugStringConvertible {
   public var debugDescription: String {
     _map(mapNominal: \.debugDescription)._debugDescription
   }
@@ -373,7 +381,7 @@ where NominalType: CustomDebugStringConvertible {
 
 // MARK: Nested-Cycle Detection
 
-extension TypeResolutionFailure {
+extension TypeResolver.Failure {
   /// Tries to pull out a ``.cyclicalTypeReference`` from this failure at depth
   /// zero or one (non-recursive).
   var nestedCycle: [TypeSyntax]? {
@@ -401,13 +409,13 @@ extension TypeResolutionFailure {
     // Only return a nested cycle if we have exactly one result.
     case .invalidMembers(let nestedFailures):
       guard
-        case (_, TypeResolutionFailure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
+        case (_, TypeResolver.GenericFailure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
         nestedFailures.count == 1
       else { return nil }
       return nestedCycle
     case .invalidComposition(let nestedFailures):
       guard
-        case (_, TypeResolutionFailure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
+        case (_, TypeResolver.GenericFailure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
         nestedFailures.count == 1
       else { return nil }
       return nestedCycle

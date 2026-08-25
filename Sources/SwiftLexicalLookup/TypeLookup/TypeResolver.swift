@@ -39,7 +39,6 @@ public struct TypeResolver {
     line: UInt = #line
   ) -> T {
     if let nestingLimit = self._logNestingLimit, logPrefix.count >= nestingLimit {
-      fflush(stdout)
       fatalError(
         "Exceeded log nesting limit of \(nestingLimit), suggesting there's an infinite loop. If you think this is a mistake, you may change the limit in `TypeQualifier`."
       )
@@ -52,7 +51,6 @@ public struct TypeResolver {
     return result
   }
 
-  public typealias Failure = TypeResolutionFailure<ResolvedTypeSyntax>
   public typealias TypeResult<ResolvedType> = Result<ResolvedType, Failure>
 
   let symbolTable: SymbolTable

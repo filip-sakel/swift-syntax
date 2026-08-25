@@ -15,7 +15,7 @@ import SwiftSyntax
 /// The type result of structural type resolution. `Result`
 /// represents a nominal type.
 @_spi(_QualifiedLookupTests)
-public indirect enum ResolvedType<NominalType> {
+public indirect enum ResolvedType<NominalType: Sendable>: Sendable {
   /// E.g. `(A) -> ()`
   case function(argumentCount: Int)
   /// E.g. `(a: A, _: B)`
@@ -48,7 +48,6 @@ public indirect enum ResolvedType<NominalType> {
 
 // MARK: Conformances
 
-extension ResolvedType: Sendable where NominalType: Sendable {}
 extension ResolvedType: Equatable where NominalType: Equatable {}
 extension ResolvedType: Hashable where NominalType: Hashable {}
 
