@@ -14,55 +14,6 @@ import SwiftIfConfig
 import SwiftSyntax
 
 extension SourceFileSyntax {
-  fileprivate final class _ConfiguredImportVisitor: ActiveSyntaxVisitor {
-    var importDecls = [ImportDeclSyntax]()
-
-    override func visit(_ node: ImportDeclSyntax) -> SyntaxVisitorContinueKind {
-      importDecls.append(node)
-      return .visitChildren
-    }
-    // Don't go to nested scopes
-    override func visit(_ node: CodeBlockItemListSyntax) -> SyntaxVisitorContinueKind {
-      return .skipChildren
-    }
-    // Don't go into `DeclGroupSyntax`'s members
-    override func visit(_ node: MemberBlockSyntax) -> SyntaxVisitorContinueKind {
-      return .skipChildren
-    }
-  }
-  fileprivate final class _ImportVisitor: SyntaxVisitor {
-    var importDecls = [ImportDeclSyntax]()
-
-    override func visit(_ node: ImportDeclSyntax) -> SyntaxVisitorContinueKind {
-      importDecls.append(node)
-      return .visitChildren
-    }
-    // Don't go to nested scopes
-    override func visit(_ node: CodeBlockItemListSyntax) -> SyntaxVisitorContinueKind {
-      return .skipChildren
-    }
-    // Don't go into `DeclGroupSyntax`'s members
-    override func visit(_ node: MemberBlockSyntax) -> SyntaxVisitorContinueKind {
-      return .skipChildren
-    }
-  }
-
-  // TODO: Implement
-  func findImportDecls(using configuredRegions: ConfiguredRegions?) -> [ImportDeclSyntax] {
-    // Get visitor based on config
-    if let configuredRegions {
-      let visitor = _ConfiguredImportVisitor(viewMode: .all, configuredRegions: configuredRegions)
-      visitor.walk(self)
-      return visitor.importDecls
-    } else {
-      let visitor = _ImportVisitor(viewMode: .all)
-      visitor.walk(self)
-      return visitor.importDecls
-    }
-  }
-}
-
-extension SourceFileSyntax {
   /// Helper visitor for `findExtensions`
   fileprivate final class _ExtensionVisitor: SyntaxVisitor {
     var extensionDecls = [Attached<ExtensionDeclSyntax>]()
@@ -127,19 +78,15 @@ extension SourceFileSyntax {
 }
 
 extension SymbolTable {
-  // TODO: Merge with nominal-type lookup-position-sensitive code
-  //
   // Extensions come from several sources:
   // 1. Current file (e.g., fileprivate nominal types draw just from here)
   // 2. Current module (e.g., internal nominal types can only be here)
   // 3. Imported modules
   //    a. Current file's imported modules
   //    b. Internal/public/@_exported modules in other files
-  //    c. Transitive dependencies in member visibility migration mode (TODO :Verify)
-  //
+  //    c. Transitive dependencies in member visibility migration mode
   func findAllExtensions(
     accessibleFrom lookupFile: SourceFileSyntax
-      // TODO: Convert to array
   ) -> [Attached<ExtensionDeclSyntax>] {
     func extractConfiguredRegions(file: SourceFileSyntax) -> ConfiguredRegions? {
       guard let fileInfo = getFileInfo(file) else {
@@ -151,17 +98,12 @@ extension SymbolTable {
     }
 
     guard let lookupFileInfo = self.getFileInfo(lookupFile) else {
-      // TODO: Handle error
       fatalError(
         "[SwiftLexicalLookup] Internal error: Unexpectedly couldn't find lookup file in symbol table's module map."
       )
     }
-    // TODO: This should be imported *decls*, e.g., import struct Swift.Int
-    let imports = lookupFile.findImportDecls(using: lookupFileInfo.configuredRegions)
-    let importedModules = imports.flatMap({ $0.path.compactMap({ Identifier(validating: $0.name) }) })
 
     guard let internalSources = moduleToSources[lookupFileInfo.module] else {
-      // TODO: Handle error
       fatalError(
         "[SwiftLexicalLookup] Internal error: Unexpectedly couldn't find lookup file for a given lookup module."
       )
@@ -172,18 +114,6 @@ extension SymbolTable {
     // Look in this module
     for file in internalSources.values where file != lookupFile {
       results.append(contentsOf: file.findExtensions(configuredRegions: extractConfiguredRegions(file: file)))
-    }
-    // Look for imported modules (reversed order to account for shadowing)
-    for module in importedModules.reversed() {
-      guard let moduleSources = moduleToSources[module] else {
-        // Handle error
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Unexpectedly couldn't find lookup file in symbol table's module map."
-        )
-      }
-      for file in moduleSources.values {
-        results.append(contentsOf: file.findExtensions(configuredRegions: extractConfiguredRegions(file: file)))
-      }
     }
 
     return results
