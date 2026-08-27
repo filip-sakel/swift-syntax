@@ -27,7 +27,7 @@ struct TypeResultName: NominalTypeResultProtocol {
 }
 
 // TODO: Rename to remove `Test` or remove aliases
-typealias TestResolvedType = TypeResolver.GenericTypeResult<Character>
+typealias TestResolvedType = TypeResolver.TypeResult
 typealias TestExtensionState = ExtensionState
 typealias TestResolutionFailure = TypeResolver.Failure
 
@@ -38,8 +38,8 @@ typealias TestResolutionFailure = TypeResolver.Failure
 struct TypeResolutionMatcher {
   /// A marker and the resolved qualified name of the annotated `NominalTypeDeclSyntax`.
   struct Definition {
-    let marker: Character
-    let name: TypeGraph.GlobalTypeName?
+    // let marker: Character
+    let nominalType: TypeResolver.ResolvedTypeSyntax
   }
   /// Annotates `TypeSyntax` with a type-resolution result using markers;
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
@@ -66,13 +66,14 @@ extension TypeResolutionMatcher.Definition: LexicalAnnotation, Identifiable, Cus
     LexicalAssertionUtilities.findDirectParent(from: token, ofType: NominalTypeDeclSyntax.self, file: file, line: line)
   }
 
-  var id: Character { marker }
+  var id: String { nominalType.debugDescription }
 
+  // TODO: Remove
   // Use the name for a more familiar description,
   // or the marker (if we don't care about the name
   // and for local declarations.)
   var description: String {
-    name?.debugDescription ?? marker.description
+    nominalType.debugDescription  //?? marker.description
   }
 }
 
@@ -174,7 +175,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
   func assertExpectation(
     expectation: ContextualizedAnnotation<Expectation>,
-    markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
+    markersToDefinitions: [String: ContextualizedAnnotation<Definition>],
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool
   ) -> [ExpectationFailure] {
@@ -216,13 +217,13 @@ extension TypeResolutionMatcher: LexicalMatcher {
   private func _assertExtensionBinding(
     extensionDecl: Attached<ExtensionDeclSyntax>,
     expectedRawState: TestExtensionState,
-    markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
+    markersToDefinitions: [String: ContextualizedAnnotation<Definition>],
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool
   ) -> [ExpectationFailure] {
-    []
-    // // FIXME: Re-enable
-    //
+    return []
+    // FIXME: Implement
+
     // // Look up extended type if not already resolved
     // let actualRawState: ExtensionState
     // // Try to get already-resolved state
@@ -255,24 +256,30 @@ extension TypeResolutionMatcher: LexicalMatcher {
     // // Map the types
     // var mappingFailures = [ExpectationFailure]()
     // /// Helper for mapping the expected state
-    // let expectedState = expectedRawState._mapTypes(mapNominal: { marker -> TypeResultName in
-    //   guard let targetDefinition = markersToDefinitions[marker] else {
-    //     mappingFailures.append(ExpectationFailure.referencesUndefinedMarker(marker))
-    //     return TypeResultName("")
-    //   }
-    //   guard let expectedName = targetDefinition.annotation.name else {
-    //     mappingFailures.append(
-    //       ExpectationFailure.other(
-    //         failure:
-    //           "Must specify 'name' argument in annotation '\(targetDefinition.annotation.marker)' for declaration '\(targetDefinition.syntax.trimmedDescription)'."
-    //       )
-    //     )
-    //     return TypeResultName("")
-    //   }
-    //   return TypeResultName(expectedName.debugDescription)
-    // })
+    // let expectedState = expectedRawState
+    // // ._mapTypes(mapNominal: { marker -> TypeResultName in
+    // //   guard let targetDefinition = markersToDefinitions[marker] else {
+    // //     mappingFailures.append(ExpectationFailure.referencesUndefinedMarker(marker))
+    // //     return TypeResultName("")
+    // //   }
+    // //   guard let expectedName = targetDefinition.annotation.name else {
+    // //     mappingFailures.append(
+    // //       ExpectationFailure.other(
+    // //         failure:
+    // //           "Must specify 'name' argument in annotation '\(targetDefinition.annotation.marker)' for declaration '\(targetDefinition.syntax.trimmedDescription)'."
+    // //       )
+    // //     )
+    // //     return TypeResultName("")
+    // //   }
+    // //   return TypeResultName(expectedName.debugDescription)
+    // // })
+    //
     // // Get the type name
-    // let actualState = actualRawState._mapTypes(mapNominal: { TypeResultName($0.type._succinctDescription) })
+    // let actualState = actualRawState._mapTypes(mapNominal: { nominalType in
+    //   // TypeResultName($0.type._succinctDescription)
+    //   syntaxToDefinitions[nominalType.type.mainDecl.node]?.annotation.name.debugDescription
+    //     == nominalType.type.debugDescription
+    // })
     // // Don't continue if we couldn't map the states
     // guard mappingFailures.isEmpty else { return mappingFailures }
     //
@@ -294,7 +301,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
   private func _assertTypeSyntax(
     typeSyntax: Attached<TypeSyntax>,
     expectedType: TestResolvedType,
-    markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
+    markersToDefinitions: [String: ContextualizedAnnotation<Definition>],
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool
   ) -> [ExpectationFailure] {
@@ -310,37 +317,60 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
     // Assert output
     var failures = [ExpectationFailure]()
-    let actualTypeDescription: String = actualType.mapNominals({ nominalType -> TypeResultName in
-      guard let targetDefinition = syntaxToDefinitions[nominalType.type.mainDecl.node] else {
-        failures.append(
-          ExpectationFailure.resultReferencesUnmarkedSyntax(
-            syntaxDescription: nominalType.type.globalName.debugDescription
+    let expectedTypeDescription: String = expectedType.debugDescription
+    // .mapNominals({ marker -> TypeResultName in
+    //   guard let targetDefinition = markersToDefinitions[marker] else {
+    //     failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
+    //     return TypeResultName("")
+    //   }
+    //   return TypeResultName(targetDefinition.annotation.description)
+    // }).debugDescription
+    let actualTypeDescription: String = actualType.mapNominals({ nominalType -> TypeResolver.ResolvedTypeSyntax in
+      // Check
+      assertions: do {
+        // Ensure we've marked syntax with that name
+        guard let definition = markersToDefinitions[nominalType.debugDescription] else {
+          failures.append(ExpectationFailure.referencesUndefinedMarker(nominalType.debugDescription))
+          break assertions
+        }
+
+        // Ensure the actual syntax matches the marked syntax
+        guard nominalType.type.mainDecl.node == definition.syntax else {
+          failures.append(
+            ExpectationFailure.other(
+              failure:
+                "Expected result '\(nominalType.debugDescription)' to point to `\(definition.syntax._memberlessDescription)`, not `\(nominalType.type.mainDecl.node._memberlessDescription)`."
+            )
           )
-        )
-        return TypeResultName("")
-      }
-      // Ensure we got the right name
-      let actualName = nominalType.type.globalName?.debugDescription
-      if let expectedName = targetDefinition.annotation.name?.debugDescription, actualName != expectedName {
-        failures.append(
-          ExpectationFailure.other(
-            failure:
-              "Expected name '\(expectedName)' for type marked '\(targetDefinition.annotation.marker)' but got '\(actualName?.debugDescription ?? "nil")'."
-          )
-        )
-        return TypeResultName("")
+          break assertions
+        }
       }
 
-      return TypeResultName(targetDefinition.annotation.description)
+      return nominalType
     }).debugDescription
-
-    let expectedTypeDescription: String = expectedType.mapNominals({ marker -> TypeResultName in
-      guard let targetDefinition = markersToDefinitions[marker] else {
-        failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
-        return TypeResultName("")
-      }
-      return TypeResultName(targetDefinition.annotation.description)
-    }).debugDescription
+    // .mapNominals({ nominalType -> TypeResultName in
+    //   guard let targetDefinition = syntaxToDefinitions[nominalType.type.mainDecl.node] else {
+    //     failures.append(
+    //       ExpectationFailure.resultReferencesUnmarkedSyntax(
+    //         syntaxDescription: nominalType.type.globalName.debugDescription
+    //       )
+    //     )
+    //     return TypeResultName("")
+    //   }
+    //   // Ensure we got the right name
+    //   let actualName = nominalType.type.globalName?.debugDescription
+    //   if let expectedName = targetDefinition.annotation.name.debugDescription, actualName != expectedName {
+    //     failures.append(
+    //       ExpectationFailure.other(
+    //         failure:
+    //           "Expected name '\(expectedName)' for type marked '\(targetDefinition.annotation.marker)' but got '\(actualName?.debugDescription ?? "nil")'."
+    //       )
+    //     )
+    //     return TypeResultName("")
+    //   }
+    //
+    //   return TypeResultName(targetDefinition.annotation.description)
+    // }).debugDescription
     // Give up if markers are undefined (i.e. we already have failures)
     guard failures.isEmpty else { return failures }
 
@@ -405,11 +435,19 @@ func assertTypeResolution(
 extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatcher {
   mutating func appendInterpolation(
     _ marker: Character,
-    name: TypeGraph.GlobalTypeName? = nil,
+    name mockedNominalType: TypeResolver.ResolvedTypeSyntax,
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    append(definition: TypeResolutionMatcher.Definition(marker: marker, name: name), file: file, line: line)
+    append(definition: TypeResolutionMatcher.Definition(nominalType: mockedNominalType), file: file, line: line)
+  }
+  mutating func appendInterpolation(
+    _ marker: Character,
+    local: String,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) {
+    fatalError("TODO")
   }
   mutating func appendInterpolation(
     extensionState: TestExtensionState,
@@ -437,18 +475,18 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     appendInterpolation(type: TestResolvedType.failure(failure), file: file, line: line)
   }
   mutating func appendInterpolation(
-    nominals markers: [Character],
+    nominals: [TypeResolver.ResolvedTypeSyntax],
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    appendInterpolation(type: TestResolvedType.nominalTypes(markers), file: file, line: line)
+    appendInterpolation(type: TestResolvedType.nominalTypes(nominals), file: file, line: line)
   }
   mutating func appendInterpolation(
-    nominal marker: Character,
+    nominal: TypeResolver.ResolvedTypeSyntax,
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    appendInterpolation(nominals: [marker], file: file, line: line)
+    appendInterpolation(nominals: [nominal], file: file, line: line)
   }
 }
 
@@ -585,7 +623,44 @@ extension TypeGraph.GlobalTypeName: ExpressibleByStringLiteral {
 
 @_spi(_QualifiedLookupTests)
 extension TypeResolver.ResolvedTypeSyntax: ExpressibleByStringLiteral {
+  /// Mock a global type reference with the given debug description.
   public init(stringLiteral value: String) {
     self.init(_testGlobalType: TypeGraph.GlobalTypeName(stringLiteral: value), unusedNominalDecl: "struct")
+  }
+}
+
+extension NominalTypeDeclSyntax {
+  /// Returns the name of this local declaration or `nil` if global.
+  var localNameDescription: String? {
+    var result = ""
+    var ancestor = self.parent
+
+    while let currentAncestor = ancestor {
+      if let nominalParent = currentAncestor.as(NominalTypeDeclSyntax.self) {
+        // We could be nested in local nominal decls
+        result = "\(nominalParent.name.trimmedDescription).\(result)"
+      }
+      // Once we get the local scope, we're done
+      else if let scope = currentAncestor.as(CodeBlockItemListSyntax.self),
+        let parentScope = scope.parent,
+        // Source files and `#if` aren't local scopes
+        !parentScope.is(SourceFileSyntax.self), !parentScope.is(IfConfigClauseSyntax.self)
+      {
+        result = "`\(scope.prettyScope.prettyDescription)`.\(result)"
+        break
+      }
+      // Return `nil` for globals
+      else if let scope = currentAncestor.as(CodeBlockItemListSyntax.self),
+        scope.parent?.is(SourceFileSyntax.self) == true
+      {
+        return nil
+      }
+      // Otherwise, keep going up scopes
+      else {
+        ancestor = currentAncestor.parent
+      }
+    }
+
+    return result
   }
 }

@@ -66,8 +66,10 @@ extension TypeResolver.ResolvedTypeSyntax {
   /// `Attached<NominalTypeDeclSyntax>` instance and isn't used to produce a
   /// description.
   @_spi(_QualifiedLookupTests)
-  public init(_testGlobalType globalName: TypeGraph.GlobalTypeName, unusedNominalDecl: Attached<NominalTypeDeclSyntax>)
-  {
+  public init(
+    _testGlobalType globalName: TypeGraph.GlobalTypeName,
+    unusedNominalDecl: Attached<NominalTypeDeclSyntax>
+  ) {
     self.init(
       type: TypeGraph.TypeRef(
         globalReference: TypeGraph.GlobalTypeRef(name: globalName, mainDecl: unusedNominalDecl, _version: -1)
