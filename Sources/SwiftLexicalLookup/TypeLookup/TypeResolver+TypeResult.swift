@@ -44,7 +44,7 @@ extension TypeResolver {
     public let syntax: Attached<TypeLikeSyntax>
 
     public var debugDescription: String {
-      type.debugDescription
+      type._succinctDescription
     }
   }
 }
@@ -74,17 +74,6 @@ extension TypeResolver.ResolvedTypeSyntax {
       ),
       syntax: Attached<TypeLikeSyntax>(unusedNominalDecl)
     )
-  }
-
-  /// A succinct description provides just the crucial information required
-  /// for testing.
-  var _succinctDescription: String {
-    switch type.storage {
-    case .global(let global):
-      return global.name.debugDescription
-    case .local(let nominalDecl):
-      return nominalDecl._memberlessDescription
-    }
   }
 }
 

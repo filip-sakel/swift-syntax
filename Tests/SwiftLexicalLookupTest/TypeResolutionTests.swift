@@ -272,7 +272,7 @@ final class TypeResolutionTests: XCTestCase {
         "MyFile.swift": """
         \(interpolation: baseSourceInterpolation)
 
-        let _: \(failure: .noTypeMember(member: memberT, in: .nominalTypes(["🟩"])))A.T
+        let _: \(failure: .noTypeMember(member: memberT, in: .nominalTypes(["_(MyFile.swift)::A"])))A.T
         """
       ],
       buildConfiguration: flagsConfig(["FlagB"]),
@@ -461,7 +461,7 @@ final class TypeResolutionTests: XCTestCase {
 
         typealias C = \(failure: .invalidComposition([
           ("((A, B) -> Int)", .partialTypeResolutionFailure(.functionType)),
-          ("A", .cannotComposeNonClassOrProtocol(resolved: .nominalTypes(["🟥"]))),
+          ("A", .cannotComposeNonClassOrProtocol(resolved: .nominalTypes(["_(MyFile.swift)::A"]))),
         ]))
         ((A, B) -> Int) & A
         """ as LexicalLookupSource
@@ -515,7 +515,7 @@ final class TypeResolutionTests: XCTestCase {
              (A, B).MyType
       var y: \(failure: .partialTypeResolutionFailure(.functionType))
              ((A) -> B).MyType
-      var z: \(failure: .noTypeMember(member: myTypeMember, in: .metatype(base: .nominalTypes(["🟩"]))))
+      var z: \(failure: .noTypeMember(member: myTypeMember, in: .metatype(base: .nominalTypes(["_(MyFile.swift)::A"]))))
              A.Type.MyType
       """ as LexicalLookupSource
     ])
@@ -586,7 +586,9 @@ final class TypeResolutionTests: XCTestCase {
       typealias Metatype = ProtoA.Type
       \(extensionState: ExtensionState(
         dependencies: [],
-        resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .metatype(base: .nominalTypes(["🟥"]))))
+        resolvedType: .failure(.cannotExtendNonNominal(
+          nonnominal: .metatype(base: .nominalTypes(["_(MyFile.swift)::ProtoA"]))
+        ))
       ))
       extension Metatype {}
 
@@ -614,7 +616,7 @@ final class TypeResolutionTests: XCTestCase {
       \(extensionState: ExtensionState(
         dependencies: [],
         resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .nominalTypes([
-          "🟥", "🟪"
+          "_(MyFile.swift)::ProtoA", "_(MyFile.swift)::ProtoB"
         ])))
       ))
       extension ProtoA & ProtoB {}

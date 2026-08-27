@@ -135,7 +135,7 @@ extension TypeGraph.GlobalTypeName {
     // (which every global name has), and use the first part as the qualifier
     // and the tail as the "name".
     guard let firstQualifierSeparatorRange = string.firstRange(of: "::") else {
-      fatalError("GlobalTypeName '\(string)' must have at least one qualifier separator '::'.")
+      fatalError("GlobalTypeName '\(string)' must have at least one qualifier separator '::'.", file: file, line: line)
     }
     let (firstQualifier, tail) = (
       string[..<firstQualifierSeparatorRange.lowerBound].description,
@@ -258,6 +258,9 @@ extension TypeGraph.TypeRef: CustomDebugStringConvertible {
     }
   }
 
+  /// A shorter description solely with information used for testing/
+  /// important logs.
+  ///
   /// E.g. a local 'struct LocalDecl {}' or global
   /// '_(InternalFile.swift)::MyType.ExternalModule::OtherType'
   public var _succinctDescription: String {

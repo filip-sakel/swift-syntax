@@ -811,7 +811,7 @@ extension TypeResolver {
         // We should have diagnosed an ambiguity if there was a different
         // nominal decl or we couldn't find a member
         fatalError(
-          "[SwiftLexicalLookup] Internal error: Qualified lookup of \(baseType._succinctDescription) > '\(declName.name)' unexpectedly returned `\(unexpectedResult.debugDescription)`"
+          "[SwiftLexicalLookup] Internal error: Qualified lookup of \(baseType.debugDescription) > '\(declName.name)' unexpectedly returned `\(unexpectedResult.debugDescription)`"
         )
       case .failure(let failure):
         return .failure(failure)
@@ -840,7 +840,7 @@ extension TypeResolver {
         // .baseNotRegistered, .baseDeclGroupUnbound -> We should have a valid base from the recursive step
         case .other(.cannotRegisterRedeclaration), .baseNotRegistered, .baseDeclGroupUnbound:
           fatalError(
-            "[ewiftLexicalLookup] Internal error: While registering '\(baseType._succinctDescription)' > '\(nominalDecl._memberlessDescription)': \(registrationFailure)"
+            "[ewiftLexicalLookup] Internal error: While registering '\(baseType.debugDescription)' > '\(nominalDecl._memberlessDescription)': \(registrationFailure)"
           )
         }
       }
@@ -1016,7 +1016,7 @@ extension TypeResolver {
           (typeDecl: Attached<TypeDeclSyntax>, result: TypeResult)?,
           Failure
         >
-      logPrefix.append("Base `\(baseType._succinctDescription)`")
+      logPrefix.append("Base `\(baseType.debugDescription)`")
       defer {
         logPrefix.removeLast()
         switch memberResult {
@@ -1205,7 +1205,7 @@ extension TypeResolver {
     typeReference: ResolvedTypeSyntax
   ) -> Result<ResolvedTypeSyntax, Failure> {
     withLogging(
-      request: "Extended nominal`\(typeReference._succinctDescription)`",
+      request: "Extended nominal`\(typeReference.debugDescription)`",
       describe: \._debugDescription,
       perform: { $0._resolveType(typeReference: typeReference) }
     )

@@ -348,7 +348,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
       return [
         ExpectationFailure.other(
           failure:
-            "Resolved-type mismatch. Expected: \(expectedTypeDescription)\nBut got:  \(actualTypeDescription)"
+            "Resolved-type mismatch.\nExpected: \(expectedTypeDescription)\nBut got:  \(actualTypeDescription)"
         )
       ]
     }
