@@ -77,10 +77,10 @@ final class TypeResolutionTests: XCTestCase {
     assertTypeResolution([
       "MyFile.swift": """
       // Meta types
-      \("🟥", name: "_(MyFile.swift)::A")
+      \(name: "_(MyFile.swift)::A")
       struct A {}
 
-      func f(_: \(type: .metatype(base: .nominalTypes(["🟥"])))A.Type)
+      func f(_: \(type: .metatype(base: .nominalTypes(["_(MyFile.swift)::A"])))A.Type)
 
       // Named opaque return types
       func g() -> <T> \(nominals: [])T { 1 }
@@ -99,15 +99,15 @@ final class TypeResolutionTests: XCTestCase {
       "MyFile.swift": """
       // Any/some types forward to the underlying protocol (but we
       // don't actually check that the base type is a protocol)
-      \("🟥", name: "_(MyFile.swift)::A")
+      \(name: "_(MyFile.swift)::A")
       protocol A {}
 
-      func f(_: \(nominal: "🟥")some A)
-      func g(_: \(nominal: "🟥")any A)
+      func f(_: \(nominal: "_(MyFile.swift)::A")some A)
+      func g(_: \(nominal: "_(MyFile.swift)::A")any A)
 
       // Attributed types (and modifiers)
       func h(_: @escaping \(failure: .partialTypeResolutionFailure(.functionType))() -> Void)
-      func i(_: sending \(nominal: "🟥")A)
+      func i(_: sending \(nominal: "_(MyFile.swift)::A")A)
 
       // Pack elements & expansions
       func f<each T>(_: \(failure: .genericParameterOrAssociatedType)(repeat each T)) {}
@@ -250,7 +250,7 @@ final class TypeResolutionTests: XCTestCase {
         "MyFile.swift": """
         \(interpolation: baseSourceInterpolation)
 
-        let _: \(nominal: "🟩")A.T
+        let _: \(nominal: "_(MyFile.swift)::A")A.T
         """
       ],
       buildConfiguration: flagsConfig(["FlagA"]),
@@ -262,7 +262,7 @@ final class TypeResolutionTests: XCTestCase {
         "MyFile.swift": """
         \(interpolation: baseSourceInterpolation)
 
-        let _: \(nominal: "🟨")A.T
+        let _: \(nominal: "_(MyFile.swift)::B")A.T
         """
       ],
       buildConfiguration: flagsConfig(["FlagA", "FlagB"])
@@ -285,7 +285,7 @@ final class TypeResolutionTests: XCTestCase {
         "MyFile.swift": """
         \(interpolation: baseSourceInterpolation)
 
-        let _: \(nominal: "🟪")A.T
+        let _: \(nominal: "_(MyFile.swift)::C")A.T
         """
       ],
       buildConfiguration: flagsConfig(["FlagB", "FlagC"])
@@ -296,7 +296,7 @@ final class TypeResolutionTests: XCTestCase {
         "MyFile.swift": """
         \(interpolation: baseSourceInterpolation)
 
-        let _: \(nominal: "🟦")A.T
+        let _: \(nominal: "_(MyFile.swift)::D")A.T
         """
       ],
       buildConfiguration: flagsConfig(["FlagB", "FlagD"])
@@ -321,15 +321,15 @@ final class TypeResolutionTests: XCTestCase {
   func testSimpleAlias() {
     assertTypeResolution([
       "MyFile.swift": """
-      typealias A = \(nominal: "🟥")B
+      typealias A = \(nominal: "_(MyFile.swift)::B")B
 
-      \("🟥", name: "_(MyFile.swift)::B")
+      \(name: "_(MyFile.swift)::B")
       struct B {
-        static func f() -> \(nominal: "🟥")A {}
-        static func g() -> \(nominal: "🟥")B {}
+        static func f() -> \(nominal: "_(MyFile.swift)::B")A {}
+        static func g() -> \(nominal: "_(MyFile.swift)::B")B {}
       }
-      func f() -> \(nominal: "🟥")A {}
-      func g() -> \(nominal: "🟥")B {}
+      func f() -> \(nominal: "_(MyFile.swift)::B")A {}
+      func g() -> \(nominal: "_(MyFile.swift)::B")B {}
       """ as LexicalLookupSource
     ])
   }
@@ -337,18 +337,17 @@ final class TypeResolutionTests: XCTestCase {
   func testNestedAlias() {
     assertTypeResolution([
       "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::Outer")
       struct Outer {
-        typealias B = \(nominal: "🟩")A
+        typealias B = \(nominal: "_(MyFile.swift)::Outer._(MyFile.swift)::A")A
 
-        \("🟩", name: "_(MyFile.swift)::Outer._(MyFile.swift)::A")
+        \(name: "_(MyFile.swift)::Outer._(MyFile.swift)::A")
         struct A {
-          static func f() -> \(nominal: "🟩")B {}
-          static func g() -> \(nominal: "🟩")B {}
+          static func f() -> \(nominal: "_(MyFile.swift)::Outer._(MyFile.swift)::A")B {}
+          static func g() -> \(nominal: "_(MyFile.swift)::Outer._(MyFile.swift)::A")B {}
         }
       }
-      func f(_: \(nominal: "🟩")Outer.A)
-      func g(_: \(nominal: "🟩")Outer.B)
+      func f(_: \(nominal: "_(MyFile.swift)::Outer._(MyFile.swift)::A")Outer.A)
+      func g(_: \(nominal: "_(MyFile.swift)::Outer._(MyFile.swift)::A")Outer.B)
       """ as LexicalLookupSource
     ])
   }
@@ -404,11 +403,11 @@ final class TypeResolutionTests: XCTestCase {
   func testNestedCycle() {
     assertTypeResolution([
       "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::A")
+      \(name: "_(MyFile.swift)::A")
       struct A { typealias Element = B.Element }
       struct B { typealias Element = A.Element }
 
-      func f(_: \(nominal: "🟥")A)
+      func f(_: \(nominal: "_(MyFile.swift)::A")A)
       func g(_: \(failure: .invalidMembers([("A.Element", .cyclicalTypeReference(cycle: ["B.Element", "A.Element"]))]))A.Element)
       """ as LexicalLookupSource
     ])
@@ -419,33 +418,31 @@ final class TypeResolutionTests: XCTestCase {
   func testSimpleComposition() {
     assertTypeResolution([
       "MyFile.swift": """
-      typealias C = \(nominals: ["🟥", "🟩"])A & B
+      typealias C = \(nominals: ["_(MyFile.swift)::A", "_(MyFile.swift)::B"])A & B
 
-      \("🟥", name: "_(MyFile.swift)::A")
+      \(name: "_(MyFile.swift)::A")
       protocol A {}
 
-      \("🟩", name: "_(MyFile.swift)::B")
+      \(name: "_(MyFile.swift)::B")
       protocol B {}
       """ as LexicalLookupSource
     ])
   }
 
   func testAnyTypeComposition() {
-    // assertTypeResolution([
-    //   "MyFile.swift": """
-    //   \("🟥", name: "_(MyFile.swift)::ProtoA")
-    //   protocol ProtoA {}
-    //   func f(_: \(nominal: "🟥")(Any & ProtoA) & Any)
-    //   """ as LexicalLookupSource
-    // ], verbose: true)
     assertTypeResolution([
       "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::ProtoA")
+      \(name: "_(MyFile.swift)::ProtoA")
       protocol ProtoA {}
-      \("🟩", name: "_(MyFile.swift)::ProtoB")
+
+      \(name: "_(MyFile.swift)::ProtoB")
       protocol ProtoB {}
-      func f(_: \(nominal: "🟥")(Any & ProtoA) & Any & ProtoA)
-      func g(_: \(nominals: ["🟥", "🟩"])((ProtoA & Any) & Any) & ProtoB)
+
+      let x: \(nominal: "_(MyFile.swift)::ProtoA")
+        (Any & ProtoA) & Any & ProtoA
+
+      let y: \(nominals: ["_(MyFile.swift)::ProtoA", "_(MyFile.swift)::ProtoB"])
+        ((ProtoA & Any) & Any) & ProtoB
       """ as LexicalLookupSource
     ])
   }
@@ -455,7 +452,7 @@ final class TypeResolutionTests: XCTestCase {
       [
         "MyFile.swift": """
         // Cannot compose non nominal types
-        \("🟥", name: "_(MyFile.swift)::A")
+        \(name: "_(MyFile.swift)::A")
         struct A {}
 
         struct B {}
@@ -488,12 +485,14 @@ final class TypeResolutionTests: XCTestCase {
   func testDuplicateComposition() {
     assertTypeResolution([
       "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::ProtoA")
+      \(name: "_(MyFile.swift)::ProtoA")
       protocol ProtoA {}
-      \("🟩", name: "_(MyFile.swift)::ProtoB")
+      \(name: "_(MyFile.swift)::ProtoB")
       protocol ProtoB {}
-      func f(_: \(nominal: "🟥")ProtoA & Any & ProtoA)
-      func g(_: \(nominals: ["🟥", "🟩"])(ProtoA & ProtoB) & ProtoA)
+
+      func f(_: \(nominal: "_(MyFile.swift)::ProtoA")ProtoA & Any & ProtoA)
+
+      func g(_: \(nominals: ["_(MyFile.swift)::ProtoA", "_(MyFile.swift)::ProtoB"])(ProtoA & ProtoB) & ProtoA)
       """ as LexicalLookupSource
     ])
   }
@@ -507,7 +506,7 @@ final class TypeResolutionTests: XCTestCase {
     )
     assertTypeResolution([
       "MyFile.swift": """
-      \("🟩", name: "_(MyFile.swift)::A")
+      \(name: "_(MyFile.swift)::A")
       struct A {}
       struct B {}
 
@@ -557,16 +556,15 @@ final class TypeResolutionTests: XCTestCase {
   func testSimpleExtension() {
     assertTypeResolution([
       "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::A")
       struct A {}
 
       extension A {
-        \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
+        \(name: "_(MyFile.swift)::A._(MyFile.swift)::B")
         struct B {}
       }
-      func f(_: \(nominal: "🟩")A.B)
+      func f(_: \(nominal: "_(MyFile.swift)::A._(MyFile.swift)::B")A.B)
       // Test that incremental binding still works with a second request
-      func g(_: \(nominal: "🟩")A.B)
+      func g(_: \(nominal: "_(MyFile.swift)::A._(MyFile.swift)::B")A.B)
       """ as LexicalLookupSource
     ])
   }
@@ -574,7 +572,7 @@ final class TypeResolutionTests: XCTestCase {
   func testExtendedType() {
     assertTypeResolution([
       "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::ProtoA")
+      \(name: "_(MyFile.swift)::ProtoA")
       protocol ProtoA: ~Copyable {}
 
       // Tuple
@@ -612,7 +610,7 @@ final class TypeResolutionTests: XCTestCase {
       extension ProtoAndAny {}
 
       // Invalid Compositions
-      \("🟪", name: "_(MyFile.swift)::ProtoB")
+      \(name: "_(MyFile.swift)::ProtoB")
       protocol ProtoB {}
 
       \(extensionState: ExtensionState(
@@ -628,17 +626,16 @@ final class TypeResolutionTests: XCTestCase {
   func testTypeInExtension() {
     assertTypeResolution([
       "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::A")
       struct A {}
 
       extension A {
-        \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::B")
+        \(name: "_(MyFile.swift)::A._(MyFile.swift)::B")
         struct B {
-          func f(_: \(nominal: "🟩")B)
+          func f(_: \(nominal: "_(MyFile.swift)::A._(MyFile.swift)::B")B)
         }
-        func g(_: \(nominal: "🟩")B)
+        func g(_: \(nominal: "_(MyFile.swift)::A._(MyFile.swift)::B")B)
       }
-      func h(_: \(nominal: "🟩")A.B)
+      func h(_: \(nominal: "_(MyFile.swift)::A._(MyFile.swift)::B")A.B)
       """ as LexicalLookupSource
     ])
   }
@@ -647,7 +644,7 @@ final class TypeResolutionTests: XCTestCase {
     assertTypeResolution(
       [
         "MyFile.swift": """
-        \("🟥", name: "_(MyFile.swift)::A")
+        \(name: "_(MyFile.swift)::A")
         struct A {}
 
         \(extensionState: .invalidCycle(
@@ -668,13 +665,27 @@ final class TypeResolutionTests: XCTestCase {
       ]
     )
   }
+  // FIXME: Add expectations
   func testRedeclarationWithRecursiveExtension() {
     assertTypeResolution([
       "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::A")
+      \(name: "_(MyFile.swift)::A")
       struct A {}
+
+      \(extensionState: .bound(
+        to: "_(MyFile.swift)::A",
+        dependencies: [ExtensionDependency(baseType: "_(MyFile.swift)::A", members: ["B", "A"])]
+      ))
       extension A.B {}
+
+      \(extensionState: .bound(to: "_(MyFile.swift)::A", dependencies: []))
       extension A { typealias B = A }
+
+      \(extensionState: .invalidCycle(
+        dependencies: [ExtensionDependency(baseType: "_(MyFile.swift)::A", members: ["B", "A"])],
+        cycleElements: [],
+        conflictingMember: "B"
+      ))
       extension A.B { typealias B = OtherType }
       """ as LexicalLookupSource
     ])
@@ -687,9 +698,13 @@ final class TypeResolutionTests: XCTestCase {
     // `extension T_0`), and continue from there.
     assertTypeResolution([
       "File.swift": """
+      \(name: "_(File.swift)::T_0")
       struct T_0 {}
+      \(name: "_(File.swift)::T_1")
       struct T_1 {}
+      \(name: "_(File.swift)::T_2")
       struct T_2 {}
+      \(name: "_(File.swift)::T_3")
       struct T_3 {}
 
       extension T_0 { typealias Last = T_3 }
@@ -737,9 +752,13 @@ final class TypeResolutionTests: XCTestCase {
   func testFixedPathologicalN3() {
     assertTypeResolution([
       "File.swift": """
+      \(name: "_(File.swift)::T_0")
       struct T_0 {}
+      \(name: "_(File.swift)::T_1")
       struct T_1 {}
+      \(name: "_(File.swift)::T_2")
       struct T_2 {}
+      \(name: "_(File.swift)::T_3")
       struct T_3 {}
 
       extension T_0 { typealias Last = T_3 }
@@ -770,6 +789,7 @@ final class TypeResolutionTests: XCTestCase {
   /// Similar to pathological n=3 above, but for any `n`
   func testPathologicalArbitrary() {
     typealias GlobalTypeName = TypeGraph.GlobalTypeName
+    typealias ResolvedTypeSyntax = TypeResolver.ResolvedTypeSyntax
 
     let n = 20
     precondition(n >= 2, "Pathological case requires `n` of at least 2.")
@@ -778,11 +798,8 @@ final class TypeResolutionTests: XCTestCase {
 
     // Add the type definitions: struct T_0, ..., struct T_N
     for i in 0...n {
-      lookupSource.appendLiteral(
-        """
-        struct T_\(i) {}
-        """
-      )
+      lookupSource.appendInterpolation(name: ResolvedTypeSyntax(stringLiteral: "_(File.swift)::T_\(i)"))
+      lookupSource.appendLiteral("struct T_\(i) {}")
     }
     lookupSource.appendLiteral("\n")
 
@@ -865,6 +882,7 @@ final class TypeResolutionTests: XCTestCase {
   func testExtensionDoubleNestedTypes() {
     assertTypeResolution([
       "File.swift": """
+      \(name: "_(File.swift)::A")
       struct A { typealias B = A }
 
       // Last extension makes `A.B` resolves to `A.A`
@@ -873,7 +891,9 @@ final class TypeResolutionTests: XCTestCase {
         dependencies: [ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"])]
       ))
       extension A.B {
+        \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C")
         struct C {
+          \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D")
           struct D {}
         }
       }
@@ -886,10 +906,16 @@ final class TypeResolutionTests: XCTestCase {
           ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A._(File.swift)::C", members: ["D"]),
         ]
       ))
-      extension A.B.C.D { struct E {} }
+      extension A.B.C.D {
+        \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D._(File.swift)::E")
+        struct E {}
+      }
 
       \(extensionState: .bound(to: "_(File.swift)::A", dependencies: []))
-      extension A { struct A {} }
+      extension A {
+        \(name: "_(File.swift)::A._(File.swift)::A")
+        struct A {}
+      }
       """
     ])
   }
@@ -897,8 +923,10 @@ final class TypeResolutionTests: XCTestCase {
   func testExtensionNestedTypeRedeclaration1() {
     assertTypeResolution([
       "File.swift": """
+      \(name: "_(File.swift)::A")
       struct A {
         typealias B = A
+
         struct C {}
       }
 
@@ -909,7 +937,9 @@ final class TypeResolutionTests: XCTestCase {
         ]
       ))
       extension A.B {
+        \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C")
         struct C { // Initially treated as redecl
+          \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D")
           struct D {}
         }
       }
@@ -923,11 +953,17 @@ final class TypeResolutionTests: XCTestCase {
           ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A._(File.swift)::C", members: ["D"]),
         ]
       ))
-      extension A.B.C.D { struct E {} }
+      extension A.B.C.D {
+        \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D._(File.swift)::E")
+        struct E {}
+      }
 
       // After `A` gains a member type `A`, `struct C` above
       // resolves to `_::A._::A._::C`
-      extension A { struct A {} }
+      extension A {
+        \(name: "_(File.swift)::A._(File.swift)::A")
+        struct A {}
+      }
       """
     ])
   }
@@ -936,13 +972,16 @@ final class TypeResolutionTests: XCTestCase {
   func testExtensionNestedTypeRedeclaration2() {
     assertTypeResolution([
       "File.swift": """
+      \(name: "_(File.swift)::A")
       struct A {
         typealias B = A
         struct C {}
       }
 
       extension A.B {
+        \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C")
         struct C { // Initially treated as redecl
+          \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D")
           struct D {}
         }
       }
@@ -959,11 +998,17 @@ final class TypeResolutionTests: XCTestCase {
           ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A._(File.swift)::C", members: ["D"]),
         ]
       ))
-      extension A.B.C.D { struct E {} }
+      extension A.B.C.D {
+        \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D._(File.swift)::E")
+        struct E {}
+      }
 
       // After `A` gains a member type `A`, `struct C` above
       // resolves to `_::A._::A._::C`
-      extension A { struct A {} }
+      extension A {
+        \(name: "_(File.swift)::A._(File.swift)::A")
+        struct A {}
+      }
       """
     ])
   }

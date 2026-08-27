@@ -221,80 +221,116 @@ extension TypeResolutionMatcher: LexicalMatcher {
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool
   ) -> [ExpectationFailure] {
-    return []
-    // FIXME: Implement
+    // return [ExpectationFailure.other(failure: "Not implemented")]
+    // // FIXME: Implement
 
-    // // Look up extended type if not already resolved
-    // let actualRawState: ExtensionState
-    // // Try to get already-resolved state
-    // if let existingState = symbolTable.typeGraph.extensionsToState[extensionDecl] {
-    //   actualRawState = existingState
-    // } else {
-    //   if verbose {
-    //     print("Extension `\(extensionDecl.node._memberlessDescription)` not already bound; initating binding.")
+    // Look up extended type if not already resolved
+    let actualRawState: ExtensionState
+    // Try to get already-resolved state
+    if let existingState = symbolTable.typeGraph.extensionsToState[extensionDecl] {
+      actualRawState = existingState
+    } else {
+      if verbose {
+        print("Extension `\(extensionDecl.node._memberlessDescription)` not already bound; initating binding.")
+      }
+
+      // Evaluate the extended type
+      var typeQualifier = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
+      let _: Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure> =
+        typeQualifier.bindExtension(extensionDecl)
+
+      // After binding, we should we have a state
+      guard let producedState = symbolTable.typeGraph.extensionsToState[extensionDecl] else {
+        let availableExtensions = symbolTable.typeGraph.extensionsToState.keys.map(\.node._memberlessDescription)
+        return [
+          ExpectationFailure.other(
+            failure:
+              "No extension state: Couldn't find extension state even after nominal-type resolution; available extensions are: \(availableExtensions)",
+          )
+        ]
+      }
+
+      actualRawState = producedState
+    }
+
+    // Map the types
+    var failures = [ExpectationFailure]()
+    /// Helper for mapping the expected state
+    let expectedStateDescription = expectedRawState._mapTypes(
+      mapNominal: {
+        nominalType -> TypeResolver.ResolvedTypeSyntax in
+        // Ensure we're referencing a marked nominal-type name
+        if markersToDefinitions[nominalType.debugDescription] == nil {
+          failures.append(ExpectationFailure.referencesUndefinedMarker(nominalType.debugDescription))
+        }
+        return nominalType
+      },
+      mapName: { name in
+        if markersToDefinitions[name.debugDescription] == nil {
+          failures.append(ExpectationFailure.referencesUndefinedMarker(name.debugDescription))
+        }
+        return name
+      }
+    ).debugDescription
+    // ._mapTypes(mapNominal: { marker -> TypeResultName in
+    //   guard let targetDefinition = markersToDefinitions[marker] else {
+    //     mappingFailures.append(ExpectationFailure.referencesUndefinedMarker(marker))
+    //     return TypeResultName("")
     //   }
-    //
-    //   // Evaluate the extended type
-    //   var typeQualifier = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
-    //   let _: Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure> =
-    //     typeQualifier.bindExtension(extensionDecl)
-    //
-    //   // After binding, we should we have a state
-    //   guard let producedState = symbolTable.typeGraph.extensionsToState[extensionDecl] else {
-    //     let availableExtensions = symbolTable.typeGraph.extensionsToState.keys.map(\.node._memberlessDescription)
-    //     return [
+    //   guard let expectedName = targetDefinition.annotation.name else {
+    //     mappingFailures.append(
     //       ExpectationFailure.other(
     //         failure:
-    //           "No extension state: Couldn't find extension state even after nominal-type resolution; available extensions are: \(availableExtensions)",
+    //           "Must specify 'name' argument in annotation '\(targetDefinition.annotation.marker)' for declaration '\(targetDefinition.syntax.trimmedDescription)'."
     //       )
-    //     ]
-    //   }
-    //
-    //   actualRawState = producedState
-    // }
-    //
-    // // Map the types
-    // var mappingFailures = [ExpectationFailure]()
-    // /// Helper for mapping the expected state
-    // let expectedState = expectedRawState
-    // // ._mapTypes(mapNominal: { marker -> TypeResultName in
-    // //   guard let targetDefinition = markersToDefinitions[marker] else {
-    // //     mappingFailures.append(ExpectationFailure.referencesUndefinedMarker(marker))
-    // //     return TypeResultName("")
-    // //   }
-    // //   guard let expectedName = targetDefinition.annotation.name else {
-    // //     mappingFailures.append(
-    // //       ExpectationFailure.other(
-    // //         failure:
-    // //           "Must specify 'name' argument in annotation '\(targetDefinition.annotation.marker)' for declaration '\(targetDefinition.syntax.trimmedDescription)'."
-    // //       )
-    // //     )
-    // //     return TypeResultName("")
-    // //   }
-    // //   return TypeResultName(expectedName.debugDescription)
-    // // })
-    //
-    // // Get the type name
-    // let actualState = actualRawState._mapTypes(mapNominal: { nominalType in
-    //   // TypeResultName($0.type._succinctDescription)
-    //   syntaxToDefinitions[nominalType.type.mainDecl.node]?.annotation.name.debugDescription
-    //     == nominalType.type.debugDescription
-    // })
-    // // Don't continue if we couldn't map the states
-    // guard mappingFailures.isEmpty else { return mappingFailures }
-    //
-    // // We use strings for the expected qualified name; just print that name
-    // let expectedStateDescription = expectedState.debugDescription
-    // let actualStateDescription = actualState.debugDescription
-    // guard expectedStateDescription == actualStateDescription else {
-    //   return [
-    //     ExpectationFailure.other(
-    //       failure:
-    //         "Extension-state mismatch.\nExpected: \(expectedStateDescription)\nBut got:  \(actualStateDescription)"
     //     )
-    //   ]
-    // }
-    // return []
+    //     return TypeResultName("")
+    //   }
+    //   return TypeResultName(expectedName.debugDescription)
+    // })
+
+    // Get the type name
+    let actualStateDescription = actualRawState._mapTypes(
+      mapNominal: { nominalType in
+        // Check
+        assertions: do {
+          // Ensure we've marked syntax with that name
+          let mainDecl = nominalType.type.mainDecl.node
+          guard let definition = syntaxToDefinitions[mainDecl] else {
+            failures.append(.resultReferencesUnmarkedSyntax(syntaxDescription: mainDecl._memberlessDescription))
+            break assertions
+          }
+
+          // Ensure the actual name matches the marked name
+          let markedName = definition.annotation.nominalType.debugDescription
+          guard nominalType.debugDescription == markedName else {
+            failures.append(
+              ExpectationFailure.other(
+                failure:
+                  "Expected nominal-type decl `\(mainDecl._memberlessDescription)` to be named '\(markedName)' but instead got name '\(nominalType.debugDescription)'."
+              )
+            )
+            break assertions
+          }
+        }
+
+        return nominalType
+      },
+      mapName: { $0 }
+    ).debugDescription
+    // Don't continue if we couldn't map the states
+    guard failures.isEmpty else { return failures }
+
+    // We use strings for the expected qualified name; just print that name
+    guard expectedStateDescription == actualStateDescription else {
+      return [
+        ExpectationFailure.other(
+          failure:
+            "Extension-state mismatch.\nExpected: \(expectedStateDescription)\nBut got:  \(actualStateDescription)"
+        )
+      ]
+    }
+    return []
   }
 
   /// `assertExpectation` forwards type syntax here.

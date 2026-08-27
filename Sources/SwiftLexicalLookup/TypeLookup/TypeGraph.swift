@@ -1846,6 +1846,13 @@ extension ExtensionDependency: CustomDebugStringConvertible {
       "ExtensionDependency(dependencyTypeName: '\(dependencyTypeName.debugDescription)', members: [\(membersDescriptions)])"
   }
 
+  fileprivate func _mapName(_ mapName: (TypeGraph.GlobalTypeName) -> TypeGraph.GlobalTypeName) -> ExtensionDependency {
+    ExtensionDependency(
+      dependencyTypeName: mapName(dependencyTypeName),
+      members: members
+    )
+  }
+
   /// Debug description but removes the `TypeDeclSyntax` from `TypeMember` for easier testing.
   fileprivate var _declarationlessDescription: String {
     _describe(includeMemberDecls: false)
@@ -1874,9 +1881,12 @@ extension ExtensionState {
   @_spi(_QualifiedLookupTests)
   public func _mapTypes(
     mapNominal: (TypeResolver.ResolvedTypeSyntax) -> TypeResolver.ResolvedTypeSyntax,
+    mapName: (TypeGraph.GlobalTypeName) -> (TypeGraph.GlobalTypeName)
   ) -> ExtensionState {
     ExtensionState(
-      _uncheckedDependencies: dependencies,
+      _uncheckedDependencies: dependencies.map({ dependency in
+        dependency._mapName(mapName)
+      }),
       extensionDecl: extensionDecl,
       resolvedType: resolvedType.mapError({
         $0._map(mapNominal: mapNominal)
