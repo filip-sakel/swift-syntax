@@ -32,6 +32,7 @@ extension TypeResolver {
 /// A type used by `GenericTypeResult` to represent nominal types.
 /// SwiftLexicalLookup just uses `TypeResolver.ResolvedTypeSyntax`
 /// and testing uses `Character` markers.
+// TODO: Remove
 @_spi(_QualifiedLookupTests)
 public protocol NominalTypeResultProtocol: CustomDebugStringConvertible, Sendable {}
 
@@ -45,14 +46,6 @@ extension TypeResolver {
     public var debugDescription: String {
       type.debugDescription
     }
-    var _succinctDescription: String {
-      switch type.storage {
-      case .global(let global):
-        return global.name.debugDescription
-      case .local(let nominalDecl):
-        return nominalDecl._memberlessDescription
-      }
-    }
   }
 }
 
@@ -63,6 +56,35 @@ extension TypeResolver.ResolvedTypeSyntax {
       type: TypeGraph.TypeRef(globalReference: global.type),
       syntax: global.syntax
     )
+  }
+}
+
+// MARK: ResolvedTypeSyntax + Test Hook
+
+extension TypeResolver.ResolvedTypeSyntax {
+  /// Creates a mock `ResolvedTypeSyntax` where `unusedNominalDecl` can be any
+  /// `Attached<NominalTypeDeclSyntax>` instance and isn't used to produce a
+  /// description.
+  @_spi(_QualifiedLookupTests)
+  public init(_testGlobalType globalName: TypeGraph.GlobalTypeName, unusedNominalDecl: Attached<NominalTypeDeclSyntax>)
+  {
+    self.init(
+      type: TypeGraph.TypeRef(
+        globalReference: TypeGraph.GlobalTypeRef(name: globalName, mainDecl: unusedNominalDecl, _version: -1)
+      ),
+      syntax: Attached<TypeLikeSyntax>(unusedNominalDecl)
+    )
+  }
+
+  /// A succinct description provides just the crucial information required
+  /// for testing.
+  var _succinctDescription: String {
+    switch type.storage {
+    case .global(let global):
+      return global.name.debugDescription
+    case .local(let nominalDecl):
+      return nominalDecl._memberlessDescription
+    }
   }
 }
 
@@ -113,7 +135,7 @@ extension TypeResolver {
 
 // MARK: Debug Description
 
-extension TypeResolver.TypeResult: CustomDebugStringConvertible {
+extension TypeResolver.GenericTypeResult: CustomDebugStringConvertible {
   @_spi(_QualifiedLookupTests)
   public var debugDescription: String {
     switch self {

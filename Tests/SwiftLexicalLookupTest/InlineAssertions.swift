@@ -435,6 +435,12 @@ extension TypeSyntax: ParsableByAttached {
     "typealias = \(syntaxString)"
   }
 }
+extension NominalTypeDeclSyntax: ParsableByAttached {
+  public static func fileContents(syntaxString: String) -> String {
+    // Nominal-type declarations parse as declarations
+    syntaxString
+  }
+}
 extension TypeDeclSyntax: ParsableByAttached {
   public static func fileContents(syntaxString: String) -> String {
     // Type declarations parse as declarations

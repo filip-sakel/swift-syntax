@@ -576,7 +576,7 @@ final class TypeResolutionTests: XCTestCase {
       protocol ProtoA: ~Copyable {}
 
       // Tuple
-      \(extensionState: GenericExtensionState(
+      \(extensionState: ExtensionState(
         dependencies: [],
         resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .tuple(labels: [])))
       ))
@@ -584,14 +584,14 @@ final class TypeResolutionTests: XCTestCase {
 
       // Metatype
       typealias Metatype = ProtoA.Type
-      \(extensionState: GenericExtensionState(
+      \(extensionState: ExtensionState(
         dependencies: [],
         resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .metatype(base: .nominalTypes(["🟥"]))))
       ))
       extension Metatype {}
 
       // Any
-      \(extensionState: GenericExtensionState(
+      \(extensionState: ExtensionState(
         dependencies: [],
         resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .anyType))
       ))
@@ -611,7 +611,7 @@ final class TypeResolutionTests: XCTestCase {
       \("🟪", name: "_(MyFile.swift)::ProtoB")
       protocol ProtoB {}
 
-      \(extensionState: GenericExtensionState(
+      \(extensionState: ExtensionState(
         dependencies: [],
         resolvedType: .failure(.cannotExtendNonNominal(nonnominal: .nominalTypes([
           "🟥", "🟪"
@@ -839,7 +839,7 @@ final class TypeResolutionTests: XCTestCase {
       )
     )
     lookupSource.appendInterpolation(
-      extensionState: GenericExtensionState.invalidCycle(
+      extensionState: ExtensionState.invalidCycle(
         dependencies: [
           ExtensionDependency(baseType: "_(File.swift)::T_1", members: ["Prev", "T_0"])
         ],
