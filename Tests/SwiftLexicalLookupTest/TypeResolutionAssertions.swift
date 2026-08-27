@@ -619,39 +619,3 @@ extension TypeResolver.ResolvedTypeSyntax {
     TypeResolver.ResolvedTypeSyntax._mockLocalType(nominalDecl: nominalDecl)
   }
 }
-
-extension NominalTypeDeclSyntax {
-  /// Returns the name of this local declaration or `nil` if global.
-  var localNameDescription: String? {
-    var result = ""
-    var ancestor = self.parent
-
-    while let currentAncestor = ancestor {
-      if let nominalParent = currentAncestor.as(NominalTypeDeclSyntax.self) {
-        // We could be nested in local nominal decls
-        result = "\(nominalParent.name.trimmedDescription).\(result)"
-      }
-      // Once we get the local scope, we're done
-      else if let scope = currentAncestor.as(CodeBlockItemListSyntax.self),
-        let parentScope = scope.parent,
-        // Source files and `#if` aren't local scopes
-        !parentScope.is(SourceFileSyntax.self), !parentScope.is(IfConfigClauseSyntax.self)
-      {
-        result = "`\(scope.prettyScope.prettyDescription)`.\(result)"
-        break
-      }
-      // Return `nil` for globals
-      else if let scope = currentAncestor.as(CodeBlockItemListSyntax.self),
-        scope.parent?.is(SourceFileSyntax.self) == true
-      {
-        return nil
-      }
-      // Otherwise, keep going up scopes
-      else {
-        ancestor = currentAncestor.parent
-      }
-    }
-
-    return result
-  }
-}

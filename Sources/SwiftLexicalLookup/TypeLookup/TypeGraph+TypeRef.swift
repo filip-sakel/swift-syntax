@@ -245,6 +245,61 @@ extension TypeGraph.GlobalTypeRef: CustomDebugStringConvertible {
   }
 }
 
+extension CodeBlockItemListSyntax {
+  /// The scope decl/stmt/expr enclosing this code-block item list, such as
+  /// `do` or `func`. Returns this scope syntax and an error description if
+  /// no such scope exists.
+  @_spi(_QualifiedLookupTests)
+  public var _prettyScope: (scope: Syntax, prettyDescription: String) {
+    let actualScope = self.parent?.parent
+
+    // A `WithCodeBlockSyntax` like `do` or `WithOptionalCodeBlockSyntax` like `func`
+    if let actualScope, let withCodeBlock = actualScope.asProtocol((any WithCodeBlockSyntax).self) {
+      return (actualScope, withCodeBlock.with(\.body, CodeBlockSyntax(statements: [])).trimmedDescription)
+    } else if let actualScope, let withCodeBlock = actualScope.asProtocol((any WithOptionalCodeBlockSyntax).self) {
+      return (actualScope, withCodeBlock.with(\.body, nil).trimmedDescription)
+    } else {
+      // Fallback descriptions
+      return (Syntax(self), "<CodeBlockItemListSyntax has no grandparent>")
+    }
+  }
+}
+
+extension Attached where Node == NominalTypeDeclSyntax {
+  /// Returns the name of this local declaration or `nil` if global.
+  var localNameDescription: String? {
+    var result = "\(node.name.trimmedDescription)"
+    var ancestor = node.parent
+
+    while let currentAncestor = ancestor {
+      if let nominalParent = currentAncestor.as(NominalTypeDeclSyntax.self) {
+        // We could be nested in local nominal decls
+        result = "\(nominalParent.name.trimmedDescription).\(result)"
+      }
+      // Once we get the local scope, we're done
+      else if let scope = currentAncestor.as(CodeBlockItemListSyntax.self),
+        let parentScope = scope.parent,
+        // Source files and `#if` aren't local scopes
+        !parentScope.is(SourceFileSyntax.self), !parentScope.is(IfConfigClauseSyntax.self)
+      {
+        result = "`\(scope._prettyScope.prettyDescription)`.\(result)"
+        break
+      }
+      // Return `nil` for globals
+      else if let scope = currentAncestor.as(CodeBlockItemListSyntax.self),
+        scope.parent?.is(SourceFileSyntax.self) == true
+      {
+        return nil
+      }
+
+      // Keep going up scopes
+      ancestor = currentAncestor.parent
+    }
+
+    return result
+  }
+}
+
 @_spi(_QualifiedLookupTests)
 extension TypeGraph.TypeRef: CustomDebugStringConvertible {
   /// E.g. 'struct LocalDecl {} (local)' or global
@@ -254,7 +309,7 @@ extension TypeGraph.TypeRef: CustomDebugStringConvertible {
     case .global(let globalReference):
       return globalReference.debugDescription
     case .local(let nominalDecl):
-      return "\(nominalDecl.node._memberlessDescription) (local)"
+      return "\(nominalDecl.localNameDescription ?? "<unexpectedly global>") (local)"
     }
   }
 
@@ -268,7 +323,7 @@ extension TypeGraph.TypeRef: CustomDebugStringConvertible {
     case .global(let globalReference):
       return globalReference.name.debugDescription
     case .local(let nominalDecl):
-      return "\(nominalDecl.node._memberlessDescription)"
+      return nominalDecl._memberlessDescription
     }
   }
 

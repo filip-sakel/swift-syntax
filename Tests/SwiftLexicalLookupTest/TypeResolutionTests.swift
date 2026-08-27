@@ -143,12 +143,12 @@ final class TypeResolutionTests: XCTestCase {
         let b: \(nominal: structB)A.B
         let invalidB: \(failure: .noTypeInScope)B
 
-        \(name: .local("struct A {}"))
+        \(name: structA)
         struct A {
           let a: \(nominal: structA)A
           let b: \(nominal: structB)B
 
-          \(name: .local("struct B {}"))
+          \(name: structB)
           struct B {
             let a: \(nominal: structA)A
             let b: \(nominal: structB)B

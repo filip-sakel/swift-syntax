@@ -84,25 +84,6 @@ extension UnqualifiedTypeLookupMatcher.Expectation: LexicalAnnotation {
 
 // MARK: `LexicalMatcher` Conformance
 
-extension CodeBlockItemListSyntax {
-  /// The scope decl/stmt/expr enclosing this code-block item list, such as
-  /// `do` or `func`. Returns this scope syntax and an error description if
-  /// no such scope exists.
-  var prettyScope: (scope: Syntax, prettyDescription: String) {
-    let actualScope = self.parent?.parent
-
-    // A `WithCodeBlockSyntax` like `do` or `WithOptionalCodeBlockSyntax` like `func`
-    if let actualScope, let withCodeBlock = actualScope.asProtocol((any WithCodeBlockSyntax).self) {
-      return (actualScope, withCodeBlock.with(\.body, CodeBlockSyntax(statements: [])).trimmedDescription)
-    } else if let actualScope, let withCodeBlock = actualScope.asProtocol((any WithOptionalCodeBlockSyntax).self) {
-      return (actualScope, withCodeBlock.with(\.body, CodeBlockSyntax(statements: [])).trimmedDescription)
-    } else {
-      // Fallback descriptions
-      return (Syntax(self), "<CodeBlockItemListSyntax has no grandparent>")
-    }
-  }
-}
-
 extension UnqualifiedTypeLookupMatcher: LexicalMatcher {
   func describeContextualizedExpectation(_ expectation: ContextualizedAnnotation<Expectation>) -> String {
     expectation.syntax.trimmedDescription
@@ -140,7 +121,7 @@ extension UnqualifiedTypeLookupMatcher: LexicalMatcher {
         guard let definition = syntaxToDefinitions[scopeSyntax.node] else {
           // Most CodeBlockItemListSyntax are part of an actual `With[Optional]CodeBlockSyntax`
           // scope; we get the latter for nicer diagnostics.
-          let (_, scopeDescription) = scopeSyntax.node.prettyScope
+          let (_, scopeDescription) = scopeSyntax.node._prettyScope
           failures.append(
             ExpectationFailure.resultReferencesUnmarkedSyntax(
               syntaxDescription: "'\(lookupResult)' references `\(scopeDescription)`"
