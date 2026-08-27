@@ -135,9 +135,7 @@ public typealias InvalidatedExtensions = [ExtensionState]
 )
 
 @_spi(_QualifiedLookupTests)
-public struct GenericExtensionState<
-  NominalType: NominalTypeResultProtocol
->: Sendable {
+public struct ExtensionState: Sendable {
   // Invariant: The extensions listed must be valid and successfully bound to a type in `extensionsToState`
   // Invariant: There's only one dependency per type.
   //
@@ -146,12 +144,12 @@ public struct GenericExtensionState<
     // TODO: Remove this property
     extensionDecl: Attached<ExtensionDeclSyntax>,
     /// The resolved type must be valid in `namesToTypes`
-    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.GenericFailure<NominalType>>
+    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
 
   @_spi(_QualifiedLookupTests) public init(
     _uncheckedDependencies dependencies: [ExtensionDependency],
     extensionDecl: Attached<ExtensionDeclSyntax>,
-    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.GenericFailure<NominalType>>
+    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
   ) {
     self.dependencies = dependencies
     self.extensionDecl = extensionDecl
@@ -161,7 +159,7 @@ public struct GenericExtensionState<
   @_spi(_QualifiedLookupTests) public init(
     dependencies: [QualifiedLookupDependency],
     extensionDecl: Attached<ExtensionDeclSyntax>,
-    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.GenericFailure<NominalType>>
+    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
   ) {
     // Group dependencies by base type and member name, while maintaing order
     var groupedDependencies =
@@ -204,8 +202,6 @@ public struct GenericExtensionState<
     )
   }
 }
-@_spi(_QualifiedLookupTests)
-public typealias ExtensionState = GenericExtensionState<TypeResolver.ResolvedTypeSyntax>
 
 @_spi(_QualifiedLookupTests) public struct TypeTable: Hashable {
   fileprivate(set) var typeMembersToDecls: [Identifier: TypeMember]
@@ -1861,7 +1857,7 @@ extension ExtensionDependency: CustomDebugStringConvertible {
 }
 
 @_spi(_QualifiedLookupTests)
-extension GenericExtensionState: CustomDebugStringConvertible {
+extension ExtensionState: CustomDebugStringConvertible {
   public var debugDescription: String {
     let dependenciesDescriptions = dependencies.map(\._declarationlessDescription).joined(separator: ",\n    ")
     return """
@@ -1874,12 +1870,12 @@ extension GenericExtensionState: CustomDebugStringConvertible {
       """
   }
 }
-extension GenericExtensionState {
+extension ExtensionState {
   @_spi(_QualifiedLookupTests)
-  public func _mapTypes<NewNominalType: NominalTypeResultProtocol>(
-    mapNominal: (NominalType) -> NewNominalType,
-  ) -> GenericExtensionState<NewNominalType> {
-    GenericExtensionState<NewNominalType>(
+  public func _mapTypes(
+    mapNominal: (TypeResolver.ResolvedTypeSyntax) -> TypeResolver.ResolvedTypeSyntax,
+  ) -> ExtensionState {
+    ExtensionState(
       _uncheckedDependencies: dependencies,
       extensionDecl: extensionDecl,
       resolvedType: resolvedType.mapError({

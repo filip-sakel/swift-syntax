@@ -14,12 +14,7 @@ import SwiftSyntax
 
 extension TypeResolver {
   @_spi(_QualifiedLookupTests)
-  public typealias Failure = GenericFailure<ResolvedTypeSyntax>
-
-  @_spi(_QualifiedLookupTests)
-  public enum GenericFailure<NominalType: NominalTypeResultProtocol>:
-    Error
-  {
+  public enum Failure: Error {
     /// A type declaration in an outer scope has an invalid identifier.
     ///
     /// E.g.
@@ -41,13 +36,13 @@ extension TypeResolver {
     /// Only protocol, class and composition types can form compositions.
     ///
     /// I.e. We don't allow structs/enums/actors, functions, tuples.
-    case cannotComposeNonClassOrProtocol(resolved: GenericTypeResult<NominalType>)
-    case noTypeMember(member: TypeReference, in: GenericTypeResult<NominalType>)
+    case cannotComposeNonClassOrProtocol(resolved: TypeResult)
+    case noTypeMember(member: TypeReference, in: TypeResult)
 
     /// We can only extend structs/enums/classes/actors/protocols
     ///
     /// I.e. We can't extend tuples, functions, protocol compositions, metatypes, etc.
-    case cannotExtendNonNominal(nonnominal: GenericTypeResult<NominalType>)
+    case cannotExtendNonNominal(nonnominal: TypeResult)
     /// Extensions may only appear at file scope (top-level).
     /// ```swift
     /// func f() {
@@ -172,12 +167,12 @@ extension TypeResolver {
   }
 }
 
-extension TypeResolver.GenericFailure {
+extension TypeResolver.Failure {
   @_spi(_QualifiedLookupTests)
-  public func _map<NewNominalType>(
-    mapNominal: (NominalType) -> NewNominalType
-  ) -> TypeResolver.GenericFailure<NewNominalType> {
-    func mapNested(_ nestedFailure: Self) -> TypeResolver.GenericFailure<NewNominalType> {
+  public func _map(
+    mapNominal: (TypeResolver.ResolvedTypeSyntax) -> TypeResolver.ResolvedTypeSyntax
+  ) -> TypeResolver.Failure {
+    func mapNested(_ nestedFailure: Self) -> Self {
       nestedFailure._map(mapNominal: mapNominal)
     }
 
@@ -305,7 +300,7 @@ extension GenericExtensionBindingCycle: CustomDebugStringConvertible where TypeN
   }
 }
 
-extension TypeResolver.GenericFailure: CustomDebugStringConvertible {
+extension TypeResolver.Failure: CustomDebugStringConvertible {
   /// Debug description
   ///
   /// Namely, for syntax nodes we use `.trimmedDescription` and for `ResolvedNominalTypeReference`
@@ -402,13 +397,13 @@ extension TypeResolver.Failure {
     // Only return a nested cycle if we have exactly one result.
     case .invalidMembers(let nestedFailures):
       guard
-        case (_, TypeResolver.GenericFailure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
+        case (_, Self.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
         nestedFailures.count == 1
       else { return nil }
       return nestedCycle
     case .invalidComposition(let nestedFailures):
       guard
-        case (_, TypeResolver.GenericFailure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
+        case (_, Self.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
         nestedFailures.count == 1
       else { return nil }
       return nestedCycle

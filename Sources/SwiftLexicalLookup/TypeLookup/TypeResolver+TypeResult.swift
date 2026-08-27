@@ -85,9 +85,9 @@ extension TypeResolver {
     /// `Any` or suppressed types like `~Copyable`
     case anyType
     /// E.g. `A.Type`, `((A, B).Type).Type`
-    case metatype(base: GenericTypeResult)
+    case metatype(base: GenericTypeResult<NominalType>)
     // E.g. no type `A` in scope
-    case failure(TypeResolver.GenericFailure<NominalType>)
+    case failure(Failure)
 
     /// Maps the nominal types in `nominalTypes`.
     public func mapNominals<NewNominalType>(
@@ -105,7 +105,7 @@ extension TypeResolver {
       case .nominalTypes(let results):
         return .nominalTypes(results.map(transform))
       case .failure(let failure):
-        return .failure(failure._map(mapNominal: transform))
+        return .failure(failure)
       }
     }
   }
@@ -113,7 +113,7 @@ extension TypeResolver {
 
 // MARK: Debug Description
 
-extension TypeResolver.GenericTypeResult: CustomDebugStringConvertible {
+extension TypeResolver.TypeResult: CustomDebugStringConvertible {
   @_spi(_QualifiedLookupTests)
   public var debugDescription: String {
     switch self {

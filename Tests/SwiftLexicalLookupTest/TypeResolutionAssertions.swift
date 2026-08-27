@@ -27,8 +27,8 @@ struct TypeResultName: NominalTypeResultProtocol {
 }
 
 typealias TestResolvedType = TypeResolver.GenericTypeResult<Character>
-typealias TestExtensionState = GenericExtensionState<Character>
-typealias TestResolutionFailure = TypeResolver.GenericFailure<Character>
+typealias TestExtensionState = ExtensionState
+typealias TestResolutionFailure = TypeResolver.Failure
 
 /// Asserts the given annotated `TypeSyntax` resolves to the right `NominalTypeDeclSyntax`
 /// and qualified name. Also asserts `ExtensionDeclSyntax`-binding produces the expected
