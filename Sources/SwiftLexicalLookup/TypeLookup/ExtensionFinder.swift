@@ -14,45 +14,43 @@ import SwiftIfConfig
 import SwiftSyntax
 
 extension SourceFileSyntax {
-  /// Helper visitor for `findExtensions`
+  /// Helper visitor for `findExtensions`, handling `#if`
   fileprivate final class _ExtensionVisitor: SyntaxVisitor {
+    let configuredRegions: ConfiguredRegions?
     var extensionDecls = [Attached<ExtensionDeclSyntax>]()
 
-    override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
-      // Force unwrap because this visitor should be called on `SourceFileSyntax`
-      extensionDecls.append(Attached(node)!)
-      return .visitChildren
+    init(viewMode: SyntaxTreeViewMode, configuredRegions: ConfiguredRegions?) {
+      self.configuredRegions = configuredRegions
+      super.init(viewMode: viewMode)
     }
-    // Don't go into to nested scopes; just the source file
-    override func visit(_ node: CodeBlockItemListSyntax) -> SyntaxVisitorContinueKind {
-      if node.parent?.is(SourceFileSyntax.self) == true {
-        return .visitChildren
-      } else {
-        return .skipChildren
+
+    // Handle `#if` (closely resembles `ActiveSyntax[Any]Visitor`)
+    override func visit(_ node: IfConfigDeclSyntax) -> SyntaxVisitorContinueKind {
+      // If configuredRegions isn't set up, return everything.
+      guard let configuredRegions else { return .visitChildren }
+
+      // If there is an active clause, visit it's children.
+      if let activeClause = configuredRegions.activeClause(for: node), let elements = activeClause.elements {
+        walk(elements)
       }
-    }
-    // Don't go into `DeclGroupSyntax`'s members
-    override func visit(_ node: MemberBlockSyntax) -> SyntaxVisitorContinueKind {
+
+      // Skip everything else in the #if.
       return .skipChildren
     }
-  }
-  /// Same as `_ExtensionVisitor`, but only visits active nodes according to
-  /// the given configured regions.
-  fileprivate final class _ConfiguredExtensionVisitor: ActiveSyntaxVisitor {
-    var extensionDecls = [Attached<ExtensionDeclSyntax>]()
-
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
       // Force unwrap because this visitor should be called on `SourceFileSyntax`
       extensionDecls.append(Attached(node)!)
       return .visitChildren
     }
-    // Don't go into to nested scopes; just the source file
+    // Don't go into to nested scopes; just the source file and `#if` clauses
     override func visit(_ node: CodeBlockItemListSyntax) -> SyntaxVisitorContinueKind {
-      if node.parent?.is(SourceFileSyntax.self) == true || node.parent?.is(IfConfigClauseSyntax.self) == true {
+      if let parent = node.parent,
+        parent.is(SourceFileSyntax.self) || parent.is(IfConfigClauseSyntax.self)
+      {
         return .visitChildren
-      } else {
-        return .skipChildren
       }
+
+      return .skipChildren
     }
     // Don't go into `DeclGroupSyntax`'s members
     override func visit(_ node: MemberBlockSyntax) -> SyntaxVisitorContinueKind {
@@ -65,15 +63,9 @@ extension SourceFileSyntax {
   ///
   /// Returns: The file's extensions in-order and without duplicates.
   func findExtensions(configuredRegions: ConfiguredRegions?) -> [Attached<ExtensionDeclSyntax>] {
-    if let configuredRegions {
-      let visitor = _ConfiguredExtensionVisitor(viewMode: .all, configuredRegions: configuredRegions)
-      visitor.walk(self)
-      return visitor.extensionDecls
-    } else {
-      let visitor = _ExtensionVisitor(viewMode: .all)
-      visitor.walk(self)
-      return visitor.extensionDecls
-    }
+    let visitor = _ExtensionVisitor(viewMode: .all, configuredRegions: configuredRegions)
+    visitor.walk(self)
+    return visitor.extensionDecls
   }
 }
 

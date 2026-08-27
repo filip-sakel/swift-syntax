@@ -17,7 +17,7 @@ extension TypeResolver {
   public typealias Failure = GenericFailure<ResolvedTypeSyntax>
 
   @_spi(_QualifiedLookupTests)
-  public indirect enum GenericFailure<NominalType: NominalTypeResultProtocol>:
+  public enum GenericFailure<NominalType: NominalTypeResultProtocol>:
     Error
   {
     /// A type declaration in an outer scope has an invalid identifier.
@@ -61,7 +61,7 @@ extension TypeResolver {
     /// E.g.
     ///   typealias A = Encodable & Int.Type // ❌ error: non-protocol, non-class type 'Int.Type' cannot be used within a protocol-constrained type
     ///   func f(_: A) {} // No diagnostic here
-    case invalidAliasedType(Self)
+    indirect case invalidAliasedType(Self)
     case invalidComposition([(TypeSyntax, Self)])
     /// An error in partial-type resolution where further type-resolution
     /// steps don't make sense. For instance, we can't parse a wildcard type
@@ -112,7 +112,7 @@ extension TypeResolver {
     ///      func f(a: T) -> Int {} // ❌ error: cannot find type 'T' in scope
     ///    }
     ///    ```
-    case invalidBaseType(Self)
+    indirect case invalidBaseType(Self)
 
     /// Name lookup found multiple type redeclarations so references to that
     /// type name are ambiguous; not necessarily an error, we just defer to
