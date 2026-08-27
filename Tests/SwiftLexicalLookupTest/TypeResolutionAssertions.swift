@@ -292,7 +292,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
     expectedType: TestResolvedType,
     markersToDefinitions: [Character: ContextualizedAnnotation<Definition>],
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
-    verbose: Bool,
+    verbose: Bool
   ) -> [ExpectationFailure] {
     // Print target syntax (to show the syntax kinds)
     if verbose {
@@ -556,7 +556,7 @@ extension TestExtensionState {
       return GenericDependencyCycleElement(
         introducingTypeDecl: introducingTypeDecl,
         extensionDecl: extensionDecl,
-        boundType: baseTypeName,
+        boundType: baseTypeName
       )
     })
 
