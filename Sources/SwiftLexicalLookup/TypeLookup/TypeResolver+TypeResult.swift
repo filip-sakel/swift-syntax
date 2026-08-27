@@ -66,15 +66,25 @@ extension TypeResolver.ResolvedTypeSyntax {
   /// `Attached<NominalTypeDeclSyntax>` instance and isn't used to produce a
   /// description.
   @_spi(_QualifiedLookupTests)
-  public init(
-    _testGlobalType globalName: TypeGraph.GlobalTypeName,
+  public static func _mockGlobalType(
+    globalName: TypeGraph.GlobalTypeName,
     unusedNominalDecl: Attached<NominalTypeDeclSyntax>
-  ) {
-    self.init(
+  ) -> TypeResolver.ResolvedTypeSyntax {
+    TypeResolver.ResolvedTypeSyntax(
       type: TypeGraph.TypeRef(
         globalReference: TypeGraph.GlobalTypeRef(name: globalName, mainDecl: unusedNominalDecl, _version: -1)
       ),
       syntax: Attached<TypeLikeSyntax>(unusedNominalDecl)
+    )
+  }
+
+  public static func _mockLocalType(
+    nominalDecl: Attached<NominalTypeDeclSyntax>
+  ) -> TypeResolver.ResolvedTypeSyntax {
+    TypeResolver.ResolvedTypeSyntax(
+      type: TypeGraph.TypeRef(localNominalType: nominalDecl),
+      // Like in `_mockGlobalType`, this isn't actually used.
+      syntax: Attached<TypeLikeSyntax>(nominalDecl)
     )
   }
 }

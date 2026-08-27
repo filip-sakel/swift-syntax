@@ -38,7 +38,6 @@ typealias TestResolutionFailure = TypeResolver.Failure
 struct TypeResolutionMatcher {
   /// A marker and the resolved qualified name of the annotated `NominalTypeDeclSyntax`.
   struct Definition {
-    // let marker: Character
     let nominalType: TypeResolver.ResolvedTypeSyntax
   }
   /// Annotates `TypeSyntax` with a type-resolution result using markers;
@@ -221,9 +220,6 @@ extension TypeResolutionMatcher: LexicalMatcher {
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool
   ) -> [ExpectationFailure] {
-    // return [ExpectationFailure.other(failure: "Not implemented")]
-    // // FIXME: Implement
-
     // Look up extended type if not already resolved
     let actualRawState: ExtensionState
     // Try to get already-resolved state
@@ -272,22 +268,6 @@ extension TypeResolutionMatcher: LexicalMatcher {
         return name
       }
     ).debugDescription
-    // ._mapTypes(mapNominal: { marker -> TypeResultName in
-    //   guard let targetDefinition = markersToDefinitions[marker] else {
-    //     mappingFailures.append(ExpectationFailure.referencesUndefinedMarker(marker))
-    //     return TypeResultName("")
-    //   }
-    //   guard let expectedName = targetDefinition.annotation.name else {
-    //     mappingFailures.append(
-    //       ExpectationFailure.other(
-    //         failure:
-    //           "Must specify 'name' argument in annotation '\(targetDefinition.annotation.marker)' for declaration '\(targetDefinition.syntax.trimmedDescription)'."
-    //       )
-    //     )
-    //     return TypeResultName("")
-    //   }
-    //   return TypeResultName(expectedName.debugDescription)
-    // })
 
     // Get the type name
     let actualStateDescription = actualRawState._mapTypes(
@@ -360,13 +340,6 @@ extension TypeResolutionMatcher: LexicalMatcher {
       }
       return nominalType
     }).debugDescription
-    // .mapNominals({ marker -> TypeResultName in
-    //   guard let targetDefinition = markersToDefinitions[marker] else {
-    //     failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
-    //     return TypeResultName("")
-    //   }
-    //   return TypeResultName(targetDefinition.annotation.description)
-    // }).debugDescription
     let actualTypeDescription: String = actualType.mapNominals({ nominalType -> TypeResolver.ResolvedTypeSyntax in
       // Check
       assertions: do {
@@ -392,29 +365,6 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       return nominalType
     }).debugDescription
-    // .mapNominals({ nominalType -> TypeResultName in
-    //   guard let targetDefinition = syntaxToDefinitions[nominalType.type.mainDecl.node] else {
-    //     failures.append(
-    //       ExpectationFailure.resultReferencesUnmarkedSyntax(
-    //         syntaxDescription: nominalType.type.globalName.debugDescription
-    //       )
-    //     )
-    //     return TypeResultName("")
-    //   }
-    //   // Ensure we got the right name
-    //   let actualName = nominalType.type.globalName?.debugDescription
-    //   if let expectedName = targetDefinition.annotation.name.debugDescription, actualName != expectedName {
-    //     failures.append(
-    //       ExpectationFailure.other(
-    //         failure:
-    //           "Expected name '\(expectedName)' for type marked '\(targetDefinition.annotation.marker)' but got '\(actualName?.debugDescription ?? "nil")'."
-    //       )
-    //     )
-    //     return TypeResultName("")
-    //   }
-    //
-    //   return TypeResultName(targetDefinition.annotation.description)
-    // }).debugDescription
     // Give up if markers are undefined (i.e. we already have failures)
     guard failures.isEmpty else { return failures }
 
@@ -478,20 +428,11 @@ func assertTypeResolution(
 
 extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatcher {
   mutating func appendInterpolation(
-    _ marker: Character? = nil,
     name mockedNominalType: TypeResolver.ResolvedTypeSyntax,
     file: StaticString = #file,
     line: UInt = #line
   ) {
     append(definition: TypeResolutionMatcher.Definition(nominalType: mockedNominalType), file: file, line: line)
-  }
-  mutating func appendInterpolation(
-    _ marker: Character,
-    local: String,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) {
-    fatalError("TODO")
   }
   mutating func appendInterpolation(
     extensionState: TestExtensionState,
@@ -669,7 +610,13 @@ extension TypeGraph.GlobalTypeName: ExpressibleByStringLiteral {
 extension TypeResolver.ResolvedTypeSyntax: ExpressibleByStringLiteral {
   /// Mock a global type reference with the given debug description.
   public init(stringLiteral value: String) {
-    self.init(_testGlobalType: TypeGraph.GlobalTypeName(stringLiteral: value), unusedNominalDecl: "struct")
+    self = ._mockGlobalType(globalName: TypeGraph.GlobalTypeName(stringLiteral: value), unusedNominalDecl: "struct")
+  }
+}
+
+extension TypeResolver.ResolvedTypeSyntax {
+  static func local(_ nominalDecl: Attached<NominalTypeDeclSyntax>) -> TypeResolver.ResolvedTypeSyntax {
+    TypeResolver.ResolvedTypeSyntax._mockLocalType(nominalDecl: nominalDecl)
   }
 }
 

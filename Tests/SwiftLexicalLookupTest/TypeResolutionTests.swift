@@ -132,37 +132,39 @@ final class TypeResolutionTests: XCTestCase {
   }
 
   // MARK: Local Types
-  // FIXME: Reenable
-  // func testSimpleLocalTypes() {
-  //   assertTypeResolution([
-  //     "MyFile.swift": """
-  //     func f() {
-  //       let a: \(nominal: "🟩")A
-  //       let b: \(nominal: "🟥")A.B
-  //       let invalidB: \(failure: .noTypeInScope)B
-  //
-  //       \("🟩")
-  //       struct A {
-  //         let a: \(nominal: "🟩")A
-  //         let b: \(nominal: "🟥")B
-  //
-  //         \("🟥")
-  //         struct B {
-  //           let a: \(nominal: "🟩")A
-  //           let b: \(nominal: "🟥")B
-  //         }
-  //
-  //         let a: \(nominal: "🟩")A
-  //         let b: \(nominal: "🟥")B
-  //       }
-  //
-  //       let a: \(nominal: "🟩")A
-  //       let b: \(nominal: "🟥")A.B
-  //       let invalidB: \(failure: .noTypeInScope)B
-  //     }
-  //     """
-  //   ])
-  // }
+  func testSimpleLocalTypes() {
+    let structA = TypeResolver.ResolvedTypeSyntax.local("struct A {}")
+    let structB = TypeResolver.ResolvedTypeSyntax.local("struct B {}")
+
+    assertTypeResolution([
+      "MyFile.swift": """
+      func f() {
+        let a: \(nominal: structA)A
+        let b: \(nominal: structB)A.B
+        let invalidB: \(failure: .noTypeInScope)B
+
+        \(name: .local("struct A {}"))
+        struct A {
+          let a: \(nominal: structA)A
+          let b: \(nominal: structB)B
+
+          \(name: .local("struct B {}"))
+          struct B {
+            let a: \(nominal: structA)A
+            let b: \(nominal: structB)B
+          }
+
+          let a: \(nominal: structA)A
+          let b: \(nominal: structB)B
+        }
+
+        let a: \(nominal: structA)A
+        let b: \(nominal: structB)A.B
+        let invalidB: \(failure: .noTypeInScope)B
+      }
+      """
+    ])
+  }
 
   // MARK: Redeclarations
 
@@ -200,13 +202,13 @@ final class TypeResolutionTests: XCTestCase {
   // MARK: If Config
   func testIfConfig() {
     let baseSourceInterpolation: LexicalLookupSource<TypeResolutionMatcher>.Interpolation = """
-      \("🟩", name: "_(MyFile.swift)::A")
+      \(name: "_(MyFile.swift)::A")
       struct A {}
-      \("🟨", name: "_(MyFile.swift)::B")
+      \(name: "_(MyFile.swift)::B")
       struct B {}
-      \("🟪", name: "_(MyFile.swift)::C")
+      \(name: "_(MyFile.swift)::C")
       struct C {}
-      \("🟦", name: "_(MyFile.swift)::D")
+      \(name: "_(MyFile.swift)::D")
       struct D {}
 
       #if FlagA
@@ -529,27 +531,27 @@ final class TypeResolutionTests: XCTestCase {
       """
     ])
   }
-  // FIXME: Reenable
-  // func testLocalTopLevelSelf() {
-  //   assertTypeResolution([
-  //     "MyFile.swift": """
-  //     func f() {
-  //       func g() { let _: \(failure: .noTypeInScope)Self }
-  //       \("🟩")
-  //       struct A {
-  //         // Add expectation here
-  //         func h() { let _: Self }
-  //       }
-  //     }
-  //     """
-  //   ])
-  //   // TODO: Add the following lookup expectation inside `struct A` when `Self`
-  //   // is fixed. Currently fails because unqualified lookup emits implicit
-  //   // `Self` only inside protocols/extensions to match ASTScope behavior.
-  //   // ```
-  //   // func h() { let _: \(nominal: "🟩")Self }
-  //   // ```
-  // }
+
+  func testLocalTopLevelSelf() {
+    assertTypeResolution([
+      "MyFile.swift": """
+      func f() {
+        func g() { let _: \(failure: .noTypeInScope)Self }
+        \(name: .local("struct A {}"))
+        struct A {
+          // Add expectation here
+          func h() { let _: Self }
+        }
+      }
+      """
+    ])
+    // TODO: Add the following lookup expectation inside `struct A` when `Self`
+    // is fixed. Currently fails because unqualified lookup emits implicit
+    // `Self` only inside protocols/extensions to match ASTScope behavior.
+    // ```
+    // func h() { let _: \(nominal: .local("A"))Self }
+    // ```
+  }
 
   // MARK: Extensions
 
