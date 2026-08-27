@@ -20,9 +20,9 @@ final class TypeResolutionTests: XCTestCase {
     assertTypeResolution(
       [
         "MyFile.swift": """
-        \("🟥", name: "_(MyFile.swift)::A")
+        \(name: "_(MyFile.swift)::A")
         struct A {
-          static func f() -> \(nominal: "🟥")A {}
+          static func f() -> \(nominal: "_(MyFile.swift)::A")A {}
           static func g() -> \(failure: .noTypeInScope)B {}
         }
         """ as LexicalLookupSource
@@ -33,17 +33,17 @@ final class TypeResolutionTests: XCTestCase {
   func testSimpleNestedCase() {
     assertTypeResolution([
       "MyFile.swift": """
-      \("🟥", name: "_(MyFile.swift)::A")
+      \(name: "_(MyFile.swift)::A")
       struct A {
 
-        \("🟩", name: "_(MyFile.swift)::A._(MyFile.swift)::A")
+        \(name: "_(MyFile.swift)::A._(MyFile.swift)::A")
         struct A {
-          static func f() -> \(nominal: "🟩")A {}
+          static func f() -> \(nominal: "_(MyFile.swift)::A._(MyFile.swift)::A")A {}
         }
 
       }
-      func g(_: \(nominal: "🟩")A.A)
-      func h(_: \(nominal: "🟥")A)
+      func g(_: \(nominal: "_(MyFile.swift)::A._(MyFile.swift)::A")A.A)
+      func h(_: \(nominal: "_(MyFile.swift)::A")A)
       """ as LexicalLookupSource
     ])
   }

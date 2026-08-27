@@ -317,7 +317,13 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
     // Assert output
     var failures = [ExpectationFailure]()
-    let expectedTypeDescription: String = expectedType.debugDescription
+    let expectedTypeDescription: String = expectedType.mapNominals({ nominalType -> TypeResolver.ResolvedTypeSyntax in
+      // Ensure we're referencing a marked nominal-type name
+      if markersToDefinitions[nominalType.debugDescription] == nil {
+        failures.append(ExpectationFailure.referencesUndefinedMarker(nominalType.debugDescription))
+      }
+      return nominalType
+    }).debugDescription
     // .mapNominals({ marker -> TypeResultName in
     //   guard let targetDefinition = markersToDefinitions[marker] else {
     //     failures.append(ExpectationFailure.referencesUndefinedMarker(marker))
@@ -329,17 +335,19 @@ extension TypeResolutionMatcher: LexicalMatcher {
       // Check
       assertions: do {
         // Ensure we've marked syntax with that name
-        guard let definition = markersToDefinitions[nominalType.debugDescription] else {
-          failures.append(ExpectationFailure.referencesUndefinedMarker(nominalType.debugDescription))
+        let mainDecl = nominalType.type.mainDecl.node
+        guard let definition = syntaxToDefinitions[mainDecl] else {
+          failures.append(.resultReferencesUnmarkedSyntax(syntaxDescription: mainDecl._memberlessDescription))
           break assertions
         }
 
-        // Ensure the actual syntax matches the marked syntax
-        guard nominalType.type.mainDecl.node == definition.syntax else {
+        // Ensure the actual name matches the marked name
+        let markedName = definition.annotation.nominalType.debugDescription
+        guard nominalType.debugDescription == markedName else {
           failures.append(
             ExpectationFailure.other(
               failure:
-                "Expected result '\(nominalType.debugDescription)' to point to `\(definition.syntax._memberlessDescription)`, not `\(nominalType.type.mainDecl.node._memberlessDescription)`."
+                "Expected nominal-type decl `\(mainDecl._memberlessDescription)` to be named '\(markedName)' but instead got name '\(nominalType.debugDescription)'."
             )
           )
           break assertions
@@ -434,7 +442,7 @@ func assertTypeResolution(
 
 extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatcher {
   mutating func appendInterpolation(
-    _ marker: Character,
+    _ marker: Character? = nil,
     name mockedNominalType: TypeResolver.ResolvedTypeSyntax,
     file: StaticString = #file,
     line: UInt = #line
