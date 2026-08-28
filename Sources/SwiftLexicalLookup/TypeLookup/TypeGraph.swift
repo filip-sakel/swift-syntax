@@ -1877,7 +1877,7 @@ extension ExtensionState: CustomDebugStringConvertible {
 extension ExtensionState {
   @_spi(_QualifiedLookupTests)
   public func _visitTypes(
-    visitResolved: (TypeResolver.ResolvedTypeSyntax) -> Void,
+    visitResolved: (TypeGraph.TypeRef) -> Void,
     visitName: (TypeGraph.GlobalTypeName) -> Void
   ) {
     for dependency in dependencies {
@@ -1887,7 +1887,7 @@ extension ExtensionState {
     case .success(let name):
       visitName(name)
     case .failure(let failure):
-      failure._visitTypes(visitResolved: visitResolved, visitName: visitName)
+      failure._visitNominals(visitResolved)
     }
   }
 }

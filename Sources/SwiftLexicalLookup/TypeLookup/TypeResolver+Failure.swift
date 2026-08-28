@@ -168,13 +168,13 @@ extension TypeResolver {
 }
 
 extension TypeResolver.Failure {
+  // FIXME: Should take a single `TypeGraph.TypeRef` visitor closure.
   @_spi(_QualifiedLookupTests)
-  public func _visitTypes(
-    visitResolved: (TypeResolver.ResolvedTypeSyntax) -> Void,
-    visitName: (TypeGraph.GlobalTypeName) -> Void
+  public func _visitNominals(
+    _ visit: (TypeGraph.TypeRef) -> Void,
   ) {
     func visitNested(_ nestedFailure: Self) {
-      nestedFailure._visitTypes(visitResolved: visitResolved, visitName: visitName)
+      nestedFailure._visitNominals(visit)
     }
 
     switch self {
@@ -186,25 +186,24 @@ extension TypeResolver.Failure {
       break
     // Actual maps
     case .cyclicalExtensionDependency(let cycle):
-      cycle._visitNominals(visitName)
+      // Wrap cycle's global-type refs into regular refs.
+      cycle._visitNominals({ visit(TypeGraph.TypeRef(globalReference: $0)) })
 
     case .cannotComposeNonClassOrProtocol(let type),
       .noTypeMember(_, let type),
       .cannotExtendNonNominal(let type):
-      type._visitTypes(visitResolved: visitResolved, visitFailure: visitNested(_:))
+      type._visitNominals(visit)
 
-    case .invalidAliasedType(let nestedFailure):
-      visitNested(nestedFailure)
+    case .invalidAliasedType(let baseFailure), .invalidBaseType(let baseFailure):
+      baseFailure._visitNominals(visit)
     case .invalidComposition(let invalidChildren):
       invalidChildren.forEach({ _, nestedFailure in
-        visitNested(nestedFailure)
+        nestedFailure._visitNominals(visit)
       })
     case .invalidMembers(let invalidMembers):
       invalidMembers.forEach({ _, nestedFailure in
-        visitNested(nestedFailure)
+        nestedFailure._visitNominals(visit)
       })
-    case .invalidBaseType(let baseFailure):
-      visitNested(baseFailure)
     }
   }
 }
@@ -225,9 +224,9 @@ extension TypeResolver {
       self.dependencyMember = dependencyMember
     }
 
-    fileprivate func _visitNominals(_ visit: (TypeGraph.GlobalTypeName) -> Void) {
+    fileprivate func _visitNominals(_ visit: (TypeGraph.GlobalTypeRef) -> Void) {
       for element in dependencyPath {
-        visit(element.boundType.name)
+        visit(element.boundType)
       }
     }
   }

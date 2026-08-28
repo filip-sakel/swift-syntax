@@ -111,19 +111,20 @@ extension TypeResolver {
 
     /// Maps the nominal types in `nominalTypes`.
     @_spi(_QualifiedLookupTests)
-    public func _visitTypes(
-      visitResolved: (ResolvedTypeSyntax) -> Void,
-      visitFailure: (TypeResolver.Failure) -> Void
+    public func _visitNominals(
+      _ visit: (TypeGraph.TypeRef) -> Void
     ) {
       switch self {
       case .function, .tuple, .anyType:
         break
       case .metatype(let base):
-        base._visitTypes(visitResolved: visitResolved, visitFailure: visitFailure)
+        base._visitNominals(visit)
       case .nominalTypes(let results):
-        results.forEach(visitResolved)
+        for result in results {
+          visit(result.type)
+        }
       case .failure(let failure):
-        return visitFailure(failure)
+        failure._visitNominals(visit)
       }
     }
   }

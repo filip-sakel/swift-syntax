@@ -238,6 +238,44 @@ extension TypeResolutionMatcher: LexicalMatcher {
       )
     }
 
+    /// `assertExpectation` forwards type syntax here.
+    func _assertTypeSyntax(
+      typeSyntax: Attached<TypeSyntax>,
+      expectedType: TestResolvedType,
+      markersToDefinitions: [String: ContextualizedAnnotation<Definition>],
+      syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
+      verbose: Bool
+    ) -> [ExpectationFailure] {
+      // Print target syntax (to show the syntax kinds)
+      if verbose {
+        print("Target syntax parsed as:\n\(typeSyntax.node.debugDescription)\n")
+      }
+
+      // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
+      let actualType: TypeResolver.TypeResult = symbolTable.resolveSyntax(
+        typeSyntax: typeSyntax
+      )
+
+      // Assert output
+      var failures = [ExpectationFailure]()
+      expectedType._visitNominals({ verifyExpectedNominal($0, failures: &failures) })
+      actualType._visitNominals({ verifyActualNominal($0, failures: &failures) })
+      // Give up if markers are undefined (i.e. we already have failures)
+      guard failures.isEmpty else { return failures }
+
+      let expectedTypeDescription = expectedType.debugDescription
+      let actualTypeDescription = actualType.debugDescription
+      guard expectedTypeDescription == actualTypeDescription else {
+        return [
+          ExpectationFailure.other(
+            failure:
+              "Resolved-type mismatch.\nExpected: \(expectedTypeDescription)\nBut got:  \(actualTypeDescription)"
+          )
+        ]
+      }
+      return []
+    }
+
     /// `assertExpectation` forwards extensions here.
     func _assertExtensionBinding(
       extensionDecl: Attached<ExtensionDeclSyntax>,
@@ -278,14 +316,9 @@ extension TypeResolutionMatcher: LexicalMatcher {
       // Map the types
       var failures = [ExpectationFailure]()
       /// Helper for mapping the expected state
+      /// FIXME: Remove `visitName`
       expectedRawState._visitTypes(
-        visitResolved: {
-          nominalType in
-          // Ensure we're referencing a marked nominal-type name
-          if markersToDefinitions[nominalType.debugDescription] == nil {
-            failures.append(ExpectationFailure.referencesUndefinedMarker(nominalType.debugDescription))
-          }
-        },
+        visitResolved: { verifyExpectedNominal($0, failures: &failures) },
         visitName: { name in
           if markersToDefinitions[name.debugDescription] == nil {
             failures.append(ExpectationFailure.referencesUndefinedMarker(name.debugDescription))
@@ -294,27 +327,9 @@ extension TypeResolutionMatcher: LexicalMatcher {
       )
 
       // Get the type name
+      /// FIXME: Remove `visitName`
       actualRawState._visitTypes(
-        visitResolved: { nominalType in
-          // Ensure we've marked syntax with that name
-          let mainDecl = nominalType.type.mainDecl.node
-          guard let definition = syntaxToDefinitions[mainDecl] else {
-            failures.append(.resultReferencesUnmarkedSyntax(syntaxDescription: mainDecl._memberlessDescription))
-            return
-          }
-
-          // Ensure the actual name matches the marked name
-          let markedName = definition.annotation.nominalType.debugDescription
-          guard nominalType.debugDescription == markedName else {
-            failures.append(
-              ExpectationFailure.other(
-                failure:
-                  "Expected nominal-type decl `\(mainDecl._memberlessDescription)` to be named '\(markedName)' but instead got name '\(nominalType.debugDescription)'."
-              )
-            )
-            return
-          }
-        },
+        visitResolved: { verifyActualNominal($0, failures: &failures) },
         visitName: { _ in }
       )
       // Don't continue if we couldn't map the states
@@ -328,63 +343,6 @@ extension TypeResolutionMatcher: LexicalMatcher {
           ExpectationFailure.other(
             failure:
               "Extension-state mismatch.\nExpected: \(expectedStateDescription)\nBut got:  \(actualStateDescription)"
-          )
-        ]
-      }
-      return []
-    }
-
-    /// `assertExpectation` forwards type syntax here.
-    func _assertTypeSyntax(
-      typeSyntax: Attached<TypeSyntax>,
-      expectedType: TestResolvedType,
-      markersToDefinitions: [String: ContextualizedAnnotation<Definition>],
-      syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
-      verbose: Bool
-    ) -> [ExpectationFailure] {
-      // Print target syntax (to show the syntax kinds)
-      if verbose {
-        print("Target syntax parsed as:\n\(typeSyntax.node.debugDescription)\n")
-      }
-
-      // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
-      let actualType: TypeResolver.TypeResult = symbolTable.resolveSyntax(
-        typeSyntax: typeSyntax
-      )
-
-      // Assert output
-      var failures = [ExpectationFailure]()
-      func visitFailure(failure: TypeResolver.Failure) {
-        failure._visitTypes(
-          visitResolved: { verifyExpectedNominal($0.type, failures: &failures) },
-          visitName: {
-            verifyExpectedNominal(
-              TypeGraph.TypeRef(globalReference: TypeGraph.GlobalTypeRef(name: $0, mainDecl: "struct", _version: -1)),
-              failures: &failures
-            )
-          }
-        )
-      }
-      expectedType._visitTypes(
-        visitResolved: { nominalType in
-          verifyExpectedNominal(nominalType.type, failures: &failures)
-        },
-        visitFailure: visitFailure(failure:)
-      )
-      actualType._visitTypes(
-        visitResolved: { verifyActualNominal($0.type, failures: &failures) },
-        visitFailure: visitFailure(failure:)
-      )
-      // Give up if markers are undefined (i.e. we already have failures)
-      guard failures.isEmpty else { return failures }
-
-      let expectedTypeDescription = expectedType.debugDescription
-      let actualTypeDescription = actualType.debugDescription
-      guard expectedTypeDescription == actualTypeDescription else {
-        return [
-          ExpectationFailure.other(
-            failure:
-              "Resolved-type mismatch.\nExpected: \(expectedTypeDescription)\nBut got:  \(actualTypeDescription)"
           )
         ]
       }
