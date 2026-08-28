@@ -790,6 +790,7 @@ final class TypeResolutionTests: XCTestCase {
 
   /// Similar to pathological n=3 above, but for any `n`
   func testPathologicalArbitrary() {
+    typealias GlobalTypeRef = TypeGraph.GlobalTypeRef
     typealias GlobalTypeName = TypeGraph.GlobalTypeName
     typealias ResolvedTypeSyntax = TypeResolver.ResolvedTypeSyntax
 
@@ -848,17 +849,17 @@ final class TypeResolutionTests: XCTestCase {
     }
 
     // Introduce (and check for) the cycle
-    var cycleElements: [(introducingDecl: String?, extension: String, base: GlobalTypeName)] = (0..<n - 1).map({ i in
+    var cycleElements: [(introducingDecl: String?, extension: String, base: GlobalTypeRef)] = (0..<n - 1).map({ i in
       (
         introducingDecl: "typealias Prev = T_\(i)", extension: "extension T_\(i+2).Prev {}",
-        base: GlobalTypeName(stringLiteral: "_(File.swift)::T_\(i+1)")
+        base: GlobalTypeRef(stringLiteral: "_(File.swift)::T_\(i+1)")
       )
     })
     cycleElements.append(
       (
         introducingDecl: "typealias Prev = T_\(n-1)" as String?,
         extension: "extension T_0.Last {}",
-        base: GlobalTypeName(stringLiteral: "_(File.swift)::T_\(n)")
+        base: GlobalTypeRef(stringLiteral: "_(File.swift)::T_\(n)")
       )
     )
     lookupSource.appendInterpolation(

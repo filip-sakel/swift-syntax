@@ -853,7 +853,7 @@ extension TypeGraph {
 
   struct DependencyPathElement: CustomDebugStringConvertible {
     let introducingMemberType: TypeMemberDecl?
-    let boundType: TypeGraph.GlobalTypeName
+    let boundType: TypeGraph.GlobalTypeRef
     let extensionDecl: Attached<ExtensionDeclSyntax>
     let state: ExtensionState
 
@@ -891,7 +891,8 @@ extension TypeGraph {
           // Get "transitive extension" information
           guard
             let dependencyExtensionState = extensionsToState[dependencyExtension],
-            case .success(let dependencyExtendedType) = dependencyExtensionState.resolvedType
+            case .success(let dependencyExtendedType) = dependencyExtensionState.resolvedType,
+            let dependencyExtendedTypeRef = getGlobalNominalTypeReference(name: dependencyExtendedType)
           else {
             // TODO: Find actual error message (but still use fatal error since this breaks an invariant)
             fatalError("TODO: Actual error message")
@@ -901,7 +902,7 @@ extension TypeGraph {
             path + [
               DependencyPathElement(
                 introducingMemberType: typeMemberDecl,
-                boundType: dependencyExtendedType,
+                boundType: dependencyExtendedTypeRef,
                 extensionDecl: dependencyExtension,
                 state: dependencyExtensionState
               )
@@ -917,18 +918,18 @@ extension TypeGraph {
   fileprivate mutating func _findFirstCycleWhenBinding(
     extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionMembers: TypeTable,
-    to boundTypeName: TypeGraph.GlobalTypeName,
+    to boundTypeRef: TypeGraph.GlobalTypeRef,
     extensionDependencies: [QualifiedLookupDependency],
-  ) -> Result<GenericExtensionBindingCycle<TypeGraph.GlobalTypeName>, CycleDetectionFailure>? {
+  ) -> Result<ExtensionBindingCycle, CycleDetectionFailure>? {
     let boundExtensionInfo = [
       DependencyPathElement(
         introducingMemberType: nil,
-        boundType: boundTypeName,
+        boundType: boundTypeRef,
         extensionDecl: extensionDecl,
         state: ExtensionState(
           dependencies: extensionDependencies,
           extensionDecl: extensionDecl,
-          resolvedType: .success(boundTypeName)
+          resolvedType: .success(boundTypeRef.name)
         )
       )
     ]
@@ -936,7 +937,7 @@ extension TypeGraph {
     // TODO: Check that `extensionDependencies` have states and resolved to a type or throw an error
 
     log(
-      "Checking cycles if introducing `\(extensionDecl._memberlessDescription)` with members '\(boundTypeName.debugDescription)' > \(extensionMembers.typeMembersToDecls.map(\.key.name))"
+      "Checking cycles if introducing `\(extensionDecl._memberlessDescription)` with members '\(boundTypeRef.debugDescription)' > \(extensionMembers.typeMembersToDecls.map(\.key.name))"
     )
 
     // Check recursive dependencies
@@ -948,7 +949,7 @@ extension TypeGraph {
         // Collisions require that the base type match and that members share a name.
         log("Visiting `\(dependency._declarationlessDescription)` [path \(path)]")
         guard
-          boundTypeName == dependency.dependencyTypeName,
+          boundTypeRef.name == dependency.dependencyTypeName,
           let firstConflictingMember = dependency.members.first(where: { member in
             extensionMembers.typeMembersToDecls[member.name] != nil
           })
@@ -1670,9 +1671,9 @@ extension TypeGraph {
         _findFirstCycleWhenBinding(
           extensionDecl: extensionDecl,
           extensionMembers: mappedExtensionDecl.typeMap,
-          to: extendedTypeName,
+          to: extendedTypeRef,
           extensionDependencies: dependencyTracker.dependencies
-        ) as Result<GenericExtensionBindingCycle<GlobalTypeName>, CycleDetectionFailure>?
+        ) as Result<ExtensionBindingCycle, CycleDetectionFailure>?
 
       // Map result
       switch cycleResult {

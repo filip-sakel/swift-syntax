@@ -164,7 +164,8 @@ extension TypeGraph {
     let mainDecl: Attached<NominalTypeDeclSyntax>
     let _version: Int
 
-    internal init(name: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>, _version: Int) {
+    @_spi(_QualifiedLookupTests)
+    public init(name: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>, _version: Int) {
       self.name = name
       self.mainDecl = mainDecl
       self._version = _version
@@ -242,6 +243,9 @@ extension TypeGraph.GlobalTypeRef: CustomDebugStringConvertible {
   /// E.g. '_(InternalFile.swift)::MyType.ExternalModule::OtherType (v0, structDecl)'
   public var debugDescription: String {
     return "\(name.debugDescription) (v\(_version), \(mainDecl.kind))"
+  }
+  public var _succinctDescription: String {
+    return name.debugDescription
   }
 }
 
@@ -321,7 +325,7 @@ extension TypeGraph.TypeRef: CustomDebugStringConvertible {
   public var _succinctDescription: String {
     switch storage {
     case .global(let globalReference):
-      return globalReference.name.debugDescription
+      return globalReference._succinctDescription
     case .local(let nominalDecl):
       return nominalDecl._memberlessDescription
     }

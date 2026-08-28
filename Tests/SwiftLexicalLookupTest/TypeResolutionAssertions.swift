@@ -546,17 +546,17 @@ extension TestExtensionState {
 
   static func invalidCycle(
     dependencies: [ExtensionDependency],
-    cycleElements: [(introducingDecl: String?, extension: String, base: TypeGraph.GlobalTypeName)],
+    cycleElements: [(introducingDecl: String?, extension: String, base: TypeGraph.GlobalTypeRef)],
     conflictingMember: IdentifierWrapper,
     file: StaticString = #file,
     line: UInt = #line
   ) -> TestExtensionState {
-    let dependencyPath: [GenericDependencyCycleElement<TypeGraph.GlobalTypeName>] = cycleElements.map({
+    let dependencyPath: [DependencyCycleElement] = cycleElements.map({
       (
         introducingTypeDeclText,
         extensionDeclText,
         baseTypeName
-      ) -> GenericDependencyCycleElement<TypeGraph.GlobalTypeName> in
+      ) -> DependencyCycleElement in
       let introducingTypeDecl: TypeDeclSyntax?
       if let introducingTypeDeclText {
         let typeDeclRaw = DeclSyntax(stringLiteral: introducingTypeDeclText)
@@ -580,14 +580,14 @@ extension TestExtensionState {
           line: line
         )
       }
-      return GenericDependencyCycleElement(
+      return DependencyCycleElement(
         introducingTypeDecl: introducingTypeDecl,
         extensionDecl: extensionDecl,
         boundType: baseTypeName
       )
     })
 
-    let cycle = GenericExtensionBindingCycle<TypeGraph.GlobalTypeName>(
+    let cycle = ExtensionBindingCycle(
       dependencyPath: dependencyPath,
       dependencyMember: conflictingMember.identifier
     )
@@ -603,6 +603,18 @@ extension TestExtensionState {
 extension TypeGraph.GlobalTypeName: ExpressibleByStringLiteral {
   public init(stringLiteral string: String) {
     self.init(_testName: string)
+  }
+}
+
+@_spi(_QualifiedLookupTests)
+extension TypeGraph.GlobalTypeRef: ExpressibleByStringLiteral {
+  public init(stringLiteral string: String) {
+    self.init(
+      name: TypeGraph.GlobalTypeName(stringLiteral: string),
+      // We'll use `_succinctDescription`, so these don't matter.
+      mainDecl: "struct",
+      _version: -1
+    )
   }
 }
 

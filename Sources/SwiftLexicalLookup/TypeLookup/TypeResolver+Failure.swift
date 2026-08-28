@@ -154,7 +154,7 @@ extension TypeResolver {
     //   func f(_: Self) {} // <- Look up `Self` here
     // }
     // ```
-    case cyclicalExtensionDependency(GenericExtensionBindingCycle<TypeGraph.GlobalTypeName>)
+    case cyclicalExtensionDependency(ExtensionBindingCycle)
 
     /// We bind extensions to types incrementally, so a type-resolution request
     /// might be nested within an extension binding request, but it may itself
@@ -255,7 +255,7 @@ public struct GenericDependencyCycleElement<TypeName: Sendable>: Sendable {
 }
 @_spi(_QualifiedLookupTests)
 public typealias DependencyCycleElement = GenericDependencyCycleElement<
-  TypeGraph.GlobalTypeName
+  TypeGraph.GlobalTypeRef
 >
 
 @_spi(_QualifiedLookupTests)
@@ -273,20 +273,20 @@ public struct GenericExtensionBindingCycle<TypeName: Sendable>: Sendable {
 }
 @_spi(_QualifiedLookupTests)
 public typealias ExtensionBindingCycle = GenericExtensionBindingCycle<
-  TypeGraph.GlobalTypeName
+  TypeGraph.GlobalTypeRef
 >
 
 // MARK: Debug
 
 @_spi(_QualifiedLookupTests)
-extension GenericDependencyCycleElement: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+extension DependencyCycleElement: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
   public var debugDescription: String {
-    "DependencyCycleElement(introducingTypeDecl: `\(introducingTypeDecl?._memberlessDescription ?? "nil")`, extensionDecl: `\(extensionDecl._memberlessDescription)`, boundType: '\(boundType.debugDescription)'"
+    "DependencyCycleElement(introducingTypeDecl: `\(introducingTypeDecl?._memberlessDescription ?? "nil")`, extensionDecl: `\(extensionDecl._memberlessDescription)`, boundType: '\(boundType._succinctDescription)'"
   }
 }
 
 @_spi(_QualifiedLookupTests)
-extension GenericExtensionBindingCycle: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+extension ExtensionBindingCycle: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
   public var debugDescription: String {
     let pathDescriptions = dependencyPath.map(\.debugDescription).joined(separator: ",\n    ")
     return """
