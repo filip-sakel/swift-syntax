@@ -920,7 +920,7 @@ extension TypeGraph {
     extensionMembers: TypeTable,
     to boundTypeRef: TypeGraph.GlobalTypeRef,
     extensionDependencies: [QualifiedLookupDependency],
-  ) -> Result<ExtensionBindingCycle, CycleDetectionFailure>? {
+  ) -> Result<TypeResolver.ExtensionCycle, CycleDetectionFailure>? {
     let boundExtensionInfo = [
       DependencyPathElement(
         introducingMemberType: nil,
@@ -941,9 +941,9 @@ extension TypeGraph {
     )
 
     // Check recursive dependencies
-    let cycleResult: ExtensionBindingCycle? = _findFirstDependency(
+    let cycleResult: TypeResolver.ExtensionCycle? = _findFirstDependency(
       path: boundExtensionInfo,
-      where: { (dependency, path) -> ExtensionBindingCycle? in
+      where: { (dependency, path) -> TypeResolver.ExtensionCycle? in
         // TODO: Factor out to or remove `collidesWithDependency` helper above.
         // Check if dependency collides with introduces `boundTypeName` > `extensionMembers`.
         // Collisions require that the base type match and that members share a name.
@@ -957,8 +957,8 @@ extension TypeGraph {
           return nil
         }
 
-        let mappedPath: [DependencyCycleElement] = path.dropFirst().map({ chainElement in
-          DependencyCycleElement(
+        let mappedPath: [TypeResolver.ExtensionCycleElement] = path.dropFirst().map({ chainElement in
+          TypeResolver.ExtensionCycleElement(
             // Only the first element has `nil` by `_findFirstDependency` invariant.
             introducingTypeDecl: chainElement.introducingMemberType!.typeDeclSyntax.node,
             extensionDecl: chainElement.extensionDecl.node,
@@ -966,7 +966,10 @@ extension TypeGraph {
           )
         })
 
-        return ExtensionBindingCycle(dependencyPath: mappedPath, dependencyMember: firstConflictingMember.name)
+        return TypeResolver.ExtensionCycle(
+          dependencyPath: mappedPath,
+          dependencyMember: firstConflictingMember.name
+        )
       }
     )
 
@@ -1673,7 +1676,7 @@ extension TypeGraph {
           extensionMembers: mappedExtensionDecl.typeMap,
           to: extendedTypeRef,
           extensionDependencies: dependencyTracker.dependencies
-        ) as Result<ExtensionBindingCycle, CycleDetectionFailure>?
+        ) as Result<TypeResolver.ExtensionCycle, CycleDetectionFailure>?
 
       // Map result
       switch cycleResult {
@@ -1847,13 +1850,6 @@ extension ExtensionDependency: CustomDebugStringConvertible {
       "ExtensionDependency(dependencyTypeName: '\(dependencyTypeName.debugDescription)', members: [\(membersDescriptions)])"
   }
 
-  fileprivate func _mapName(_ mapName: (TypeGraph.GlobalTypeName) -> TypeGraph.GlobalTypeName) -> ExtensionDependency {
-    ExtensionDependency(
-      dependencyTypeName: mapName(dependencyTypeName),
-      members: members
-    )
-  }
-
   /// Debug description but removes the `TypeDeclSyntax` from `TypeMember` for easier testing.
   fileprivate var _declarationlessDescription: String {
     _describe(includeMemberDecls: false)
@@ -1880,19 +1876,19 @@ extension ExtensionState: CustomDebugStringConvertible {
 }
 extension ExtensionState {
   @_spi(_QualifiedLookupTests)
-  public func _mapTypes(
-    mapNominal: (TypeResolver.ResolvedTypeSyntax) -> TypeResolver.ResolvedTypeSyntax,
-    mapName: (TypeGraph.GlobalTypeName) -> (TypeGraph.GlobalTypeName)
-  ) -> ExtensionState {
-    ExtensionState(
-      _uncheckedDependencies: dependencies.map({ dependency in
-        dependency._mapName(mapName)
-      }),
-      extensionDecl: extensionDecl,
-      resolvedType: resolvedType.mapError({
-        $0._map(mapNominal: mapNominal)
-      })
-    )
+  public func _visitTypes(
+    visitResolved: (TypeResolver.ResolvedTypeSyntax) -> Void,
+    visitName: (TypeGraph.GlobalTypeName) -> Void
+  ) {
+    for dependency in dependencies {
+      visitName(dependency.dependencyTypeName)
+    }
+    switch resolvedType {
+    case .success(let name):
+      visitName(name)
+    case .failure(let failure):
+      failure._visitTypes(visitResolved: visitResolved, visitName: visitName)
+    }
   }
 }
 

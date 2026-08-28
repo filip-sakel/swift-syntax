@@ -92,43 +92,38 @@ extension TypeResolver.ResolvedTypeSyntax {
 // MARK: ResolvedType
 
 extension TypeResolver {
-  @_spi(_QualifiedLookupTests)
-  public typealias TypeResult = GenericTypeResult<ResolvedTypeSyntax>
-
   /// The type result of structural type resolution. `Result`
   /// represents a nominal type.
   @_spi(_QualifiedLookupTests)
-  public indirect enum GenericTypeResult<NominalType: NominalTypeResultProtocol>: Sendable {
+  public indirect enum TypeResult: Sendable {
     /// E.g. `(A) -> ()`
     case function(argumentCount: Int)
     /// E.g. `(a: A, _: B)`
     case tuple(labels: [Identifier?])
     /// Either a single type or a composition of protocols/classes.
-    case nominalTypes([NominalType])
+    case nominalTypes([ResolvedTypeSyntax])
     /// `Any` or suppressed types like `~Copyable`
     case anyType
     /// E.g. `A.Type`, `((A, B).Type).Type`
-    case metatype(base: GenericTypeResult<NominalType>)
+    case metatype(base: TypeResult)
     // E.g. no type `A` in scope
     case failure(Failure)
 
     /// Maps the nominal types in `nominalTypes`.
-    public func mapNominals<NewNominalType>(
-      _ transform: (NominalType) -> NewNominalType
-    ) -> GenericTypeResult<NewNominalType> {
+    @_spi(_QualifiedLookupTests)
+    public func _visitTypes(
+      visitResolved: (ResolvedTypeSyntax) -> Void,
+      visitFailure: (TypeResolver.Failure) -> Void
+    ) {
       switch self {
-      case .function(let argumentCount):
-        return .function(argumentCount: argumentCount)
-      case .tuple(let labels):
-        return .tuple(labels: labels)
-      case .anyType:
-        return .anyType
+      case .function, .tuple, .anyType:
+        break
       case .metatype(let base):
-        return .metatype(base: base.mapNominals(transform))
+        base._visitTypes(visitResolved: visitResolved, visitFailure: visitFailure)
       case .nominalTypes(let results):
-        return .nominalTypes(results.map(transform))
+        results.forEach(visitResolved)
       case .failure(let failure):
-        return .failure(failure)
+        return visitFailure(failure)
       }
     }
   }
@@ -136,7 +131,7 @@ extension TypeResolver {
 
 // MARK: Debug Description
 
-extension TypeResolver.GenericTypeResult: CustomDebugStringConvertible {
+extension TypeResolver.TypeResult: CustomDebugStringConvertible {
   @_spi(_QualifiedLookupTests)
   public var debugDescription: String {
     switch self {

@@ -178,6 +178,29 @@ extension TypeResolutionMatcher: LexicalMatcher {
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool
   ) -> [ExpectationFailure] {
+    func verifyExpectedNominal(_ nominalType: TypeGraph.TypeRef, failures: inout [ExpectationFailure]) {
+    }
+    func verifyActualNominal(_ nominalType: TypeGraph.TypeRef, failures: inout [ExpectationFailure]) {
+      // Ensure we've marked syntax with that name
+      let mainDecl = nominalType.mainDecl.node
+      guard let definition = syntaxToDefinitions[mainDecl] else {
+        failures.append(.resultReferencesUnmarkedSyntax(syntaxDescription: mainDecl._memberlessDescription))
+        return
+      }
+
+      // Ensure the actual name matches the marked name
+      let markedName = definition.annotation.nominalType.debugDescription
+      guard nominalType.debugDescription == markedName else {
+        failures.append(
+          ExpectationFailure.other(
+            failure:
+              "Expected nominal-type decl `\(mainDecl._memberlessDescription)` to be named '\(markedName)' but instead got name '\(nominalType.debugDescription)'."
+          )
+        )
+        return
+      }
+    }
+
     switch expectation.annotation {
     case .syntaxResolution(let expectedType):
       guard let typeSyntax = expectation.syntax.as(TypeSyntax.self) else {
@@ -252,56 +275,51 @@ extension TypeResolutionMatcher: LexicalMatcher {
     // Map the types
     var failures = [ExpectationFailure]()
     /// Helper for mapping the expected state
-    let expectedStateDescription = expectedRawState._mapTypes(
-      mapNominal: {
-        nominalType -> TypeResolver.ResolvedTypeSyntax in
+    expectedRawState._visitTypes(
+      visitResolved: {
+        nominalType in
         // Ensure we're referencing a marked nominal-type name
         if markersToDefinitions[nominalType.debugDescription] == nil {
           failures.append(ExpectationFailure.referencesUndefinedMarker(nominalType.debugDescription))
         }
-        return nominalType
       },
-      mapName: { name in
+      visitName: { name in
         if markersToDefinitions[name.debugDescription] == nil {
           failures.append(ExpectationFailure.referencesUndefinedMarker(name.debugDescription))
         }
-        return name
       }
-    ).debugDescription
+    )
 
     // Get the type name
-    let actualStateDescription = actualRawState._mapTypes(
-      mapNominal: { nominalType in
-        // Check
-        assertions: do {
-          // Ensure we've marked syntax with that name
-          let mainDecl = nominalType.type.mainDecl.node
-          guard let definition = syntaxToDefinitions[mainDecl] else {
-            failures.append(.resultReferencesUnmarkedSyntax(syntaxDescription: mainDecl._memberlessDescription))
-            break assertions
-          }
-
-          // Ensure the actual name matches the marked name
-          let markedName = definition.annotation.nominalType.debugDescription
-          guard nominalType.debugDescription == markedName else {
-            failures.append(
-              ExpectationFailure.other(
-                failure:
-                  "Expected nominal-type decl `\(mainDecl._memberlessDescription)` to be named '\(markedName)' but instead got name '\(nominalType.debugDescription)'."
-              )
-            )
-            break assertions
-          }
+    actualRawState._visitTypes(
+      visitResolved: { nominalType in
+        // Ensure we've marked syntax with that name
+        let mainDecl = nominalType.type.mainDecl.node
+        guard let definition = syntaxToDefinitions[mainDecl] else {
+          failures.append(.resultReferencesUnmarkedSyntax(syntaxDescription: mainDecl._memberlessDescription))
+          return
         }
 
-        return nominalType
+        // Ensure the actual name matches the marked name
+        let markedName = definition.annotation.nominalType.debugDescription
+        guard nominalType.debugDescription == markedName else {
+          failures.append(
+            ExpectationFailure.other(
+              failure:
+                "Expected nominal-type decl `\(mainDecl._memberlessDescription)` to be named '\(markedName)' but instead got name '\(nominalType.debugDescription)'."
+            )
+          )
+          return
+        }
       },
-      mapName: { $0 }
-    ).debugDescription
+      visitName: { _ in }
+    )
     // Don't continue if we couldn't map the states
     guard failures.isEmpty else { return failures }
 
     // We use strings for the expected qualified name; just print that name
+    let expectedStateDescription = expectedRawState.debugDescription
+    let actualStateDescription = actualRawState.debugDescription
     guard expectedStateDescription == actualStateDescription else {
       return [
         ExpectationFailure.other(
@@ -333,14 +351,15 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
     // Assert output
     var failures = [ExpectationFailure]()
-    let expectedTypeDescription: String = expectedType.mapNominals({ nominalType -> TypeResolver.ResolvedTypeSyntax in
+    let expectedTypeDescription: String = expectedType._visitNominals({
+      nominalType -> TypeResolver.ResolvedTypeSyntax in
       // Ensure we're referencing a marked nominal-type name
       if markersToDefinitions[nominalType.debugDescription] == nil {
         failures.append(ExpectationFailure.referencesUndefinedMarker(nominalType.debugDescription))
       }
       return nominalType
     }).debugDescription
-    let actualTypeDescription: String = actualType.mapNominals({ nominalType -> TypeResolver.ResolvedTypeSyntax in
+    let actualTypeDescription: String = actualType._visitNominals({ nominalType -> TypeResolver.ResolvedTypeSyntax in
       // Check
       assertions: do {
         // Ensure we've marked syntax with that name
@@ -551,12 +570,12 @@ extension TestExtensionState {
     file: StaticString = #file,
     line: UInt = #line
   ) -> TestExtensionState {
-    let dependencyPath: [DependencyCycleElement] = cycleElements.map({
+    let dependencyPath: [TypeResolver.ExtensionCycleElement] = cycleElements.map({
       (
         introducingTypeDeclText,
         extensionDeclText,
         baseTypeName
-      ) -> DependencyCycleElement in
+      ) -> TypeResolver.ExtensionCycleElement in
       let introducingTypeDecl: TypeDeclSyntax?
       if let introducingTypeDeclText {
         let typeDeclRaw = DeclSyntax(stringLiteral: introducingTypeDeclText)
@@ -580,14 +599,14 @@ extension TestExtensionState {
           line: line
         )
       }
-      return DependencyCycleElement(
+      return TypeResolver.ExtensionCycleElement(
         introducingTypeDecl: introducingTypeDecl,
         extensionDecl: extensionDecl,
         boundType: baseTypeName
       )
     })
 
-    let cycle = ExtensionBindingCycle(
+    let cycle = TypeResolver.ExtensionCycle(
       dependencyPath: dependencyPath,
       dependencyMember: conflictingMember.identifier
     )

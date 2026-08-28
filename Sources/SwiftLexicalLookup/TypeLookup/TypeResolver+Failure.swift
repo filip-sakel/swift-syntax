@@ -154,7 +154,7 @@ extension TypeResolver {
     //   func f(_: Self) {} // <- Look up `Self` here
     // }
     // ```
-    case cyclicalExtensionDependency(ExtensionBindingCycle)
+    case cyclicalExtensionDependency(TypeResolver.ExtensionCycle)
 
     /// We bind extensions to types incrementally, so a type-resolution request
     /// might be nested within an extension binding request, but it may itself
@@ -169,124 +169,100 @@ extension TypeResolver {
 
 extension TypeResolver.Failure {
   @_spi(_QualifiedLookupTests)
-  public func _map(
-    mapNominal: (TypeResolver.ResolvedTypeSyntax) -> TypeResolver.ResolvedTypeSyntax
-  ) -> TypeResolver.Failure {
-    func mapNested(_ nestedFailure: Self) -> Self {
-      nestedFailure._map(mapNominal: mapNominal)
+  public func _visitTypes(
+    visitResolved: (TypeResolver.ResolvedTypeSyntax) -> Void,
+    visitName: (TypeGraph.GlobalTypeName) -> Void
+  ) {
+    func visitNested(_ nestedFailure: Self) {
+      nestedFailure._visitTypes(visitResolved: visitResolved, visitName: visitName)
     }
 
     switch self {
     // Passthrough
-    case .invalidNameToken(let nameToken):
-      return .invalidNameToken(nameToken)
-    case .noTypeInScope:
-      return .noTypeInScope
-    case .extensionNotAtFileScope(let extensionDecl):
-      return .extensionNotAtFileScope(extensionDecl: extensionDecl)
-    case .partialTypeResolutionFailure(let partialResolutionFailure):
-      return .partialTypeResolutionFailure(partialResolutionFailure)
-    case .genericParameterOrAssociatedType:
-      return .genericParameterOrAssociatedType
-    case .ambiguousTypeDecl(let ambiguousDecls):
-      return .ambiguousTypeDecl(ambiguousDecls)
-    case .syntaxNotInSymbolTable(let fileRoot):
-      return .syntaxNotInSymbolTable(fileRoot)
-    case .syntaxInDisabledRegion:
-      return .syntaxInDisabledRegion
-    case .cyclicalTypeReference(let cycle):
-      return .cyclicalTypeReference(cycle: cycle)
-    case .extensionNotBoundYet:
-      return .extensionNotBoundYet
+    case .invalidNameToken, .noTypeInScope, .extensionNotAtFileScope,
+      .partialTypeResolutionFailure, .genericParameterOrAssociatedType,
+      .ambiguousTypeDecl, .syntaxNotInSymbolTable,
+      .syntaxInDisabledRegion, .cyclicalTypeReference, .extensionNotBoundYet:
+      break
     // Actual maps
     case .cyclicalExtensionDependency(let cycle):
-      return .cyclicalExtensionDependency(cycle)
-    case .cannotComposeNonClassOrProtocol(let type):
-      return .cannotComposeNonClassOrProtocol(resolved: type.mapNominals(mapNominal))
-    case .noTypeMember(let member, let type):
-      return .noTypeMember(member: member, in: type.mapNominals(mapNominal))
-    case .cannotExtendNonNominal(let nonnominal):
-      return .cannotExtendNonNominal(nonnominal: nonnominal.mapNominals(mapNominal))
+      cycle._visitNominals(visitName)
+
+    case .cannotComposeNonClassOrProtocol(let type),
+      .noTypeMember(_, let type),
+      .cannotExtendNonNominal(let type):
+      type._visitTypes(visitResolved: visitResolved, visitFailure: visitNested(_:))
+
     case .invalidAliasedType(let nestedFailure):
-      return .invalidAliasedType(mapNested(nestedFailure))
+      visitNested(nestedFailure)
     case .invalidComposition(let invalidChildren):
-      return .invalidComposition(
-        invalidChildren.map({ syntax, nestedFailure in
-          (syntax, mapNested(nestedFailure))
-        })
-      )
+      invalidChildren.forEach({ _, nestedFailure in
+        visitNested(nestedFailure)
+      })
     case .invalidMembers(let invalidMembers):
-      return .invalidMembers(
-        invalidMembers.map({ syntax, nestedFailure in
-          (syntax, mapNested(nestedFailure))
-        })
-      )
+      invalidMembers.forEach({ _, nestedFailure in
+        visitNested(nestedFailure)
+      })
     case .invalidBaseType(let baseFailure):
-      return .invalidBaseType(mapNested(baseFailure))
+      visitNested(baseFailure)
     }
   }
 }
 
 // MARK: Dependency Cycle
 
-@_spi(_QualifiedLookupTests)
-public struct GenericDependencyCycleElement<TypeName: Sendable>: Sendable {
-  public let introducingTypeDecl: TypeDeclSyntax?
-  public let extensionDecl: ExtensionDeclSyntax
-  public let boundType: TypeName
+extension TypeResolver {
+  @_spi(_QualifiedLookupTests)
+  public struct ExtensionCycle: Sendable {
+    public let dependencyPath: [TypeResolver.ExtensionCycleElement]
+    public let dependencyMember: Identifier
 
-  public init(
-    introducingTypeDecl: TypeDeclSyntax?,
-    extensionDecl: ExtensionDeclSyntax,
-    boundType: TypeName
-  ) {
-    self.introducingTypeDecl = introducingTypeDecl
-    self.extensionDecl = extensionDecl
-    self.boundType = boundType
-  }
+    public init(
+      dependencyPath: [TypeResolver.ExtensionCycleElement],
+      dependencyMember: Identifier
+    ) {
+      self.dependencyPath = dependencyPath
+      self.dependencyMember = dependencyMember
+    }
 
-  fileprivate func _map<NewTypeName>(mapName: (TypeName) -> NewTypeName) -> GenericDependencyCycleElement<NewTypeName> {
-    GenericDependencyCycleElement<NewTypeName>(
-      introducingTypeDecl: introducingTypeDecl,
-      extensionDecl: extensionDecl,
-      boundType: mapName(boundType)
-    )
+    fileprivate func _visitNominals(_ visit: (TypeGraph.GlobalTypeName) -> Void) {
+      for element in dependencyPath {
+        visit(element.boundType.name)
+      }
+    }
   }
 }
-@_spi(_QualifiedLookupTests)
-public typealias DependencyCycleElement = GenericDependencyCycleElement<
-  TypeGraph.GlobalTypeRef
->
 
-@_spi(_QualifiedLookupTests)
-public struct GenericExtensionBindingCycle<TypeName: Sendable>: Sendable {
-  public let dependencyPath: [GenericDependencyCycleElement<TypeName>]
-  public let dependencyMember: Identifier
+extension TypeResolver {
+  @_spi(_QualifiedLookupTests)
+  public struct ExtensionCycleElement: Sendable {
+    public let introducingTypeDecl: TypeDeclSyntax?
+    public let extensionDecl: ExtensionDeclSyntax
+    public let boundType: TypeGraph.GlobalTypeRef
 
-  public init(
-    dependencyPath: [GenericDependencyCycleElement<TypeName>],
-    dependencyMember: Identifier
-  ) {
-    self.dependencyPath = dependencyPath
-    self.dependencyMember = dependencyMember
+    public init(
+      introducingTypeDecl: TypeDeclSyntax?,
+      extensionDecl: ExtensionDeclSyntax,
+      boundType: TypeGraph.GlobalTypeRef
+    ) {
+      self.introducingTypeDecl = introducingTypeDecl
+      self.extensionDecl = extensionDecl
+      self.boundType = boundType
+    }
   }
 }
-@_spi(_QualifiedLookupTests)
-public typealias ExtensionBindingCycle = GenericExtensionBindingCycle<
-  TypeGraph.GlobalTypeRef
->
 
 // MARK: Debug
 
 @_spi(_QualifiedLookupTests)
-extension DependencyCycleElement: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+extension TypeResolver.ExtensionCycleElement: CustomDebugStringConvertible {
   public var debugDescription: String {
     "DependencyCycleElement(introducingTypeDecl: `\(introducingTypeDecl?._memberlessDescription ?? "nil")`, extensionDecl: `\(extensionDecl._memberlessDescription)`, boundType: '\(boundType._succinctDescription)'"
   }
 }
 
 @_spi(_QualifiedLookupTests)
-extension ExtensionBindingCycle: CustomDebugStringConvertible where TypeName: CustomDebugStringConvertible {
+extension TypeResolver.ExtensionCycle: CustomDebugStringConvertible {
   public var debugDescription: String {
     let pathDescriptions = dependencyPath.map(\.debugDescription).joined(separator: ",\n    ")
     return """
