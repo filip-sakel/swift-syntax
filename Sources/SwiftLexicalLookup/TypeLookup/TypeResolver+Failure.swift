@@ -168,15 +168,8 @@ extension TypeResolver {
 }
 
 extension TypeResolver.Failure {
-  // FIXME: Should take a single `TypeGraph.TypeRef` visitor closure.
   @_spi(_QualifiedLookupTests)
-  public func _visitNominals(
-    _ visit: (TypeGraph.TypeRef) -> Void,
-  ) {
-    func visitNested(_ nestedFailure: Self) {
-      nestedFailure._visitNominals(visit)
-    }
-
+  public func _visitNominals(_ visit: (TypeGraph.TypeRef) -> Void) {
     switch self {
     // Passthrough
     case .invalidNameToken, .noTypeInScope, .extensionNotAtFileScope,
@@ -357,18 +350,6 @@ extension TypeResolver.Failure {
       .invalidBaseType(.cyclicalTypeReference(let nestedCycle)):
       return nestedCycle
 
-    // No nested ``TypeQualifierFailure`` => nil
-    case .invalidNameToken(_), .noTypeInScope, .cannotComposeNonClassOrProtocol(_),
-      .noTypeMember(member: _, in: _), .cannotExtendNonNominal(nonnominal: _),
-      .extensionNotAtFileScope(extensionDecl: _), .partialTypeResolutionFailure(_),
-      .genericParameterOrAssociatedType, .ambiguousTypeDecl(_),
-      .syntaxNotInSymbolTable, .syntaxInDisabledRegion, .extensionNotBoundYet,
-      // Extension cycles are distinct
-      .cyclicalExtensionDependency(_),
-      // If the above case don't directly contain a cycle
-      .invalidAliasedType(_), .invalidBaseType(_):
-      return nil
-
     // Only return a nested cycle if we have exactly one result.
     case .invalidMembers(let nestedFailures):
       guard
@@ -382,6 +363,18 @@ extension TypeResolver.Failure {
         nestedFailures.count == 1
       else { return nil }
       return nestedCycle
+
+    // No nested ``TypeQualifierFailure`` => nil
+    case .invalidNameToken(_), .noTypeInScope, .cannotComposeNonClassOrProtocol(_),
+      .noTypeMember(member: _, in: _), .cannotExtendNonNominal(nonnominal: _),
+      .extensionNotAtFileScope(extensionDecl: _), .partialTypeResolutionFailure(_),
+      .genericParameterOrAssociatedType, .ambiguousTypeDecl(_),
+      .syntaxNotInSymbolTable, .syntaxInDisabledRegion, .extensionNotBoundYet,
+      // Extension cycles are distinct
+      .cyclicalExtensionDependency(_),
+      // If the above case don't directly contain a cycle
+      .invalidAliasedType(_), .invalidBaseType(_):
+      return nil
     }
   }
 }

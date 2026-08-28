@@ -137,7 +137,6 @@ extension TypeGraph {
 extension TypeGraph {
   /// A reference to a resolved nominal type (global or local) vended by
   /// `TypeGraph`. Contains the unique name and resolved main declaration.
-  // FIXME: Make into an `enum`
   @_spi(_QualifiedLookupTests)
   public enum TypeRef: Hashable, Sendable {
     /// Local nominal types cannot be extended
