@@ -424,64 +424,74 @@ enum LexicalAssertionUtilities {
   }
 }
 
+// MARK: TypeSyntax + String Literal
+
+extension TypeLikeSyntax: ExpressibleByStringLiteral {
+  public init(stringLiteral value: StringLiteralType) {
+    self.init(TypeSyntax(stringLiteral: value))
+  }
+}
+
 // MARK: Attached + String Literal
 
 public protocol ParsableByAttached: SyntaxProtocol {
-  static func fileContents(syntaxString: String) -> String
+  static func fileContents(prefix: String?, syntaxString: String) -> String
 }
 
 extension TypeSyntax: ParsableByAttached {
-  public static func fileContents(syntaxString: String) -> String {
-    "typealias = \(syntaxString)"
+  public static func fileContents(prefix: String?, syntaxString: String) -> String {
+    "\(prefix ?? "typealias = ")\(syntaxString)"
   }
 }
 extension NominalTypeDeclSyntax: ParsableByAttached {
-  public static func fileContents(syntaxString: String) -> String {
+  public static func fileContents(prefix: String?, syntaxString: String) -> String {
     // Nominal-type declarations parse as declarations
     syntaxString
   }
 }
 extension TypeDeclSyntax: ParsableByAttached {
-  public static func fileContents(syntaxString: String) -> String {
+  public static func fileContents(prefix: String?, syntaxString: String) -> String {
     // Type declarations parse as declarations
     syntaxString
   }
 }
 extension GenericParameterSyntax: ParsableByAttached {
-  public static func fileContents(syntaxString: String) -> String {
+  public static func fileContents(prefix: String?, syntaxString: String) -> String {
     // Create a fake function to parse `< ... >` as a GenericParameterClauseSyntax
-    "func <\(syntaxString)>"
+    "\(prefix ?? "func ")<\(syntaxString)>"
   }
 }
 extension GenericParameterClauseSyntax: ParsableByAttached {
-  public static func fileContents(syntaxString: String) -> String {
+  public static func fileContents(prefix: String?, syntaxString: String) -> String {
     // Create a fake function to parse the given `<T1, ..., TN>`
     // as a GenericParameterClauseSyntax
-    "func \(syntaxString)"
+    "\(prefix ?? "func ")\(syntaxString)"
   }
 }
 extension ExtensionDeclSyntax: ParsableByAttached {
-  public static func fileContents(syntaxString: String) -> String { syntaxString }
+  public static func fileContents(prefix: String?, syntaxString: String) -> String { syntaxString }
 }
 extension DeclGroupSyntaxType: ParsableByAttached {
-  public static func fileContents(syntaxString: String) -> String { syntaxString }
+  public static func fileContents(prefix: String?, syntaxString: String) -> String { syntaxString }
 }
 
-// TODO: Merge with Attached.typeSyntax(_)
 extension Attached: ExpressibleByStringLiteral
     & ExpressibleByExtendedGraphemeClusterLiteral
     & ExpressibleByUnicodeScalarLiteral
 where
   Node: ParsableByAttached
 {
-  public init(stringLiteral: String) {
+  public static func parse(_ string: String, prefix: String? = nil) -> Self {
     // Wrap the type syntax in a file
-    var parser = Parser(Node.fileContents(syntaxString: stringLiteral))
+    var parser = Parser(Node.fileContents(prefix: prefix, syntaxString: string))
     let sourceFile = SourceFileSyntax.parse(from: &parser)
     guard let castSyntax = sourceFile.children(ofType: Node.self).first else {
-      fatalError("Couldn't parse `\(stringLiteral)` as \(Node.self).")
+      fatalError("Couldn't parse `\(string)` as \(Node.self).")
     }
     // We should now be able to cast to SourceFileRoot
-    self = Attached(castSyntax)!
+    return Attached(castSyntax)!
+  }
+  public init(stringLiteral string: String) {
+    self = .parse(string)
   }
 }

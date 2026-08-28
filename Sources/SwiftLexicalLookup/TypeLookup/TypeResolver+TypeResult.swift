@@ -29,17 +29,10 @@ extension TypeResolver {
 
 // MARK: GlobalResolvedTypeSyntax
 
-/// A type used by `GenericTypeResult` to represent nominal types.
-/// SwiftLexicalLookup just uses `TypeResolver.ResolvedTypeSyntax`
-/// and testing uses `Character` markers.
-// TODO: Remove
-@_spi(_QualifiedLookupTests)
-public protocol NominalTypeResultProtocol: CustomDebugStringConvertible, Sendable {}
-
 extension TypeResolver {
   /// A `NominalTypeRef` and the syntax that was resolved.
   @_spi(_QualifiedLookupTests)
-  public struct ResolvedTypeSyntax: NominalTypeResultProtocol {
+  public struct ResolvedTypeSyntax: Sendable, CustomDebugStringConvertible {
     public let type: TypeGraph.TypeRef
     public let syntax: Attached<TypeLikeSyntax>
 
@@ -66,25 +59,13 @@ extension TypeResolver.ResolvedTypeSyntax {
   /// `Attached<NominalTypeDeclSyntax>` instance and isn't used to produce a
   /// description.
   @_spi(_QualifiedLookupTests)
-  public static func _mockGlobalType(
-    globalName: TypeGraph.GlobalTypeName,
+  public static func _mock(
+    typeRef: TypeGraph.TypeRef,
     unusedNominalDecl: Attached<NominalTypeDeclSyntax>
   ) -> TypeResolver.ResolvedTypeSyntax {
     TypeResolver.ResolvedTypeSyntax(
-      type: TypeGraph.TypeRef(
-        globalReference: TypeGraph.GlobalTypeRef(name: globalName, mainDecl: unusedNominalDecl, _version: -1)
-      ),
+      type: typeRef,
       syntax: Attached<TypeLikeSyntax>(unusedNominalDecl)
-    )
-  }
-
-  public static func _mockLocalType(
-    nominalDecl: Attached<NominalTypeDeclSyntax>
-  ) -> TypeResolver.ResolvedTypeSyntax {
-    TypeResolver.ResolvedTypeSyntax(
-      type: TypeGraph.TypeRef(localNominalType: nominalDecl),
-      // Like in `_mockGlobalType`, this isn't actually used.
-      syntax: Attached<TypeLikeSyntax>(nominalDecl)
     )
   }
 }

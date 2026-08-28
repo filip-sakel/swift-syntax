@@ -17,34 +17,21 @@ import SwiftParser
 import SwiftSyntax
 import XCTest
 
-// We use character markers to refer to nominal types.
-@_spi(_QualifiedLookupTests) extension Character: NominalTypeResultProtocol {}
-// ResultName just help us describe the results.
-struct TypeResultName: NominalTypeResultProtocol {
-  let stringName: String
-  init(_ stringName: String) { self.stringName = stringName }
-  var debugDescription: String { stringName }
-}
-
-// TODO: Rename to remove `Test` or remove aliases
-typealias TestResolvedType = TypeResolver.TypeResult
-typealias TestExtensionState = ExtensionState
-typealias TestResolutionFailure = TypeResolver.Failure
-
 /// Asserts the given annotated `TypeSyntax` resolves to the right `NominalTypeDeclSyntax`
 /// and qualified name. Also asserts `ExtensionDeclSyntax`-binding produces the expected
 /// `ExtensionBindingState`.
 /// and `ExtensionDeclSyntax`
 struct TypeResolutionMatcher {
-  /// A marker and the resolved qualified name of the annotated `NominalTypeDeclSyntax`.
+  /// A mock `ResolvedTypeSyntax` representing the name of this
+  /// annotated, global `NominalTypeDeclSyntax`.
   struct Definition {
     let nominalType: TypeResolver.ResolvedTypeSyntax
   }
   /// Annotates `TypeSyntax` with a type-resolution result using markers;
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
   enum Expectation {
-    case syntaxResolution(TestResolvedType)
-    case extensionBinding(TestExtensionState)
+    case syntaxResolution(TypeResolver.TypeResult)
+    case extensionBinding(ExtensionState)
   }
 
   let symbolTable: SymbolTable
@@ -67,13 +54,7 @@ extension TypeResolutionMatcher.Definition: LexicalAnnotation, Identifiable, Cus
 
   var id: String { nominalType.debugDescription }
 
-  // TODO: Remove
-  // Use the name for a more familiar description,
-  // or the marker (if we don't care about the name
-  // and for local declarations.)
-  var description: String {
-    nominalType.debugDescription  //?? marker.description
-  }
+  var description: String { nominalType.debugDescription }
 }
 
 // MARK: `Expectation` Conformances
@@ -360,7 +341,7 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     append(definition: TypeResolutionMatcher.Definition(nominalType: mockedNominalType), file: file, line: line)
   }
   mutating func appendInterpolation(
-    extensionState: TestExtensionState,
+    extensionState: ExtensionState,
     file: StaticString = #file,
     line: UInt = #line
   ) {
@@ -371,25 +352,25 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     )
   }
   mutating func appendInterpolation(
-    type: TestResolvedType,
+    type: TypeResolver.TypeResult,
     file: StaticString = #file,
     line: UInt = #line
   ) {
     appendInterpolation(expects: [TypeResolutionMatcher.Expectation.syntaxResolution(type)], file: file, line: line)
   }
   mutating func appendInterpolation(
-    failure: TestResolutionFailure,
+    failure: TypeResolver.Failure,
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    appendInterpolation(type: TestResolvedType.failure(failure), file: file, line: line)
+    appendInterpolation(type: TypeResolver.TypeResult.failure(failure), file: file, line: line)
   }
   mutating func appendInterpolation(
     nominals: [TypeResolver.ResolvedTypeSyntax],
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    appendInterpolation(type: TestResolvedType.nominalTypes(nominals), file: file, line: line)
+    appendInterpolation(type: TypeResolver.TypeResult.nominalTypes(nominals), file: file, line: line)
   }
   mutating func appendInterpolation(
     nominal: TypeResolver.ResolvedTypeSyntax,
@@ -402,18 +383,43 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
 
 // MARK: Convenience Initializers
 
-extension TypeLikeSyntax: ExpressibleByStringLiteral {
-  public init(stringLiteral value: StringLiteralType) {
-    self.init(TypeSyntax(stringLiteral: value))
+@_spi(_QualifiedLookupTests)
+extension TypeGraph.GlobalTypeName: ExpressibleByStringLiteral {
+  public init(stringLiteral string: String) {
+    self.init(_testName: string)
   }
 }
 
-extension ExtensionDependency {
-  init(baseType: TypeGraph.GlobalTypeName, members: [IdentifierWrapper]) {
-    let mappedMembers: [TypeMember] = members.map({ member in
-      return TypeMember(name: member.identifier, decls: [])
-    })
-    self.init(dependencyTypeName: baseType, members: mappedMembers)
+@_spi(_QualifiedLookupTests)
+extension TypeGraph.GlobalTypeRef: ExpressibleByStringLiteral {
+  public init(stringLiteral string: String) {
+    self = TypeGraph.GlobalTypeRef._mock(
+      globalName: TypeGraph.GlobalTypeName(stringLiteral: string),
+      unusedNominalDecl: "struct"
+    )
+  }
+}
+
+@_spi(_QualifiedLookupTests)
+extension TypeResolver.ResolvedTypeSyntax: ExpressibleByStringLiteral {
+  /// Mock a global type reference with the given debug description, e.g.,
+  /// `_(MyFile.swift)::MyType`.
+  public init(stringLiteral string: String) {
+    self = ._mock(
+      typeRef: TypeGraph.TypeRef(
+        globalReference: TypeGraph.GlobalTypeRef(stringLiteral: string)
+      ),
+      unusedNominalDecl: "struct"
+    )
+  }
+
+  /// Mock a local type by providing its main declaration without members,
+  /// e.g., `struct A {}`.
+  static func local(_ nominalDecl: Attached<NominalTypeDeclSyntax>) -> TypeResolver.ResolvedTypeSyntax {
+    TypeResolver.ResolvedTypeSyntax._mock(
+      typeRef: TypeGraph.TypeRef(localNominalType: nominalDecl),
+      unusedNominalDecl: "struct"
+    )
   }
 }
 
@@ -432,7 +438,16 @@ struct IdentifierWrapper: ExpressibleByStringLiteral {
   }
 }
 
-extension TestExtensionState {
+extension ExtensionDependency {
+  init(baseType: TypeGraph.GlobalTypeName, members: [IdentifierWrapper]) {
+    let mappedMembers: [TypeMember] = members.map({ member in
+      return TypeMember(name: member.identifier, decls: [])
+    })
+    self.init(dependencyTypeName: baseType, members: mappedMembers)
+  }
+}
+
+extension ExtensionState {
   /// Creates a mock extension state to check an extension's dependencies,
   /// bound type, or failure to bind due to cycles.
   ///
@@ -443,7 +458,7 @@ extension TestExtensionState {
   /// binding.
   init(
     dependencies: [ExtensionDependency],
-    resolvedType: Result<TypeGraph.GlobalTypeName, TestResolutionFailure>,
+    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>,
     file: StaticString = #file,
     line: UInt = #line
   ) {
@@ -463,10 +478,10 @@ extension TestExtensionState {
   }
 
   static func bound(
-    to typeName: TypeGraph.GlobalTypeName,
-    dependencies: [ExtensionDependency]
-  ) -> TestExtensionState {
-    TestExtensionState(dependencies: dependencies, resolvedType: .success(typeName))
+    dependencies: [ExtensionDependency],
+    typeName: TypeGraph.GlobalTypeName,
+  ) -> ExtensionState {
+    ExtensionState(dependencies: dependencies, resolvedType: .success(typeName))
   }
 
   static func invalidCycle(
@@ -475,7 +490,7 @@ extension TestExtensionState {
     conflictingMember: IdentifierWrapper,
     file: StaticString = #file,
     line: UInt = #line
-  ) -> TestExtensionState {
+  ) -> ExtensionState {
     let dependencyPath: [TypeResolver.ExtensionCycleElement] = cycleElements.map({
       (
         introducingTypeDeclText,
@@ -517,42 +532,9 @@ extension TestExtensionState {
       dependencyMember: conflictingMember.identifier
     )
 
-    return TestExtensionState(
+    return ExtensionState(
       dependencies: dependencies,
-      resolvedType: Result.failure(TestResolutionFailure.cyclicalExtensionDependency(cycle))
+      resolvedType: Result.failure(TypeResolver.Failure.cyclicalExtensionDependency(cycle))
     )
-  }
-}
-
-@_spi(_QualifiedLookupTests)
-extension TypeGraph.GlobalTypeName: ExpressibleByStringLiteral {
-  public init(stringLiteral string: String) {
-    self.init(_testName: string)
-  }
-}
-
-@_spi(_QualifiedLookupTests)
-extension TypeGraph.GlobalTypeRef: ExpressibleByStringLiteral {
-  public init(stringLiteral string: String) {
-    self.init(
-      name: TypeGraph.GlobalTypeName(stringLiteral: string),
-      // We'll use `_succinctDescription`, so these don't matter.
-      mainDecl: "struct",
-      _version: -1
-    )
-  }
-}
-
-@_spi(_QualifiedLookupTests)
-extension TypeResolver.ResolvedTypeSyntax: ExpressibleByStringLiteral {
-  /// Mock a global type reference with the given debug description.
-  public init(stringLiteral value: String) {
-    self = ._mockGlobalType(globalName: TypeGraph.GlobalTypeName(stringLiteral: value), unusedNominalDecl: "struct")
-  }
-}
-
-extension TypeResolver.ResolvedTypeSyntax {
-  static func local(_ nominalDecl: Attached<NominalTypeDeclSyntax>) -> TypeResolver.ResolvedTypeSyntax {
-    TypeResolver.ResolvedTypeSyntax._mockLocalType(nominalDecl: nominalDecl)
   }
 }

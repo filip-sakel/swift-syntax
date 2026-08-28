@@ -604,11 +604,11 @@ final class TypeResolutionTests: XCTestCase {
       // Valid Compositions
       //
       // We defer diagnostics to SEMA
-      \(extensionState: .bound(to: "_(MyFile.swift)::ProtoA", dependencies: []))
+      \(extensionState: .bound(dependencies: [], typeName: "_(MyFile.swift)::ProtoA"))
       extension ProtoA & ~Copyable {}
 
       typealias ProtoAndAny = ProtoA & Any
-      \(extensionState: .bound(to: "_(MyFile.swift)::ProtoA", dependencies: []))
+      \(extensionState: .bound(dependencies: [], typeName: "_(MyFile.swift)::ProtoA"))
       extension ProtoAndAny {}
 
       // Invalid Compositions
@@ -675,12 +675,12 @@ final class TypeResolutionTests: XCTestCase {
       struct A {}
 
       \(extensionState: .bound(
-        to: "_(MyFile.swift)::A",
-        dependencies: [ExtensionDependency(baseType: "_(MyFile.swift)::A", members: ["B", "A"])]
+        dependencies: [ExtensionDependency(baseType: "_(MyFile.swift)::A", members: ["B", "A"])],
+        typeName: "_(MyFile.swift)::A"
       ))
       extension A.B {}
 
-      \(extensionState: .bound(to: "_(MyFile.swift)::A", dependencies: []))
+      \(extensionState: .bound(dependencies: [], typeName: "_(MyFile.swift)::A"))
       extension A { typealias B = A }
 
       \(extensionState: .invalidCycle(
@@ -713,24 +713,24 @@ final class TypeResolutionTests: XCTestCase {
 
 
       \(extensionState: .bound(
-        to: "_(File.swift)::T_3",
-        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_0", members: ["Last", "T_3"])]
+        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_0", members: ["Last", "T_3"])],
+        typeName: "_(File.swift)::T_3",
       ))
       extension T_0.Last { typealias Prev = T_2 }
 
 
       // j=3
       \(extensionState: .bound(
-        to: "_(File.swift)::T_2",
-        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_3", members: ["Prev", "T_2"])]
+        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_3", members: ["Prev", "T_2"])],
+        typeName: "_(File.swift)::T_2",
       ))
       extension T_3.Prev { typealias Prev = T_1 }
 
 
       // j=2
       \(extensionState: .bound(
-        to: "_(File.swift)::T_1",
-        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_2", members: ["Prev", "T_1"])]
+        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_2", members: ["Prev", "T_1"])],
+        typeName: "_(File.swift)::T_1"
       ))
       extension T_2.Prev { typealias Prev = T_0 }
 
@@ -766,8 +766,8 @@ final class TypeResolutionTests: XCTestCase {
       extension T_0 { typealias Last = T_3 }
 
       \(extensionState: .bound(
-        to: "_(File.swift)::T_3",
-        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_0", members: ["Last", "T_3"])]
+        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_0", members: ["Last", "T_3"])],
+        typeName: "_(File.swift)::T_3"
       ))
       extension T_0.Last { typealias Prev = T_2 }
 
@@ -778,8 +778,8 @@ final class TypeResolutionTests: XCTestCase {
       extension T_2.Prev { typealias Prev = T_0 }
 
       \(extensionState: .bound(
-        to: "_(File.swift)::T_1._(File.swift)::T_0",
-        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_1", members: ["Prev", "T_0"])]
+        dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_1", members: ["Prev", "T_0"])],
+        typeName: "_(File.swift)::T_1._(File.swift)::T_0"
       ))
       extension T_1.Prev { struct T_3 {} }
 
@@ -812,8 +812,8 @@ final class TypeResolutionTests: XCTestCase {
     // Link to the last type
     lookupSource.appendInterpolation(
       extensionState: .bound(
-        to: GlobalTypeName(stringLiteral: "_(File.swift)::T_0"),
-        dependencies: []
+        dependencies: [],
+        typeName: GlobalTypeName(stringLiteral: "_(File.swift)::T_0")
       )
     )
     lookupSource.appendLiteral(
@@ -828,7 +828,6 @@ final class TypeResolutionTests: XCTestCase {
     for i in stride(from: n, to: 1, by: -1) {
       lookupSource.appendInterpolation(
         extensionState: .bound(
-          to: GlobalTypeName(stringLiteral: "_(File.swift)::T_\(i-1)"),
           dependencies: [
             ExtensionDependency(
               baseType: GlobalTypeName(stringLiteral: "_(File.swift)::T_\(i)"),
@@ -840,7 +839,8 @@ final class TypeResolutionTests: XCTestCase {
                 IdentifierWrapper(string: "T_\(i-1)", allocatingIn: &lookupSource),
               ]
             )
-          ]
+          ],
+          typeName: GlobalTypeName(stringLiteral: "_(File.swift)::T_\(i-1)")
         )
       )
       lookupSource.appendLiteral(
@@ -893,8 +893,8 @@ final class TypeResolutionTests: XCTestCase {
 
       // Last extension makes `A.B` resolves to `A.A`
       \(extensionState: .bound(
-        to: "_(File.swift)::A._(File.swift)::A",
-        dependencies: [ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"])]
+        dependencies: [ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"])],
+        typeName: "_(File.swift)::A._(File.swift)::A"
       ))
       extension A.B {
         \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C")
@@ -905,19 +905,19 @@ final class TypeResolutionTests: XCTestCase {
       }
 
       \(extensionState: .bound(
-        to: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D",
         dependencies: [
           ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"]),
           ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A", members: ["C"]),
           ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A._(File.swift)::C", members: ["D"]),
-        ]
+        ],
+        typeName: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D"
       ))
       extension A.B.C.D {
         \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D._(File.swift)::E")
         struct E {}
       }
 
-      \(extensionState: .bound(to: "_(File.swift)::A", dependencies: []))
+      \(extensionState: .bound(dependencies: [], typeName: "_(File.swift)::A"))
       extension A {
         \(name: "_(File.swift)::A._(File.swift)::A")
         struct A {}
@@ -937,10 +937,10 @@ final class TypeResolutionTests: XCTestCase {
       }
 
       \(extensionState: .bound(
-        to: "_(File.swift)::A._(File.swift)::A",
         dependencies: [
           ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"]),
-        ]
+        ],
+        typeName: "_(File.swift)::A._(File.swift)::A"
       ))
       extension A.B {
         \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C")
@@ -952,12 +952,12 @@ final class TypeResolutionTests: XCTestCase {
 
       // Initially ambiguous ref to `C`
       \(extensionState: .bound(
-        to: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D",
         dependencies: [
           ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"]),
           ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A", members: ["C"]),
           ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A._(File.swift)::C", members: ["D"]),
-        ]
+        ],
+        typeName: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D"
       ))
       extension A.B.C.D {
         \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D._(File.swift)::E")
@@ -997,12 +997,12 @@ final class TypeResolutionTests: XCTestCase {
       // Because this is the first `\\(extensionState: ...)` assertion,
       // we bind this extension first.
       \(extensionState: .bound(
-        to: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D",
         dependencies: [
           ExtensionDependency(baseType: "_(File.swift)::A", members: ["B", "A"]),
           ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A", members: ["C"]),
           ExtensionDependency(baseType: "_(File.swift)::A._(File.swift)::A._(File.swift)::C", members: ["D"]),
-        ]
+        ],
+        typeName: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D"
       ))
       extension A.B.C.D {
         \(name: "_(File.swift)::A._(File.swift)::A._(File.swift)::C._(File.swift)::D._(File.swift)::E")

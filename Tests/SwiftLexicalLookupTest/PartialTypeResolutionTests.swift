@@ -24,28 +24,10 @@ extension TypeDeclSyntax: ExpressibleByStringLiteral {
   }
 }
 
-extension Attached where Node == TypeSyntax {
-  /// Parses the given type syntax in a file with `typeSyntaxPrefix`.
-  /// By default, the `let _: ` prefix parses type syntax as a variable type.
-  public static func typeSyntax(
-    typeSyntaxPrefix: String = "let _: ",
-    _ syntaxString: StringLiteralType,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) -> Attached<TypeSyntax> {
-    var parser = Parser("\(typeSyntaxPrefix)\(syntaxString)")
-    let fileSyntax = SourceFileSyntax.parse(from: &parser)
-    guard let typeSyntax = fileSyntax.children(ofType: TypeSyntax.self).first else {
-      fatalError("`\(syntaxString)` didn't parse as type syntax.", file: file, line: line)
-    }
-    return Attached<TypeSyntax>(typeSyntax)!
-  }
-}
-
 extension TypeReference {
   /// Convenience initializer since we ignore `introducingSyntax` in tests.
   init(module: Identifier? = nil, name: Identifier) {
-    self.init(module: module, name: name, introducingSyntax: .typeSyntax(""))
+    self.init(module: module, name: name, introducingSyntax: "")
   }
 }
 
@@ -59,7 +41,7 @@ func assertPartialResolutionResult(
   line: UInt = #line
 ) {
   // Compute
-  let syntax = Attached.typeSyntax(typeSyntaxPrefix: typeSyntaxPrefix, typeSyntax, file: file, line: line)
+  let syntax = Attached<TypeSyntax>.parse(typeSyntax, prefix: typeSyntaxPrefix)
   let actualResult = syntax.partiallyResolve()
   // Convert to strings to compare syntax
   let expectedDescription = result._debugDescription
@@ -165,7 +147,7 @@ final class PartialTypeResolutionTests: XCTestCase {
       typeSyntax: "(Int & (A, B)).MyMember",
       result: .success(
         .member(
-          base: .typeSyntax("(Int & (A, B))"),
+          base: "(Int & (A, B))",
           memberComponent: TypeReference(name: "MyMember")
         )
       )
@@ -175,7 +157,7 @@ final class PartialTypeResolutionTests: XCTestCase {
       typeSyntax: "(A & B).Module::C",
       result: .success(
         .member(
-          base: .typeSyntax("(A & B)"),
+          base: "(A & B)",
           memberComponent: TypeReference(module: "Module", name: "C")
         )
       )
@@ -185,7 +167,7 @@ final class PartialTypeResolutionTests: XCTestCase {
       typeSyntax: "(() -> Int).Self",
       result: .success(
         .member(
-          base: .typeSyntax("(() -> Int)"),
+          base: "(() -> Int)",
           memberComponent: TypeReference(name: "Self")
         )
       )
@@ -194,7 +176,7 @@ final class PartialTypeResolutionTests: XCTestCase {
       typeSyntax: "(() -> Int).`Self`",
       result: .success(
         .member(
-          base: .typeSyntax("(() -> Int)"),
+          base: "(() -> Int)",
           memberComponent: TypeReference(name: "Self")
         )
       )
@@ -309,7 +291,7 @@ final class PartialTypeResolutionTests: XCTestCase {
     // Opaque/any types
     assertPartialResolutionResult(
       typeSyntax: "some Proto & Class",
-      result: .success(.composition([.typeSyntax("Proto"), .typeSyntax("Class")]))
+      result: .success(.composition(["Proto", "Class"]))
     )
     assertPartialResolutionResult(
       typeSyntax: "any A",
@@ -331,8 +313,8 @@ final class PartialTypeResolutionTests: XCTestCase {
       typeSyntax: "Module::MyType & Any",
       result: .success(
         .composition([
-          .typeSyntax("Module::MyType"),
-          .typeSyntax("Any"),
+          "Module::MyType",
+          "Any",
         ])
       )
     )

@@ -176,6 +176,7 @@ extension TypeGraph {
 extension TypeGraph {
   /// A reference to a resolved nominal type (global or local) vended by
   /// `TypeGraph`. Contains the unique name and resolved main declaration.
+  // FIXME: Make into an `enum`
   @_spi(_QualifiedLookupTests)
   public struct TypeRef: Hashable, Sendable {
     public enum Storage: Hashable, Sendable {
@@ -186,13 +187,12 @@ extension TypeGraph {
 
     public let storage: Storage
 
-    /// Important: Only `TypeGraph` should use this initializer.
     @_spi(_QualifiedLookupTests)
     public init(globalReference: TypeGraph.GlobalTypeRef) {
       storage = .global(globalReference)
     }
-    /// Important: Only `TypeGraph` should use this initializer.
-    init(localNominalType: Attached<NominalTypeDeclSyntax>) {
+    @_spi(_QualifiedLookupTests)
+    public init(localNominalType: Attached<NominalTypeDeclSyntax>) {
       storage = .local(localNominalType)
     }
 
@@ -349,5 +349,18 @@ extension TypeGraph.GlobalTypeName.Component {
       qualifier: qualifier,
       name: name
     )
+  }
+}
+
+extension TypeGraph.GlobalTypeRef {
+  /// Creates a mock `ResolvedTypeSyntax` where `unusedNominalDecl` can be any
+  /// `Attached<NominalTypeDeclSyntax>` instance and isn't used to produce a
+  /// description.
+  @_spi(_QualifiedLookupTests)
+  public static func _mock(
+    globalName: TypeGraph.GlobalTypeName,
+    unusedNominalDecl: Attached<NominalTypeDeclSyntax>
+  ) -> TypeGraph.GlobalTypeRef {
+    TypeGraph.GlobalTypeRef(name: globalName, mainDecl: unusedNominalDecl, _version: -1)
   }
 }
