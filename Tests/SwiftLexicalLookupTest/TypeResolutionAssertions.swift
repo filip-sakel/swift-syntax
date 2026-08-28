@@ -178,10 +178,10 @@ extension TypeResolutionMatcher: LexicalMatcher {
     syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
     verbose: Bool
   ) -> [ExpectationFailure] {
-    func verifyExpectedNominal(_ nominalType: TypeGraph.TypeRef, failures: inout [ExpectationFailure]) {
+    func verifyExpectedNominalDescription(_ nominalTypeDescription: String, failures: inout [ExpectationFailure]) {
       // Ensure we're referencing a marked nominal-type name
-      if markersToDefinitions[nominalType._succinctDescription] == nil {
-        failures.append(ExpectationFailure.referencesUndefinedMarker(nominalType._succinctDescription))
+      if markersToDefinitions[nominalTypeDescription] == nil {
+        failures.append(ExpectationFailure.referencesUndefinedMarker(nominalTypeDescription))
       }
     }
     func verifyActualNominal(_ nominalType: TypeGraph.TypeRef, failures: inout [ExpectationFailure]) {
@@ -258,7 +258,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Assert output
       var failures = [ExpectationFailure]()
-      expectedType._visitNominals({ verifyExpectedNominal($0, failures: &failures) })
+      expectedType._visitNominals({ verifyExpectedNominalDescription($0._succinctDescription, failures: &failures) })
       actualType._visitNominals({ verifyActualNominal($0, failures: &failures) })
       // Give up if markers are undefined (i.e. we already have failures)
       guard failures.isEmpty else { return failures }
@@ -315,21 +315,22 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Map the types
       var failures = [ExpectationFailure]()
-      /// Helper for mapping the expected state
-      /// FIXME: Remove `visitName`
+      /// Helper for verifying the nominals in the expected state
       expectedRawState._visitTypes(
-        visitResolved: { verifyExpectedNominal($0, failures: &failures) },
+        visitResolved: { verifyExpectedNominalDescription($0._succinctDescription, failures: &failures) },
         visitName: { name in
-          if markersToDefinitions[name.debugDescription] == nil {
-            failures.append(ExpectationFailure.referencesUndefinedMarker(name.debugDescription))
-          }
+          verifyExpectedNominalDescription(name.debugDescription, failures: &failures)
         }
       )
-
       // Get the type name
-      /// FIXME: Remove `visitName`
       actualRawState._visitTypes(
         visitResolved: { verifyActualNominal($0, failures: &failures) },
+        // Extension state uses `GlobalTypeName` instead of `GlobalTypeRef`
+        // since the type graph already stores information about types in a
+        // different property. So, because `GlobalTypeName` doesn't store
+        // syntax information like `GlobalTypeRef`, we don't verify that
+        // the produced type is annotated. Of course, we still check if we
+        // get the right type result when comparing the descriptions.
         visitName: { _ in }
       )
       // Don't continue if we couldn't map the states
