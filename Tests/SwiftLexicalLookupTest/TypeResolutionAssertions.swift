@@ -171,6 +171,37 @@ extension TypeResolutionMatcher: LexicalMatcher {
       )
     }
   }
+  /// Look up extended type if not already resolved
+  private func _admitAndGetExtensionState(
+    _ extensionDecl: Attached<ExtensionDeclSyntax>,
+    verbose: Bool,
+    failures: inout [ExpectationFailure]
+  ) -> ExtensionState? {
+    // Try to get already-resolved state
+    if let existingState = symbolTable.typeGraph.extensionsToState[extensionDecl] {
+      return existingState
+    }
+
+    // Admit the extension
+    if verbose {
+      print("Extension `\(extensionDecl.node._memberlessDescription)` not already bound; initating binding.")
+    }
+    symbolTable.admitExtensions([extensionDecl])
+
+    // After binding, we should we have a state
+    guard let producedState = symbolTable.typeGraph.extensionsToState[extensionDecl] else {
+      let availableExtensions = symbolTable.typeGraph.extensionsToState.keys.map(\.node._memberlessDescription)
+      failures.append(
+        ExpectationFailure.other(
+          failure:
+            "No extension state: Couldn't find extension state even after nominal-type resolution; available extensions are: \(availableExtensions)",
+        )
+      )
+      return nil
+    }
+
+    return producedState
+  }
 
   func assertExpectation(
     expectation: ContextualizedAnnotation<Expectation>,
@@ -204,151 +235,73 @@ extension TypeResolutionMatcher: LexicalMatcher {
         return
       }
     }
+    // Force unwrap we parse from a file
+    let expectationSyntax = Attached(expectation.syntax)!
 
+    // Check the given `TypeSyntax` resolution or extension-binding state
+    var failures = [ExpectationFailure]()
+    let expectedDescription: String
+    let actualDescription: String
     switch expectation.annotation {
     case .syntaxResolution(let expectedType):
-      guard let typeSyntax = expectation.syntax.as(TypeSyntax.self) else {
+      guard let typeSyntax = expectationSyntax.as(TypeSyntax.self) else {
         fatalError(
           "[SwiftLexicalLookup] Internal test error: Expected syntax-resolution queries to find 'TypeSyntax' nodes, but got '\(expectation.syntax.kind)'."
         )
       }
 
-      return _assertTypeSyntax(
-        // Force unwrap because we parsed this from `lookupSources`
-        typeSyntax: Attached(typeSyntax)!,
-        expectedType: expectedType,
-        markersToDefinitions: markersToDefinitions,
-        syntaxToDefinitions: syntaxToDefinitions,
-        verbose: verbose
-      )
+      // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
+      let actualType: TypeResolver.TypeResult = symbolTable.resolveSyntax(typeSyntax: typeSyntax)
+
+      // Check the nested nominals
+      expectedType._visitNominals({ verifyExpectedNominalDescription($0._succinctDescription, failures: &failures) })
+      actualType._visitNominals({ verifyActualNominal($0, failures: &failures) })
+
+      // Describe the types
+      (expectedDescription, actualDescription) = (expectedType.debugDescription, actualType.debugDescription)
+
     case .extensionBinding(let expectedState):
-      guard let extensionDecl = expectation.syntax.as(ExtensionDeclSyntax.self) else {
+      guard let extensionDecl = expectationSyntax.as(ExtensionDeclSyntax.self) else {
         fatalError(
           "[SwiftLexicalLookup] Internal test error: Expected syntax-resolution queries to find 'ExtensionDeclSyntax' nodes, but got '\(expectation.syntax.kind)'."
         )
       }
 
-      return _assertExtensionBinding(
-        // Force unwrap because we parsed this from `lookupSources`
-        extensionDecl: Attached(extensionDecl)!,
-        expectedRawState: expectedState,
-        markersToDefinitions: markersToDefinitions,
-        syntaxToDefinitions: syntaxToDefinitions,
-        verbose: verbose
-      )
-    }
-
-    /// `assertExpectation` forwards type syntax here.
-    func _assertTypeSyntax(
-      typeSyntax: Attached<TypeSyntax>,
-      expectedType: TestResolvedType,
-      markersToDefinitions: [String: ContextualizedAnnotation<Definition>],
-      syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
-      verbose: Bool
-    ) -> [ExpectationFailure] {
-      // Print target syntax (to show the syntax kinds)
-      if verbose {
-        print("Target syntax parsed as:\n\(typeSyntax.node.debugDescription)\n")
+      // Give up if we can't get the extension state
+      guard let actualState = _admitAndGetExtensionState(extensionDecl, verbose: verbose, failures: &failures) else {
+        return failures
       }
 
-      // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
-      let actualType: TypeResolver.TypeResult = symbolTable.resolveSyntax(
-        typeSyntax: typeSyntax
-      )
-
-      // Assert output
-      var failures = [ExpectationFailure]()
-      expectedType._visitNominals({ verifyExpectedNominalDescription($0._succinctDescription, failures: &failures) })
-      actualType._visitNominals({ verifyActualNominal($0, failures: &failures) })
-      // Give up if markers are undefined (i.e. we already have failures)
-      guard failures.isEmpty else { return failures }
-
-      let expectedTypeDescription = expectedType.debugDescription
-      let actualTypeDescription = actualType.debugDescription
-      guard expectedTypeDescription == actualTypeDescription else {
-        return [
-          ExpectationFailure.other(
-            failure:
-              "Resolved-type mismatch.\nExpected: \(expectedTypeDescription)\nBut got:  \(actualTypeDescription)"
-          )
-        ]
-      }
-      return []
-    }
-
-    /// `assertExpectation` forwards extensions here.
-    func _assertExtensionBinding(
-      extensionDecl: Attached<ExtensionDeclSyntax>,
-      expectedRawState: TestExtensionState,
-      markersToDefinitions: [String: ContextualizedAnnotation<Definition>],
-      syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
-      verbose: Bool
-    ) -> [ExpectationFailure] {
-      // Look up extended type if not already resolved
-      let actualRawState: ExtensionState
-      // Try to get already-resolved state
-      if let existingState = symbolTable.typeGraph.extensionsToState[extensionDecl] {
-        actualRawState = existingState
-      } else {
-        if verbose {
-          print("Extension `\(extensionDecl.node._memberlessDescription)` not already bound; initating binding.")
-        }
-
-        // Evaluate the extended type
-        var typeQualifier = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
-        let _: Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure> =
-          typeQualifier.bindExtension(extensionDecl)
-
-        // After binding, we should we have a state
-        guard let producedState = symbolTable.typeGraph.extensionsToState[extensionDecl] else {
-          let availableExtensions = symbolTable.typeGraph.extensionsToState.keys.map(\.node._memberlessDescription)
-          return [
-            ExpectationFailure.other(
-              failure:
-                "No extension state: Couldn't find extension state even after nominal-type resolution; available extensions are: \(availableExtensions)",
-            )
-          ]
-        }
-
-        actualRawState = producedState
-      }
-
-      // Map the types
-      var failures = [ExpectationFailure]()
-      /// Helper for verifying the nominals in the expected state
-      expectedRawState._visitTypes(
+      // Check the nested nominals
+      expectedState._visitTypes(
         visitResolved: { verifyExpectedNominalDescription($0._succinctDescription, failures: &failures) },
         visitName: { name in
           verifyExpectedNominalDescription(name.debugDescription, failures: &failures)
         }
       )
-      // Get the type name
-      actualRawState._visitTypes(
+      actualState._visitTypes(
         visitResolved: { verifyActualNominal($0, failures: &failures) },
-        // Extension state uses `GlobalTypeName` instead of `GlobalTypeRef`
-        // since the type graph already stores information about types in a
-        // different property. So, because `GlobalTypeName` doesn't store
-        // syntax information like `GlobalTypeRef`, we don't verify that
-        // the produced type is annotated. Of course, we still check if we
-        // get the right type result when comparing the descriptions.
+        // `GlobalTypeName` doesn't store syntax information like `GlobalTypeRef`,
+        // so we can't call `verifyActualNominal`. Of course, we still check if we
+        // get the right type result by comparing the descriptions below.
         visitName: { _ in }
       )
-      // Don't continue if we couldn't map the states
-      guard failures.isEmpty else { return failures }
 
-      // We use strings for the expected qualified name; just print that name
-      let expectedStateDescription = expectedRawState.debugDescription
-      let actualStateDescription = actualRawState.debugDescription
-      guard expectedStateDescription == actualStateDescription else {
-        return [
-          ExpectationFailure.other(
-            failure:
-              "Extension-state mismatch.\nExpected: \(expectedStateDescription)\nBut got:  \(actualStateDescription)"
-          )
-        ]
-      }
-      return []
+      // Describe the states
+      (expectedDescription, actualDescription) = (actualState.debugDescription, expectedState.debugDescription)
     }
+
+    // Give up if the expectation/actual results have undefined references
+    guard failures.isEmpty else { return failures }
+
+    // Check they're equal
+    guard expectedDescription == actualDescription else {
+      return [
+        .other(failure: "Resolved-type mismatch.\nExpected: \(expectedDescription)\nBut got:  \(actualDescription)")
+      ]
+    }
+
+    return []
   }
 }
 

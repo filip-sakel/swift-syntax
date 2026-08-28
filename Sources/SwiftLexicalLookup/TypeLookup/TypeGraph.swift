@@ -134,6 +134,12 @@ public typealias InvalidatedExtensions = [ExtensionState]
   invalidatedExtensions: InvalidatedExtensions
 )
 
+/// The state of an admitted extension: what type it resolved to and the
+/// dependencies for that resolution result.
+///
+/// Note: Extension state uses `GlobalTypeName` instead of `GlobalTypeRef`
+/// since the type graph already stores information about types in a
+/// different property.
 @_spi(_QualifiedLookupTests)
 public struct ExtensionState: Sendable {
   // Invariant: The extensions listed must be valid and successfully bound to a type in `extensionsToState`
