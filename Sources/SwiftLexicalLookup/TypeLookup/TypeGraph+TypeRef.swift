@@ -39,6 +39,11 @@ extension TypeGraph {
     public struct Component: Sendable, Hashable {
       private let qualifier: Qualifier
       private let name: String
+
+      fileprivate init(qualifier: TypeGraph.GlobalTypeName.Qualifier, name: String) {
+        self.qualifier = qualifier
+        self.name = name
+      }
     }
 
     /// The type's components.
@@ -109,50 +114,6 @@ extension TypeGraph.GlobalTypeName {
   }
 }
 
-// MARK: Name Deconstruction
-
-extension TypeGraph.GlobalTypeName {
-  /// Break this name up into a base name and a member, if not a top-level type.
-  var baseAndMember: (base: TypeGraph.GlobalTypeName, member: Component)? {
-    var baseComponents = components
-    // We have at least one component according to initializer precondition
-    let member = baseComponents.popLast()!
-    guard let base = TypeGraph.GlobalTypeName(_components: baseComponents) else {
-      return nil
-    }
-    return (base, member)
-  }
-}
-
-extension TypeGraph.GlobalTypeName {
-  /// Construct a `GlobalTypeName` whose `debugDescription` is the given string
-  /// for testing. Any use outside of testing is unchecked and may result in
-  /// crashes.
-  @_spi(_QualifiedLookupTests)
-  public init(_testName string: String, file: StaticString = #file, line: UInt = #line) {
-    // This is very hacky but basically an external module + a type name will
-    // print verbatim with a '::' between them. So, split the string at '::'
-    // (which every global name has), and use the first part as the qualifier
-    // and the tail as the "name".
-    guard let firstQualifierSeparatorRange = string.firstRange(of: "::") else {
-      fatalError("GlobalTypeName '\(string)' must have at least one qualifier separator '::'.", file: file, line: line)
-    }
-    let (firstQualifier, tail) = (
-      string[..<firstQualifierSeparatorRange.lowerBound].description,
-      string[firstQualifierSeparatorRange.upperBound...].description
-    )
-    self.init(component: Component(_testQualifier: Qualifier.external(moduleName: firstQualifier), name: tail))
-
-    // Ensure we round-trip correctly
-    precondition(
-      self.debugDescription == string,
-      "Unexpectedly parsed global type name '\(string)' wrong.",
-      file: file,
-      line: line
-    )
-  }
-}
-
 // MARK: Type Ref
 
 extension TypeGraph {
@@ -178,23 +139,10 @@ extension TypeGraph {
   /// `TypeGraph`. Contains the unique name and resolved main declaration.
   // FIXME: Make into an `enum`
   @_spi(_QualifiedLookupTests)
-  public struct TypeRef: Hashable, Sendable {
-    public enum Storage: Hashable, Sendable {
-      /// Local nominal types cannot be extended
-      case local(Attached<NominalTypeDeclSyntax>)
-      case global(TypeGraph.GlobalTypeRef)
-    }
-
-    public let storage: Storage
-
-    @_spi(_QualifiedLookupTests)
-    public init(globalReference: TypeGraph.GlobalTypeRef) {
-      storage = .global(globalReference)
-    }
-    @_spi(_QualifiedLookupTests)
-    public init(localNominalType: Attached<NominalTypeDeclSyntax>) {
-      storage = .local(localNominalType)
-    }
+  public enum TypeRef: Hashable, Sendable {
+    /// Local nominal types cannot be extended
+    case local(Attached<NominalTypeDeclSyntax>)
+    case global(TypeGraph.GlobalTypeRef)
 
     /// The main declaration of this nominal reference
     ///
@@ -203,7 +151,7 @@ extension TypeGraph {
     /// 2. To find generic parameters
     /// 3. Testing if the resovled type match the expected main decl
     public var mainDecl: Attached<NominalTypeDeclSyntax> {
-      switch storage {
+      switch self {
       case .global(let globalReference):
         return globalReference.mainDecl
       case .local(let localDecl):
@@ -310,7 +258,7 @@ extension TypeGraph.TypeRef: CustomDebugStringConvertible {
   /// E.g. 'struct LocalDecl {} (local)' or global
   /// '_(InternalFile.swift)::MyType.ExternalModule::OtherType (v0, structDecl)'
   public var debugDescription: String {
-    switch storage {
+    switch self {
     case .global(let globalReference):
       return globalReference.debugDescription
     case .local(let nominalDecl):
@@ -324,7 +272,7 @@ extension TypeGraph.TypeRef: CustomDebugStringConvertible {
   /// E.g. a local 'struct LocalDecl {}' or global
   /// '_(InternalFile.swift)::MyType.ExternalModule::OtherType'
   public var _succinctDescription: String {
-    switch storage {
+    switch self {
     case .global(let globalReference):
       return globalReference._succinctDescription
     case .local(let nominalDecl):
@@ -334,21 +282,47 @@ extension TypeGraph.TypeRef: CustomDebugStringConvertible {
 
   /// Extracts the global-type name if a global reference. Useful for testing.
   public var globalName: TypeGraph.GlobalTypeName? {
-    guard case .global(let globalReference) = storage else { return nil }
-
-    return globalReference.name
+    switch self {
+    case .global(let globalReference):
+      return globalReference.name
+    case .local:
+      return nil
+    }
   }
 }
 
 // MARK: Test Hooks
 
-extension TypeGraph.GlobalTypeName.Component {
+extension TypeGraph.GlobalTypeName {
+  /// Construct a `GlobalTypeName` whose `debugDescription` is the given string
+  /// for testing. Any use outside of testing is unchecked and may result in
+  /// crashes.
   @_spi(_QualifiedLookupTests)
-  public init(_testQualifier qualifier: TypeGraph.GlobalTypeName.Qualifier, name: String) {
-    self.init(
-      qualifier: qualifier,
-      name: name
+  public static func _mock(nameDescription string: String, file: StaticString = #file, line: UInt = #line) -> Self {
+    // This is very hacky but basically an external module + a type name will
+    // print verbatim with a '::' between them. So, split the string at '::'
+    // (which every global name has), and use the first part as the qualifier
+    // and the tail as the "name".
+    guard let firstQualifierSeparatorRange = string.firstRange(of: "::") else {
+      fatalError("GlobalTypeName '\(string)' must have at least one qualifier separator '::'.", file: file, line: line)
+    }
+    let (firstQualifier, tail) = (
+      string[..<firstQualifierSeparatorRange.lowerBound].description,
+      string[firstQualifierSeparatorRange.upperBound...].description
     )
+    let instance = Self(
+      component: Component(qualifier: Qualifier.external(moduleName: firstQualifier), name: tail)
+    )
+
+    // Ensure we round-trip correctly
+    precondition(
+      instance.debugDescription == string,
+      "Unexpectedly parsed global type name '\(string)' wrong.",
+      file: file,
+      line: line
+    )
+
+    return instance
   }
 }
 

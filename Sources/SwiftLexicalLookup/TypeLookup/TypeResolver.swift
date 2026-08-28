@@ -1174,7 +1174,7 @@ extension TypeResolver {
       }
       // That types needs to be global (can't extended local types)
       let nominalRef = nominalType.type
-      guard case .global(let globalNominalRef) = nominalRef.storage else {
+      guard case .global(let globalNominalRef) = nominalRef else {
         fatalError(
           "[SwiftLexicalLookup] Internal error: Extended type of top-level extension `\(extensionDecl._memberlessDescription)` unexpectedly evaluated to local type `\(nominalRef._succinctDescription)`."
         )
@@ -1219,7 +1219,7 @@ extension TypeResolver {
     //
     // For instance, there's no way to extend `A` in `func f() { struct A {} }`
     // since extensions may only be declared at the top level.
-    guard case .global(let qualifiedGlobalRef) = typeReference.type.storage else {
+    guard case .global(let qualifiedGlobalRef) = typeReference.type else {
       return .success(typeReference)
     }
 
@@ -1268,7 +1268,7 @@ extension TypeResolver {
     // After binding all extensions, get the new nominal type
     guard
       case .success(let finalizedNominalRef) = symbolTable.typeGraph.updateNominalTypeReference(
-        oldReference: TypeGraph.TypeRef(globalReference: qualifiedGlobalRef)
+        oldReference: TypeGraph.TypeRef.global(qualifiedGlobalRef)
       )
     else {
       // We checked the nominal type is registered at the start.

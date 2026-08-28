@@ -187,7 +187,7 @@ extension TypeResolver.Failure {
     // Actual maps
     case .cyclicalExtensionDependency(let cycle):
       // Wrap cycle's global-type refs into regular refs.
-      cycle._visitNominals({ visit(TypeGraph.TypeRef(globalReference: $0)) })
+      cycle._visitNominals({ visit(TypeGraph.TypeRef.global($0)) })
 
     case .cannotComposeNonClassOrProtocol(let type),
       .noTypeMember(_, let type),

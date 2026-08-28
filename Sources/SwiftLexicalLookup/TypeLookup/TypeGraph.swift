@@ -537,7 +537,7 @@ extension TypeGraph {
   > {
     // Get global nominal reference
     let baseTypeReference: TypeGraph.GlobalTypeRef
-    switch baseType.storage {
+    switch baseType {
     case .global(let globalReference):
       baseTypeReference = globalReference
     case .local(let nominalTypeDecl):
@@ -660,7 +660,7 @@ extension TypeGraph {
   ) -> Result<TypeRef, NominalRegistrationFailure> {
     // Local types don't have extensions, so we can just return a reference.
     guard isGlobal else {
-      return .success(TypeRef(localNominalType: mainDecl))
+      return .success(TypeRef.local(mainDecl))
     }
 
     let globalName = TypeGraph.GlobalTypeName(
@@ -704,7 +704,7 @@ extension TypeGraph {
 
     // Get the global reference, or return the local
     let globalParent: TypeGraph.GlobalTypeRef
-    switch baseType.storage {
+    switch baseType {
     case .global(let globalReference):
       globalParent = globalReference
     case .local(let parentDecl):
@@ -714,7 +714,7 @@ extension TypeGraph {
       )
 
       // We can't extend local types; just return a reference.
-      return .success(TypeRef(localNominalType: mainDecl))
+      return .success(TypeRef.local(mainDecl))
     }
 
     let globalName = globalParent.name.addingComponent(
@@ -797,7 +797,7 @@ extension TypeGraph {
     }
 
     return .success(
-      TypeRef(globalReference: TypeGraph.GlobalTypeRef(name: globalTypeName, nominal: type))
+      TypeRef.global(TypeGraph.GlobalTypeRef(name: globalTypeName, nominal: type))
     )
   }
 
@@ -808,7 +808,7 @@ extension TypeGraph {
   func updateNominalTypeReference(oldReference: TypeRef) -> Result<TypeRef, NominalTypeRefUpdateFailure> {
     // Extract global reference; return local reference as is
     let globalReference: TypeGraph.GlobalTypeRef
-    switch oldReference.storage {
+    switch oldReference {
     case .global(let reference):
       globalReference = reference
     case .local:
@@ -821,8 +821,8 @@ extension TypeGraph {
     }
 
     return .success(
-      TypeRef(
-        globalReference: TypeGraph.GlobalTypeRef(name: globalReference.name, nominal: typeState)
+      TypeRef.global(
+        TypeGraph.GlobalTypeRef(name: globalReference.name, nominal: typeState)
       )
     )
   }
@@ -1626,7 +1626,7 @@ extension TypeGraph {
   ///
   /// Useful for getting the final version of a nominal type after binding extensions.
   func getNominalTypeReference(name: GlobalTypeName) -> TypeRef? {
-    getGlobalNominalTypeReference(name: name).map(TypeRef.init(globalReference:))
+    getGlobalNominalTypeReference(name: name).map(TypeRef.global(_:))
   }
 }
 

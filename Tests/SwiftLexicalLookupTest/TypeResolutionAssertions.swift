@@ -386,7 +386,7 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
 @_spi(_QualifiedLookupTests)
 extension TypeGraph.GlobalTypeName: ExpressibleByStringLiteral {
   public init(stringLiteral string: String) {
-    self.init(_testName: string)
+    self = ._mock(nameDescription: string)
   }
 }
 
@@ -406,8 +406,8 @@ extension TypeResolver.ResolvedTypeSyntax: ExpressibleByStringLiteral {
   /// `_(MyFile.swift)::MyType`.
   public init(stringLiteral string: String) {
     self = ._mock(
-      typeRef: TypeGraph.TypeRef(
-        globalReference: TypeGraph.GlobalTypeRef(stringLiteral: string)
+      typeRef: TypeGraph.TypeRef.global(
+        TypeGraph.GlobalTypeRef(stringLiteral: string)
       ),
       unusedNominalDecl: "struct"
     )
@@ -417,7 +417,7 @@ extension TypeResolver.ResolvedTypeSyntax: ExpressibleByStringLiteral {
   /// e.g., `struct A {}`.
   static func local(_ nominalDecl: Attached<NominalTypeDeclSyntax>) -> TypeResolver.ResolvedTypeSyntax {
     TypeResolver.ResolvedTypeSyntax._mock(
-      typeRef: TypeGraph.TypeRef(localNominalType: nominalDecl),
+      typeRef: TypeGraph.TypeRef.local(nominalDecl),
       unusedNominalDecl: "struct"
     )
   }

@@ -27,7 +27,7 @@ extension TypeResolver {
   }
 }
 
-// MARK: GlobalResolvedTypeSyntax
+// MARK: ResolvedTypeSyntax
 
 extension TypeResolver {
   /// A `NominalTypeRef` and the syntax that was resolved.
@@ -46,26 +46,8 @@ extension TypeResolver.ResolvedTypeSyntax {
   /// Map from a `GlobalNominalTypeRef` to a `NominalTypeRef`
   init(global: TypeResolver.GloballyResolvedTypeSyntax) {
     self.init(
-      type: TypeGraph.TypeRef(globalReference: global.type),
+      type: TypeGraph.TypeRef.global(global.type),
       syntax: global.syntax
-    )
-  }
-}
-
-// MARK: ResolvedTypeSyntax + Test Hook
-
-extension TypeResolver.ResolvedTypeSyntax {
-  /// Creates a mock `ResolvedTypeSyntax` where `unusedNominalDecl` can be any
-  /// `Attached<NominalTypeDeclSyntax>` instance and isn't used to produce a
-  /// description.
-  @_spi(_QualifiedLookupTests)
-  public static func _mock(
-    typeRef: TypeGraph.TypeRef,
-    unusedNominalDecl: Attached<NominalTypeDeclSyntax>
-  ) -> TypeResolver.ResolvedTypeSyntax {
-    TypeResolver.ResolvedTypeSyntax(
-      type: typeRef,
-      syntax: Attached<TypeLikeSyntax>(unusedNominalDecl)
     )
   }
 }
@@ -130,5 +112,23 @@ extension TypeResolver.TypeResult: CustomDebugStringConvertible {
     case .failure(let failure):
       return ".failure(\(failure.debugDescription))"
     }
+  }
+}
+
+// MARK: ResolvedTypeSyntax + Test Hook
+
+extension TypeResolver.ResolvedTypeSyntax {
+  /// Creates a mock `ResolvedTypeSyntax` where `unusedNominalDecl` can be any
+  /// `Attached<NominalTypeDeclSyntax>` instance and isn't used to produce a
+  /// description.
+  @_spi(_QualifiedLookupTests)
+  public static func _mock(
+    typeRef: TypeGraph.TypeRef,
+    unusedNominalDecl: Attached<NominalTypeDeclSyntax>
+  ) -> TypeResolver.ResolvedTypeSyntax {
+    TypeResolver.ResolvedTypeSyntax(
+      type: typeRef,
+      syntax: Attached<TypeLikeSyntax>(unusedNominalDecl)
+    )
   }
 }
