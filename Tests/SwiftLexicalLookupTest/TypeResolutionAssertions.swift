@@ -179,6 +179,10 @@ extension TypeResolutionMatcher: LexicalMatcher {
     verbose: Bool
   ) -> [ExpectationFailure] {
     func verifyExpectedNominal(_ nominalType: TypeGraph.TypeRef, failures: inout [ExpectationFailure]) {
+      // Ensure we're referencing a marked nominal-type name
+      if markersToDefinitions[nominalType._succinctDescription] == nil {
+        failures.append(ExpectationFailure.referencesUndefinedMarker(nominalType._succinctDescription))
+      }
     }
     func verifyActualNominal(_ nominalType: TypeGraph.TypeRef, failures: inout [ExpectationFailure]) {
       // Ensure we've marked syntax with that name
@@ -190,11 +194,11 @@ extension TypeResolutionMatcher: LexicalMatcher {
 
       // Ensure the actual name matches the marked name
       let markedName = definition.annotation.nominalType.debugDescription
-      guard nominalType.debugDescription == markedName else {
+      guard nominalType._succinctDescription == markedName else {
         failures.append(
           ExpectationFailure.other(
             failure:
-              "Expected nominal-type decl `\(mainDecl._memberlessDescription)` to be named '\(markedName)' but instead got name '\(nominalType.debugDescription)'."
+              "Expected nominal-type decl `\(mainDecl._memberlessDescription)` to be named '\(markedName)' but instead got name '\(nominalType._succinctDescription)'."
           )
         )
         return
@@ -233,169 +237,159 @@ extension TypeResolutionMatcher: LexicalMatcher {
         verbose: verbose
       )
     }
-  }
 
-  /// `assertExpectation` forwards extensions here.
-  private func _assertExtensionBinding(
-    extensionDecl: Attached<ExtensionDeclSyntax>,
-    expectedRawState: TestExtensionState,
-    markersToDefinitions: [String: ContextualizedAnnotation<Definition>],
-    syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
-    verbose: Bool
-  ) -> [ExpectationFailure] {
-    // Look up extended type if not already resolved
-    let actualRawState: ExtensionState
-    // Try to get already-resolved state
-    if let existingState = symbolTable.typeGraph.extensionsToState[extensionDecl] {
-      actualRawState = existingState
-    } else {
-      if verbose {
-        print("Extension `\(extensionDecl.node._memberlessDescription)` not already bound; initating binding.")
+    /// `assertExpectation` forwards extensions here.
+    func _assertExtensionBinding(
+      extensionDecl: Attached<ExtensionDeclSyntax>,
+      expectedRawState: TestExtensionState,
+      markersToDefinitions: [String: ContextualizedAnnotation<Definition>],
+      syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
+      verbose: Bool
+    ) -> [ExpectationFailure] {
+      // Look up extended type if not already resolved
+      let actualRawState: ExtensionState
+      // Try to get already-resolved state
+      if let existingState = symbolTable.typeGraph.extensionsToState[extensionDecl] {
+        actualRawState = existingState
+      } else {
+        if verbose {
+          print("Extension `\(extensionDecl.node._memberlessDescription)` not already bound; initating binding.")
+        }
+
+        // Evaluate the extended type
+        var typeQualifier = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
+        let _: Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure> =
+          typeQualifier.bindExtension(extensionDecl)
+
+        // After binding, we should we have a state
+        guard let producedState = symbolTable.typeGraph.extensionsToState[extensionDecl] else {
+          let availableExtensions = symbolTable.typeGraph.extensionsToState.keys.map(\.node._memberlessDescription)
+          return [
+            ExpectationFailure.other(
+              failure:
+                "No extension state: Couldn't find extension state even after nominal-type resolution; available extensions are: \(availableExtensions)",
+            )
+          ]
+        }
+
+        actualRawState = producedState
       }
 
-      // Evaluate the extended type
-      var typeQualifier = TypeResolver(symbolTable: symbolTable, _verbose: verbose)
-      let _: Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure> =
-        typeQualifier.bindExtension(extensionDecl)
+      // Map the types
+      var failures = [ExpectationFailure]()
+      /// Helper for mapping the expected state
+      expectedRawState._visitTypes(
+        visitResolved: {
+          nominalType in
+          // Ensure we're referencing a marked nominal-type name
+          if markersToDefinitions[nominalType.debugDescription] == nil {
+            failures.append(ExpectationFailure.referencesUndefinedMarker(nominalType.debugDescription))
+          }
+        },
+        visitName: { name in
+          if markersToDefinitions[name.debugDescription] == nil {
+            failures.append(ExpectationFailure.referencesUndefinedMarker(name.debugDescription))
+          }
+        }
+      )
 
-      // After binding, we should we have a state
-      guard let producedState = symbolTable.typeGraph.extensionsToState[extensionDecl] else {
-        let availableExtensions = symbolTable.typeGraph.extensionsToState.keys.map(\.node._memberlessDescription)
+      // Get the type name
+      actualRawState._visitTypes(
+        visitResolved: { nominalType in
+          // Ensure we've marked syntax with that name
+          let mainDecl = nominalType.type.mainDecl.node
+          guard let definition = syntaxToDefinitions[mainDecl] else {
+            failures.append(.resultReferencesUnmarkedSyntax(syntaxDescription: mainDecl._memberlessDescription))
+            return
+          }
+
+          // Ensure the actual name matches the marked name
+          let markedName = definition.annotation.nominalType.debugDescription
+          guard nominalType.debugDescription == markedName else {
+            failures.append(
+              ExpectationFailure.other(
+                failure:
+                  "Expected nominal-type decl `\(mainDecl._memberlessDescription)` to be named '\(markedName)' but instead got name '\(nominalType.debugDescription)'."
+              )
+            )
+            return
+          }
+        },
+        visitName: { _ in }
+      )
+      // Don't continue if we couldn't map the states
+      guard failures.isEmpty else { return failures }
+
+      // We use strings for the expected qualified name; just print that name
+      let expectedStateDescription = expectedRawState.debugDescription
+      let actualStateDescription = actualRawState.debugDescription
+      guard expectedStateDescription == actualStateDescription else {
         return [
           ExpectationFailure.other(
             failure:
-              "No extension state: Couldn't find extension state even after nominal-type resolution; available extensions are: \(availableExtensions)",
+              "Extension-state mismatch.\nExpected: \(expectedStateDescription)\nBut got:  \(actualStateDescription)"
           )
         ]
       }
-
-      actualRawState = producedState
+      return []
     }
 
-    // Map the types
-    var failures = [ExpectationFailure]()
-    /// Helper for mapping the expected state
-    expectedRawState._visitTypes(
-      visitResolved: {
-        nominalType in
-        // Ensure we're referencing a marked nominal-type name
-        if markersToDefinitions[nominalType.debugDescription] == nil {
-          failures.append(ExpectationFailure.referencesUndefinedMarker(nominalType.debugDescription))
-        }
-      },
-      visitName: { name in
-        if markersToDefinitions[name.debugDescription] == nil {
-          failures.append(ExpectationFailure.referencesUndefinedMarker(name.debugDescription))
-        }
+    /// `assertExpectation` forwards type syntax here.
+    func _assertTypeSyntax(
+      typeSyntax: Attached<TypeSyntax>,
+      expectedType: TestResolvedType,
+      markersToDefinitions: [String: ContextualizedAnnotation<Definition>],
+      syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
+      verbose: Bool
+    ) -> [ExpectationFailure] {
+      // Print target syntax (to show the syntax kinds)
+      if verbose {
+        print("Target syntax parsed as:\n\(typeSyntax.node.debugDescription)\n")
       }
-    )
 
-    // Get the type name
-    actualRawState._visitTypes(
-      visitResolved: { nominalType in
-        // Ensure we've marked syntax with that name
-        let mainDecl = nominalType.type.mainDecl.node
-        guard let definition = syntaxToDefinitions[mainDecl] else {
-          failures.append(.resultReferencesUnmarkedSyntax(syntaxDescription: mainDecl._memberlessDescription))
-          return
-        }
+      // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
+      let actualType: TypeResolver.TypeResult = symbolTable.resolveSyntax(
+        typeSyntax: typeSyntax
+      )
 
-        // Ensure the actual name matches the marked name
-        let markedName = definition.annotation.nominalType.debugDescription
-        guard nominalType.debugDescription == markedName else {
-          failures.append(
-            ExpectationFailure.other(
-              failure:
-                "Expected nominal-type decl `\(mainDecl._memberlessDescription)` to be named '\(markedName)' but instead got name '\(nominalType.debugDescription)'."
+      // Assert output
+      var failures = [ExpectationFailure]()
+      func visitFailure(failure: TypeResolver.Failure) {
+        failure._visitTypes(
+          visitResolved: { verifyExpectedNominal($0.type, failures: &failures) },
+          visitName: {
+            verifyExpectedNominal(
+              TypeGraph.TypeRef(globalReference: TypeGraph.GlobalTypeRef(name: $0, mainDecl: "struct", _version: -1)),
+              failures: &failures
             )
-          )
-          return
-        }
-      },
-      visitName: { _ in }
-    )
-    // Don't continue if we couldn't map the states
-    guard failures.isEmpty else { return failures }
-
-    // We use strings for the expected qualified name; just print that name
-    let expectedStateDescription = expectedRawState.debugDescription
-    let actualStateDescription = actualRawState.debugDescription
-    guard expectedStateDescription == actualStateDescription else {
-      return [
-        ExpectationFailure.other(
-          failure:
-            "Extension-state mismatch.\nExpected: \(expectedStateDescription)\nBut got:  \(actualStateDescription)"
+          }
         )
-      ]
-    }
-    return []
-  }
-
-  /// `assertExpectation` forwards type syntax here.
-  private func _assertTypeSyntax(
-    typeSyntax: Attached<TypeSyntax>,
-    expectedType: TestResolvedType,
-    markersToDefinitions: [String: ContextualizedAnnotation<Definition>],
-    syntaxToDefinitions: [NominalTypeDeclSyntax: ContextualizedAnnotation<Definition>],
-    verbose: Bool
-  ) -> [ExpectationFailure] {
-    // Print target syntax (to show the syntax kinds)
-    if verbose {
-      print("Target syntax parsed as:\n\(typeSyntax.node.debugDescription)\n")
-    }
-
-    // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
-    let actualType: TypeResolver.TypeResult = symbolTable.resolveSyntax(
-      typeSyntax: typeSyntax
-    )
-
-    // Assert output
-    var failures = [ExpectationFailure]()
-    let expectedTypeDescription: String = expectedType._visitNominals({
-      nominalType -> TypeResolver.ResolvedTypeSyntax in
-      // Ensure we're referencing a marked nominal-type name
-      if markersToDefinitions[nominalType.debugDescription] == nil {
-        failures.append(ExpectationFailure.referencesUndefinedMarker(nominalType.debugDescription))
       }
-      return nominalType
-    }).debugDescription
-    let actualTypeDescription: String = actualType._visitNominals({ nominalType -> TypeResolver.ResolvedTypeSyntax in
-      // Check
-      assertions: do {
-        // Ensure we've marked syntax with that name
-        let mainDecl = nominalType.type.mainDecl.node
-        guard let definition = syntaxToDefinitions[mainDecl] else {
-          failures.append(.resultReferencesUnmarkedSyntax(syntaxDescription: mainDecl._memberlessDescription))
-          break assertions
-        }
+      expectedType._visitTypes(
+        visitResolved: { nominalType in
+          verifyExpectedNominal(nominalType.type, failures: &failures)
+        },
+        visitFailure: visitFailure(failure:)
+      )
+      actualType._visitTypes(
+        visitResolved: { verifyActualNominal($0.type, failures: &failures) },
+        visitFailure: visitFailure(failure:)
+      )
+      // Give up if markers are undefined (i.e. we already have failures)
+      guard failures.isEmpty else { return failures }
 
-        // Ensure the actual name matches the marked name
-        let markedName = definition.annotation.nominalType.debugDescription
-        guard nominalType.debugDescription == markedName else {
-          failures.append(
-            ExpectationFailure.other(
-              failure:
-                "Expected nominal-type decl `\(mainDecl._memberlessDescription)` to be named '\(markedName)' but instead got name '\(nominalType.debugDescription)'."
-            )
+      let expectedTypeDescription = expectedType.debugDescription
+      let actualTypeDescription = actualType.debugDescription
+      guard expectedTypeDescription == actualTypeDescription else {
+        return [
+          ExpectationFailure.other(
+            failure:
+              "Resolved-type mismatch.\nExpected: \(expectedTypeDescription)\nBut got:  \(actualTypeDescription)"
           )
-          break assertions
-        }
+        ]
       }
-
-      return nominalType
-    }).debugDescription
-    // Give up if markers are undefined (i.e. we already have failures)
-    guard failures.isEmpty else { return failures }
-
-    guard expectedTypeDescription == actualTypeDescription else {
-      return [
-        ExpectationFailure.other(
-          failure:
-            "Resolved-type mismatch.\nExpected: \(expectedTypeDescription)\nBut got:  \(actualTypeDescription)"
-        )
-      ]
+      return []
     }
-    return []
   }
 }
 

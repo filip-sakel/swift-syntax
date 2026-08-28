@@ -783,7 +783,10 @@ final class TypeResolutionTests: XCTestCase {
       ))
       extension T_1.Prev { struct T_3 {} }
 
-      extension T_1 { struct T_0 {} }
+      extension T_1 {
+        \(name: "_(File.swift)::T_1._(File.swift)::T_0")
+        struct T_0 {}
+      }
       """
     ])
   }

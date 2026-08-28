@@ -187,7 +187,8 @@ extension TypeGraph {
     public let storage: Storage
 
     /// Important: Only `TypeGraph` should use this initializer.
-    init(globalReference: TypeGraph.GlobalTypeRef) {
+    @_spi(_QualifiedLookupTests)
+    public init(globalReference: TypeGraph.GlobalTypeRef) {
       storage = .global(globalReference)
     }
     /// Important: Only `TypeGraph` should use this initializer.
