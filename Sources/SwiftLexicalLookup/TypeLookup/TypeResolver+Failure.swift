@@ -110,9 +110,6 @@ extension TypeResolver {
     /// might be nested within an extension binding request, but it may itself
     /// make an extension-binding request. In that case, the nested type resolution
     /// fails and we mark the dependency. *Users should not see this error.*
-    ///
-    /// TODO: Find use case where this actually happens; currently, only `bindExtension`
-    /// emits this error.
     case extensionNotBoundYet
 
     /// A nested failure is a failure that occurs due to an underlying
@@ -167,8 +164,10 @@ extension TypeResolver {
     indirect case invalidBaseType(Failure)
 
     /// Type members (obtained through qualified lookup) had errors
-    /// TODO: Explain why we have multiple types in more detail
     ///
+    /// Note: If the base type of some member-type syntax is a composition,
+    /// each class/protocol in the composition has its own failure (or
+    /// none at all). For instance, consider this code:
     /// E.g.
     /// ```swift
     /// protocol A { typealias T = Undefined }
@@ -176,9 +175,21 @@ extension TypeResolver {
     ///
     /// func f(_: (A & B).T)
     /// ```
+    /// Here, `A.T` is invalid because `Undefined` isn't in scope, whereas
+    /// `B.T` produces a failure because `T` resolves to a generic parameter
+    /// (giving `.genericParameterOrAssociatedType`).
     case invalidMembers([(TypeLikeSyntax, Failure)])
 
-    // TODO: Add docstring
+    // There are errors in the compositions constituent type syntaxes.
+    //
+    // E.g.
+    // ```swift
+    // struct A {}
+    // let _: A & B
+    // ```
+    // Here, both child type syntaxes, `A` and `B`, produce errors:
+    // `A` because it resolves to a struct, and `B` because it's not
+    // in scope.
     case invalidComposition([(TypeSyntax, Failure)])
   }
 }
