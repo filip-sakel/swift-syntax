@@ -177,7 +177,7 @@ extension TypeResolver {
       // Wrap the base type/failure and return
       switch baseTypeResult {
       case .failure(let baseFailure):
-        return .failure(Failure.invalidBaseType(baseFailure))
+        return .failure(Failure.nested(.invalidBaseType(baseFailure)))
       default:
         return TypeResult.metatype(base: baseTypeResult)
       }
@@ -294,7 +294,7 @@ extension TypeResolver {
 
     // Stop even if we only have one failure
     guard failures.isEmpty else {
-      return .failure(Failure.invalidComposition(failures))
+      return .failure(Failure.nested(.invalidComposition(failures)))
     }
 
     // We get `anyType` only when all the child types are `any`,
@@ -467,7 +467,7 @@ extension TypeResolver {
             case .success(let type):
               baseType = type
             case .failure(let failure):
-              return Result.failure(Failure.invalidBaseType(failure))
+              return Result.failure(Failure.nested(.invalidBaseType(failure)))
             }
 
             // Get first matching generic parameter
@@ -510,7 +510,7 @@ extension TypeResolver {
         return .failure(failure)
       // Otherwise, wrap in a '.invalidBaseType'
       case (.failure(let failure), true):
-        return .failure(Failure.invalidBaseType(failure))
+        return .failure(Failure.nested(.invalidBaseType(failure)))
       // Forward success
       case (let result, _):
         enclosingType = result
@@ -777,7 +777,7 @@ extension TypeResolver {
       case .success(let success):
         baseType = success
       case .failure(let failure):
-        return .failure(Failure.invalidBaseType(failure))
+        return .failure(Failure.nested(.invalidBaseType(failure)))
       }
 
       // Find this nominal declaration through qualified lookup
@@ -786,7 +786,7 @@ extension TypeResolver {
       case .success(let success):
         resolvedBase = success
       case .failure(let failure):
-        return .failure(Failure.invalidBaseType(failure))
+        return .failure(Failure.nested(.invalidBaseType(failure)))
       }
       let memberResult:
         Result<(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)?, Failure>
@@ -912,7 +912,7 @@ extension TypeResolver {
         }
         // Wrapping the failure indicates the type alias itself isn't the
         // problem; the referenced type is the problem (diagnosed separately).
-        return .failure(Failure.invalidAliasedType(failure))
+        return .failure(Failure.nested(.invalidAliasedType(failure)))
       case let success:
         return success
       }
@@ -1094,7 +1094,7 @@ extension TypeResolver {
     //   let a: Composition.IntAlias = "" // ❌ Cannot value of type 'String' to specified type 'Int'
     guard failures.isEmpty else {
       return .failure(
-        Failure.invalidMembers(failures.map({ (typeSyntax, failure) in (typeSyntax.node, failure) }))
+        Failure.nested(.invalidMembers(failures.map({ (typeSyntax, failure) in (typeSyntax.node, failure) })))
       )
     }
 

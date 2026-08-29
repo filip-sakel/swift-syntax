@@ -51,13 +51,6 @@ extension TypeResolver {
     /// }
     /// ```
     case extensionNotAtFileScope(extensionDecl: ExtensionDeclSyntax)
-    /// Child has error, so we can't qualify this type but we can't offer a useful diagnostic either.
-    ///
-    /// E.g.
-    ///   typealias A = Encodable & Int.Type // ❌ error: non-protocol, non-class type 'Int.Type' cannot be used within a protocol-constrained type
-    ///   func f(_: A) {} // No diagnostic here
-    indirect case invalidAliasedType(Self)
-    case invalidComposition([(TypeSyntax, Self)])
     /// An error in partial-type resolution where further type-resolution
     /// steps don't make sense. For instance, we can't parse a wildcard type
     /// or an identifier type syntax with an invalid identifier.
@@ -65,49 +58,6 @@ extension TypeResolver {
 
     /// We defer generic parameters/associated types to the type checker.
     case genericParameterOrAssociatedType
-
-    /// Type members (obtained through qualified lookup) had errors
-    ///
-    /// E.g.
-    /// ```swift
-    /// protocol A { typealias T = Undefined }
-    /// class B<Generic> { typealias T = Generic }
-    ///
-    /// func f(_: (A & B).T)
-    /// ```
-    case invalidMembers([(TypeLikeSyntax, Self)])
-
-    /// The base type which we need to derive a qualified name is invalid.
-    ///
-    /// Causes:
-    /// 1. Nested in invalid nominal type declaration, e.g.:
-    ///    ```swift
-    ///    struct { // ❌ error: expected identifier in struct declaration
-    ///      typealias A = Int
-    ///      func f(a: A) {
-    ///        let n: Int = a + "" // ✅ Compiler doesn't diagnose
-    ///      }
-    ///    }
-    ///    ```
-    ///    Note that if we use an invalid name like `struct 555`, the compiler
-    ///    will interpret the name as the backtick-escaped '`555`' to offer
-    ///    better diagnostics.
-    /// 2. Nested in extension whose type doesn't resolve to a nominal type
-    ///
-    ///    This failure happens when unqualified lookup wants to return the
-    ///    extended type or a member/generic parameter of the extended type.
-    ///    E.g.:
-    ///
-    ///    ```swift
-    ///    extension UndefinedType { // ❌ error: cannot find 'UndefinedType' in scope
-    ///      func f(a: AlsoUndefined) {} // ✅ Compiler doesn't diagnose
-    ///    }
-    ///    extension UndefinedType {
-    ///      typealias T = Int
-    ///      func f(a: T) -> Int {} // ❌ error: cannot find type 'T' in scope
-    ///    }
-    ///    ```
-    indirect case invalidBaseType(Self)
 
     /// Name lookup found multiple type redeclarations so references to that
     /// type name are ambiguous; not necessarily an error, we just defer to
@@ -164,6 +114,72 @@ extension TypeResolver {
     /// TODO: Find use case where this actually happens; currently, only `bindExtension`
     /// emits this error.
     case extensionNotBoundYet
+
+    /// A nested failure is a failure that occurs due to an underlying
+    /// type-resolution error that this syntax didn't generate itself.
+    ///
+    /// E.g., we reference a valid type alias, which references an nonexistent
+    /// type.
+    case nested(NestedFailure)
+  }
+}
+
+extension TypeResolver {
+  @_spi(_QualifiedLookupTests)
+  public enum NestedFailure: Error {
+    /// Child has error, so we can't qualify this type but we can't offer a useful diagnostic either.
+    ///
+    /// E.g.
+    ///   typealias A = Encodable & Int.Type // ❌ error: non-protocol, non-class type 'Int.Type' cannot be used within a protocol-constrained type
+    ///   func f(_: A) {} // No diagnostic here
+    indirect case invalidAliasedType(Failure)
+
+    /// The base type which we need to derive a qualified name is invalid.
+    ///
+    /// Causes:
+    /// 1. Nested in invalid nominal type declaration, e.g.:
+    ///    ```swift
+    ///    struct { // ❌ error: expected identifier in struct declaration
+    ///      typealias A = Int
+    ///      func f(a: A) {
+    ///        let n: Int = a + "" // ✅ Compiler doesn't diagnose
+    ///      }
+    ///    }
+    ///    ```
+    ///    Note that if we use an invalid name like `struct 555`, the compiler
+    ///    will interpret the name as the backtick-escaped '`555`' to offer
+    ///    better diagnostics.
+    /// 2. Nested in extension whose type doesn't resolve to a nominal type
+    ///
+    ///    This failure happens when unqualified lookup wants to return the
+    ///    extended type or a member/generic parameter of the extended type.
+    ///    E.g.:
+    ///
+    ///    ```swift
+    ///    extension UndefinedType { // ❌ error: cannot find 'UndefinedType' in scope
+    ///      func f(a: AlsoUndefined) {} // ✅ Compiler doesn't diagnose
+    ///    }
+    ///    extension UndefinedType {
+    ///      typealias T = Int
+    ///      func f(a: T) -> Int {} // ❌ error: cannot find type 'T' in scope
+    ///    }
+    ///    ```
+    indirect case invalidBaseType(Failure)
+
+    /// Type members (obtained through qualified lookup) had errors
+    /// TODO: Explain why we have multiple types in more detail
+    ///
+    /// E.g.
+    /// ```swift
+    /// protocol A { typealias T = Undefined }
+    /// class B<Generic> { typealias T = Generic }
+    ///
+    /// func f(_: (A & B).T)
+    /// ```
+    case invalidMembers([(TypeLikeSyntax, Failure)])
+
+    // TODO: Add docstring
+    case invalidComposition([(TypeSyntax, Failure)])
   }
 }
 
@@ -187,13 +203,13 @@ extension TypeResolver.Failure {
       .cannotExtendNonNominal(let type):
       type._visitNominals(visit)
 
-    case .invalidAliasedType(let baseFailure), .invalidBaseType(let baseFailure):
+    case .nested(.invalidAliasedType(let baseFailure)), .nested(.invalidBaseType(let baseFailure)):
       baseFailure._visitNominals(visit)
-    case .invalidComposition(let invalidChildren):
+    case .nested(.invalidComposition(let invalidChildren)):
       invalidChildren.forEach({ _, nestedFailure in
         nestedFailure._visitNominals(visit)
       })
-    case .invalidMembers(let invalidMembers):
+    case .nested(.invalidMembers(let invalidMembers)):
       invalidMembers.forEach({ _, nestedFailure in
         nestedFailure._visitNominals(visit)
       })
@@ -268,16 +284,45 @@ extension TypeResolver.ExtensionCycle: CustomDebugStringConvertible {
   }
 }
 
+extension TypeResolver.NestedFailure: CustomDebugStringConvertible {
+  public var debugDescription: String {
+    func describeNested(_ nestedFailure: TypeResolver.Failure) -> String {
+      nestedFailure.debugDescription.replacing("\n", with: "\n  ")
+    }
+
+    switch self {
+    case .invalidAliasedType(let nestedFailure):
+      return """
+        .invalidAliasedType(
+          \(describeNested(nestedFailure))
+        )
+        """
+    case .invalidComposition(let invalidChildren):
+      let invalidChildrenDescription = invalidChildren.map({ (childSyntax, childFailure) in
+        return "  \(childSyntax.trimmedDescription): \(describeNested(childFailure))"
+      }).joined(separator: ",\n")
+      return ".invalidComposition([\(invalidChildrenDescription)])"
+    case .invalidMembers(let invalidMembers):
+      let invalidMembersDescription = invalidMembers.map({ (childSyntax, memberFailure) in
+        return "  \(childSyntax.trimmedDescription): \(describeNested(memberFailure))"
+      }).joined(separator: ",\n")
+      return ".invalidMembers([\(invalidMembersDescription)])"
+    case .invalidBaseType(let baseFailure):
+      return """
+        .invalidBaseType(
+          \(describeNested(baseFailure))
+        )
+        """
+    }
+  }
+}
+
 extension TypeResolver.Failure: CustomDebugStringConvertible {
   /// Debug description
   ///
   /// Namely, for syntax nodes we use `.trimmedDescription` and for `ResolvedNominalTypeReference`
   /// we simply compare the qualified type name description.
   public var debugDescription: String {
-    func describeNested(_ nestedFailure: Self) -> String {
-      nestedFailure.debugDescription.replacing("\n", with: "\n  ")
-    }
-
     switch self {
     case .invalidNameToken(let nameToken):
       return ".invalidNameToken(\(nameToken.trimmedDescription))"
@@ -292,32 +337,10 @@ extension TypeResolver.Failure: CustomDebugStringConvertible {
       return ".cannotExtendNonNominal(nonnominal: \(nonnominal.debugDescription))"
     case .extensionNotAtFileScope(let extensionDecl):
       return ".extensionNotAtFileScope(extensionDecl: `\(extensionDecl._memberlessDescription)`)"
-    case .invalidAliasedType(let nestedFailure):
-      return """
-        .invalidAliasedType(
-          \(describeNested(nestedFailure))
-        )
-        """
-    case .invalidComposition(let invalidChildren):
-      let invalidChildrenDescription = invalidChildren.map({ (childSyntax, childFailure) in
-        return "  \(childSyntax.trimmedDescription): \(describeNested(childFailure))"
-      }).joined(separator: ",\n")
-      return ".invalidComposition([\(invalidChildrenDescription)])"
     case .partialTypeResolutionFailure(let partialResolutionFailure):
       return ".partialTypeResolutionFailure(\(partialResolutionFailure.debugDescription))"
     case .genericParameterOrAssociatedType:
       return ".genericParameterOrAssociatedType"
-    case .invalidMembers(let invalidMembers):
-      let invalidMembersDescription = invalidMembers.map({ (childSyntax, memberFailure) in
-        return "  \(childSyntax.trimmedDescription): \(describeNested(memberFailure))"
-      }).joined(separator: ",\n")
-      return ".invalidMembers([\(invalidMembersDescription)])"
-    case .invalidBaseType(let baseFailure):
-      return """
-        .invalidBaseType(
-          \(describeNested(baseFailure))
-        )
-        """
     case .ambiguousTypeDecl(let ambiguousDecls):
       let ambiguousDeclsDescription = ambiguousDecls.map(\.trimmedDescription).joined(separator: ", ")
       return ".ambiguousTypeDecl([\(ambiguousDeclsDescription)])"
@@ -331,11 +354,41 @@ extension TypeResolver.Failure: CustomDebugStringConvertible {
       return ".cyclicalExtensionDependencies(\(cycle.debugDescription))"
     case .extensionNotBoundYet:
       return ".extensionNotBoundYet"
+    case .nested(let nestedFailure):
+      return ".nested(\(nestedFailure.debugDescription))"
     }
   }
 }
 
 // MARK: Nested-Cycle Detection
+
+extension TypeResolver.NestedFailure {
+  var nestedCycle: [TypeSyntax]? {
+    switch self {
+    // Simple nesting
+    case .invalidAliasedType(.cyclicalTypeReference(let nestedCycle)),
+      .invalidBaseType(.cyclicalTypeReference(let nestedCycle)):
+      return nestedCycle
+
+    // If the above case don't directly contain a cycle
+    case .invalidAliasedType(_), .invalidBaseType(_):
+      return nil
+    // Only return a nested cycle if we have exactly one result.
+    case .invalidMembers(let nestedFailures):
+      guard
+        case (_, TypeResolver.Failure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
+        nestedFailures.count == 1
+      else { return nil }
+      return nestedCycle
+    case .invalidComposition(let nestedFailures):
+      guard
+        case (_, TypeResolver.Failure.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
+        nestedFailures.count == 1
+      else { return nil }
+      return nestedCycle
+    }
+  }
+}
 
 extension TypeResolver.Failure {
   /// Tries to pull out a ``.cyclicalTypeReference`` from this failure at depth
@@ -344,36 +397,17 @@ extension TypeResolver.Failure {
     switch self {
     case .cyclicalTypeReference(let cycle):
       return cycle
-
-    // Simple nesting
-    case .invalidAliasedType(.cyclicalTypeReference(let nestedCycle)),
-      .invalidBaseType(.cyclicalTypeReference(let nestedCycle)):
-      return nestedCycle
-
-    // Only return a nested cycle if we have exactly one result.
-    case .invalidMembers(let nestedFailures):
-      guard
-        case (_, Self.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
-        nestedFailures.count == 1
-      else { return nil }
-      return nestedCycle
-    case .invalidComposition(let nestedFailures):
-      guard
-        case (_, Self.cyclicalTypeReference(let nestedCycle))? = nestedFailures.first,
-        nestedFailures.count == 1
-      else { return nil }
-      return nestedCycle
+    case .nested(let nestedFailure):
+      return nestedFailure.nestedCycle
 
     // No nested ``TypeQualifierFailure`` => nil
-    case .invalidNameToken(_), .noTypeInScope, .cannotComposeNonClassOrProtocol(_),
-      .noTypeMember(member: _, in: _), .cannotExtendNonNominal(nonnominal: _),
-      .extensionNotAtFileScope(extensionDecl: _), .partialTypeResolutionFailure(_),
-      .genericParameterOrAssociatedType, .ambiguousTypeDecl(_),
+    case .invalidNameToken, .noTypeInScope, .cannotComposeNonClassOrProtocol,
+      .noTypeMember, .cannotExtendNonNominal,
+      .extensionNotAtFileScope, .partialTypeResolutionFailure,
+      .genericParameterOrAssociatedType, .ambiguousTypeDecl,
       .syntaxNotInSymbolTable, .syntaxInDisabledRegion, .extensionNotBoundYet,
       // Extension cycles are distinct
-      .cyclicalExtensionDependency(_),
-      // If the above case don't directly contain a cycle
-      .invalidAliasedType(_), .invalidBaseType(_):
+      .cyclicalExtensionDependency:
       return nil
     }
   }

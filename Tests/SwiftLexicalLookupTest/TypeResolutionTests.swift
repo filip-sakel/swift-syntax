@@ -124,7 +124,7 @@ final class TypeResolutionTests: XCTestCase {
       }
       protocol B {
         associatedtype U
-        func g(_: \(failure: .invalidMembers([("U", .genericParameterOrAssociatedType)]))U)
+        func g(_: \(failure: .nested(.invalidMembers([("U", .genericParameterOrAssociatedType)])))U)
       }
       """ as LexicalLookupSource
     ])
@@ -192,9 +192,9 @@ final class TypeResolutionTests: XCTestCase {
       struct A { struct B {} }
       extension A { struct B {} }
 
-      let _: \(failure: .invalidMembers(
+      let _: \(failure: .nested(.invalidMembers(
           [("A.B", .ambiguousTypeDecl(["struct B {}", "struct B {}"]))]
-        ))A.B
+        )))A.B
       """
     ])
   }
@@ -309,9 +309,9 @@ final class TypeResolutionTests: XCTestCase {
         "MyFile.swift": """
         \(interpolation: baseSourceInterpolation)
 
-        let _: \(failure: .invalidMembers(
+        let _: \(failure: .nested(.invalidMembers(
           [("A.T", .ambiguousTypeDecl(["typealias T = C", "typealias T = D"]))]
-        ))A.T
+        )))A.T
         """
       ],
       buildConfiguration: flagsConfig(["FlagB", "FlagC", "FlagD"])
@@ -379,7 +379,9 @@ final class TypeResolutionTests: XCTestCase {
       // Non-cyclical references
       typealias C = B
       typealias D = C
-      func f(_: \(failure: .invalidAliasedType(.invalidAliasedType(.cyclicalTypeReference(cycle: ["A", "B"]))))D)
+      func f(_: \(failure: .nested(.invalidAliasedType(
+          .nested(.invalidAliasedType(.cyclicalTypeReference(cycle: ["A", "B"])))
+        )))D)
       """ as LexicalLookupSource
     ])
   }
@@ -393,10 +395,14 @@ final class TypeResolutionTests: XCTestCase {
 
       extension A {
         struct C {
-          func f(_: \(failure: .invalidBaseType(.invalidBaseType(.cyclicalTypeReference(cycle: ["B", "A"]))))C)
-          func g(_: \(failure: .invalidBaseType(.invalidBaseType(.cyclicalTypeReference(cycle: ["B", "A"]))))Self)
+          func f(_: \(failure: .nested(.invalidBaseType(
+              .nested(.invalidBaseType(.cyclicalTypeReference(cycle: ["B", "A"]))))))
+            C)
+          func g(_: \(failure: .nested(.invalidBaseType(.nested(.invalidBaseType(
+              .cyclicalTypeReference(cycle: ["B", "A"])))
+            )))Self)
         }
-        func h(_: \(failure: .invalidBaseType(.cyclicalTypeReference(cycle: ["B", "A"])))C)
+        func h(_: \(failure: .nested(.invalidBaseType(.cyclicalTypeReference(cycle: ["B", "A"]))))C)
       }
       """ as LexicalLookupSource
     ])
@@ -410,7 +416,9 @@ final class TypeResolutionTests: XCTestCase {
       struct B { typealias Element = A.Element }
 
       func f(_: \(nominal: "_(MyFile.swift)::A")A)
-      func g(_: \(failure: .invalidMembers([("A.Element", .cyclicalTypeReference(cycle: ["B.Element", "A.Element"]))]))A.Element)
+      func g(_: \(failure: .nested(.invalidMembers(
+          [("A.Element", .cyclicalTypeReference(cycle: ["B.Element", "A.Element"]))
+        ])))A.Element)
       """ as LexicalLookupSource
     ])
   }
@@ -459,10 +467,10 @@ final class TypeResolutionTests: XCTestCase {
 
         struct B {}
 
-        typealias C = \(failure: .invalidComposition([
+        typealias C = \(failure: .nested(.invalidComposition([
           ("((A, B) -> Int)", .partialTypeResolutionFailure(.functionType)),
           ("A", .cannotComposeNonClassOrProtocol(resolved: .nominalTypes(["_(MyFile.swift)::A"]))),
-        ]))
+        ])))
         ((A, B) -> Int) & A
         """ as LexicalLookupSource
       ]
@@ -476,9 +484,9 @@ final class TypeResolutionTests: XCTestCase {
         struct A {}
 
         // type alias 'A' references 'A' in its initializer
-        typealias A = \(failure: .invalidComposition([
+        typealias A = \(failure: .nested(.invalidComposition([
           ("A", .ambiguousTypeDecl(["struct A {}", "typealias A = A & ~Escapable"])),
-        ]))A & ~Escapable
+        ])))A & ~Escapable
         """ as LexicalLookupSource
       ]
     )
@@ -1038,9 +1046,9 @@ final class TypeResolutionTests: XCTestCase {
                           // so we evict `A.B.C` > `D`
         }
 
-        let _: \(failure: .invalidMembers([
+        let _: \(failure: .nested(.invalidMembers([
                ("A.B.C", .ambiguousTypeDecl(["struct C {}", "typealias C = A"]))
-             ]))
+             ])))
                A.B.C.D
         """
       ]
