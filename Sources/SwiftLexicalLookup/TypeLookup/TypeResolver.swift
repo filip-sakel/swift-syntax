@@ -131,18 +131,18 @@ public struct TypeResolver {
 // MARK: Type Syntax
 
 extension TypeResolver {
-  public mutating func resolveSyntax(
+  public mutating func resolve(
     typeSyntax: Attached<TypeSyntax>
   ) -> TypeResult {
     withLogging(
       request: "Resolve syntax `\(typeSyntax.trimmedDescription)`",
       describe: \.debugDescription,
-      perform: { $0._resolveSyntax(typeSyntax: typeSyntax) }
+      perform: { $0._resolve(typeSyntax: typeSyntax) }
     )
   }
 
-  /// Implements `resolveSyntax`
-  public mutating func _resolveSyntax(
+  /// Implements `resolve`
+  fileprivate mutating func _resolve(
     typeSyntax: Attached<TypeSyntax>
   ) -> TypeResult {
     // Ensure we're not forming a cycle
@@ -173,7 +173,7 @@ extension TypeResolver {
     case .success(.typeIdentifier(let component)):
       return resolveUnqualifiedReference(typeComponent: component)
     case .success(.metatype(let baseTypeSyntax)):
-      let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax)
+      let baseTypeResult = resolve(typeSyntax: baseTypeSyntax)
       // Wrap the base type/failure and return
       switch baseTypeResult {
       case .failure(let baseFailure):
@@ -182,7 +182,7 @@ extension TypeResolver {
         return TypeResult.metatype(base: baseTypeResult)
       }
     case .success(.member(let baseTypeSyntax, let memberComponent)):
-      let baseTypeResult = resolveSyntax(typeSyntax: baseTypeSyntax)
+      let baseTypeResult = resolve(typeSyntax: baseTypeSyntax)
       return resolveMember(baseType: baseTypeResult, typeMember: memberComponent)
     case .success(.composition(let childTypes)):
       var syntaxToTypes = [
@@ -192,7 +192,7 @@ extension TypeResolver {
         )
       ]()
       for childTypeSyntax in childTypes {
-        let childResult = resolveSyntax(typeSyntax: childTypeSyntax)
+        let childResult = resolve(typeSyntax: childTypeSyntax)
         syntaxToTypes.append((childTypeSyntax, childResult))
       }
       return reduceComposition(syntaxToTypes)
@@ -900,7 +900,7 @@ extension TypeResolver {
         "Found aliased type `\(aliasedTypeSyntax)`"
       )
 
-      let aliasedResult: TypeResult = resolveSyntax(
+      let aliasedResult: TypeResult = resolve(
         typeSyntax: typeAlias.initializerValue
       )
       // Wrap in a failure unless we're part of a cycle
@@ -1159,7 +1159,7 @@ extension TypeResolver {
       return .failure(Failure.extensionNotAtFileScope(extensionDecl: extensionDecl.node))
     }
 
-    let resolvedType: TypeResult = resolveSyntax(
+    let resolvedType: TypeResult = resolve(
       typeSyntax: extensionDecl.extendedType
     )
 
@@ -1201,7 +1201,8 @@ extension TypeResolver {
 extension TypeResolver {
   /// Resolve a qualified-type name to a nominal type with all accessible
   /// extensions bound.
-  @_spi(_QualifiedLookupTests) public mutating func resolveType(
+  @_spi(_QualifiedLookupTests)
+  public mutating func resolveType(
     typeReference: ResolvedTypeSyntax
   ) -> Result<ResolvedTypeSyntax, Failure> {
     withLogging(

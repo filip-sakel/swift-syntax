@@ -232,7 +232,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
       }
 
       // Perform the lookup to get the `actualResult` (as opposed to `expectedResult`)
-      let actualType: TypeResolver.TypeResult = symbolTable.resolveSyntax(typeSyntax: typeSyntax)
+      let actualType: TypeResolver.TypeResult = symbolTable.resolve(typeSyntax: typeSyntax)
 
       // Check the nested nominals
       expectedType._visitNominals({ verifyExpectedNominalDescription($0._succinctDescription, failures: &failures) })

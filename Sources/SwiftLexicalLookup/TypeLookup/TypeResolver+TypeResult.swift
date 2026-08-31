@@ -58,7 +58,7 @@ extension TypeResolver {
   /// The type result of structural type resolution. `Result`
   /// represents a nominal type.
   @_spi(_QualifiedLookupTests)
-  public indirect enum TypeResult: Sendable {
+  public enum TypeResult: Sendable {
     /// E.g. `(A) -> ()`
     case function(argumentCount: Int)
     /// E.g. `(a: A, _: B)`
@@ -68,9 +68,9 @@ extension TypeResolver {
     /// `Any` or suppressed types like `~Copyable`
     case anyType
     /// E.g. `A.Type`, `((A, B).Type).Type`
-    case metatype(base: TypeResult)
+    indirect case metatype(base: TypeResult)
     // E.g. no type `A` in scope
-    case failure(Failure)
+    indirect case failure(Failure)
 
     /// Maps the nominal types in `nominalTypes`.
     @_spi(_QualifiedLookupTests)
