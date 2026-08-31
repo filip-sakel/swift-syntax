@@ -479,7 +479,7 @@ extension ExtensionState {
 
   static func bound(
     dependencies: [ExtensionDependency],
-    typeName: TypeGraph.GlobalTypeName,
+    typeName: TypeGraph.GlobalTypeName
   ) -> ExtensionState {
     ExtensionState(dependencies: dependencies, resolvedType: .success(typeName))
   }

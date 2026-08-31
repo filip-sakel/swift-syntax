@@ -1202,7 +1202,7 @@ extension TypeResolver {
   /// Resolve a qualified-type name to a nominal type with all accessible
   /// extensions bound.
   @_spi(_QualifiedLookupTests)
-  public mutating func resolveType(
+  mutating func resolveType(
     typeReference: ResolvedTypeSyntax
   ) -> Result<ResolvedTypeSyntax, Failure> {
     withLogging(
