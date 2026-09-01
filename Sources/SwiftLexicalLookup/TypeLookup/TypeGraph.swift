@@ -1870,12 +1870,15 @@ extension ExtensionDependency: CustomDebugStringConvertible {
 extension ExtensionState: CustomDebugStringConvertible {
   public var debugDescription: String {
     let dependenciesDescriptions = dependencies.map(\._declarationlessDescription).joined(separator: ",\n    ")
+    // We don't use `String/replacing(_:with:)` because it's unavailable during
+    // the compiler's bootstrapping step.
+    let indentedTypeDescription = String(resolvedType._debugDescription.flatMap({ $0 == "\n" ? "\n  " : String($0) }))
     return """
       GenericExtensionState(
         dependencies: [
           \(dependenciesDescriptions)
         ],
-        resolvedType: \(resolvedType._debugDescription.replacing("\n", with: "\n  "))
+        resolvedType: \(indentedTypeDescription))
       )
       """
   }

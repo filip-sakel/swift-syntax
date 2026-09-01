@@ -298,7 +298,9 @@ extension TypeResolver.ExtensionCycle: CustomDebugStringConvertible {
 extension TypeResolver.NestedFailure: CustomDebugStringConvertible {
   public var debugDescription: String {
     func describeNested(_ nestedFailure: TypeResolver.Failure) -> String {
-      nestedFailure.debugDescription.replacing("\n", with: "\n  ")
+      // We don't use `String/replacing(_:with:)` because it's unavailable during
+      // the compiler's bootstrapping step.
+      String(nestedFailure.debugDescription.flatMap({ $0 == "\n" ? "\n  " : String($0) }))
     }
 
     switch self {

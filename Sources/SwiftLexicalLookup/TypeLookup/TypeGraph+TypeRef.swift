@@ -302,12 +302,19 @@ extension TypeGraph.GlobalTypeName {
     // print verbatim with a '::' between them. So, split the string at '::'
     // (which every global name has), and use the first part as the qualifier
     // and the tail as the "name".
-    guard let firstQualifierSeparatorRange = string.firstRange(of: "::") else {
+    //
+    // Also, the following is basically `string.firstRange(of: "::")`, but we
+    // implement it from scratch because it's unavailable during
+    // the compiler's bootstrapping step.
+    let firstQualifierSeparatorIndex = string.indices.first(where: { i in
+      string.index(after: i) < string.endIndex && string[i] == ":" && string[string.index(after: i)] == ":"
+    })
+    guard let firstQualifierSeparatorIndex else {
       fatalError("GlobalTypeName '\(string)' must have at least one qualifier separator '::'.", file: file, line: line)
     }
     let (firstQualifier, tail) = (
-      string[..<firstQualifierSeparatorRange.lowerBound].description,
-      string[firstQualifierSeparatorRange.upperBound...].description
+      string[..<firstQualifierSeparatorIndex].description,
+      string[string.index(firstQualifierSeparatorIndex, offsetBy: 2)...].description
     )
     let instance = Self(
       component: Component(qualifier: Qualifier.external(moduleName: firstQualifier), name: tail)
@@ -316,7 +323,7 @@ extension TypeGraph.GlobalTypeName {
     // Ensure we round-trip correctly
     precondition(
       instance.debugDescription == string,
-      "Unexpectedly parsed global type name '\(string)' wrong.",
+      "Unexpectedly parsed global type name '\(string)' wrong (got '\(instance.debugDescription)' instead).",
       file: file,
       line: line
     )
