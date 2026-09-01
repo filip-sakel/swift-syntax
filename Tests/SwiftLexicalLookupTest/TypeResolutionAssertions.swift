@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-import RegexBuilder
 import SwiftIfConfig
 @_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) import SwiftLexicalLookup
 import SwiftParser
