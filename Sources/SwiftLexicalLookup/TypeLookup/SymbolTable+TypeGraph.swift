@@ -38,11 +38,6 @@ extension SymbolTable {
         requestedArray.append(element)
       }
     }
-    // TODO: Remove
-    // /// Whether we're currently processing an extension given by `popLastRequestedExtension`.
-    // var currentlyProcessing: Bool {
-    //   current != nil
-    // }
 
     /// Returns the last index and element of the requestedExtensions without
     /// popping; `nil` if empty.
@@ -70,12 +65,7 @@ extension SymbolTable {
     /// Precondition: The given extension is `current`.
     ///
     /// Complexity: O(1) with respect to the number of requested extensions.
-    mutating func finalizePop(
-      _ extensionDecl: Attached<ExtensionDeclSyntax>,
-      // TODO: Remove
-      // addingRequests newExtensionDecls: [Attached<ExtensionDeclSyntax>],
-      // _startRequests: [Attached<ExtensionDeclSyntax>]
-    ) {
+    mutating func finalizePop(_ extensionDecl: Attached<ExtensionDeclSyntax>) {
       // Ensure we're finalizing the right extension
       precondition(
         extensionDecl == current,
@@ -443,14 +433,8 @@ extension SymbolTable {
     )
 
     // TODO: Remove?
-    if _verbose {
-      print("Finding member \(baseType) > \(memberTypeName.name)")
-    }
-    defer {
-      if _verbose {
-        print("New deps for member-type lookup: \(dependencyTracker.dependencies)")
-      }
-    }
+    log("Finding member \(baseType) > \(memberTypeName.name)")
+    defer { log("New deps for member-type lookup: \(dependencyTracker.dependencies)") }
 
     return typeGraph.findMemberType(
       baseType: baseType,
