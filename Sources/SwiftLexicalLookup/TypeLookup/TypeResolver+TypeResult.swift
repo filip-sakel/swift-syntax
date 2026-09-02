@@ -102,11 +102,11 @@ extension TypeResolver.TypeResult: CustomDebugStringConvertible {
     case .function(let argumentCount):
       return ".function(argumentCount: \(argumentCount))"
     case .tuple(let labels):
-      return ".tuple(\(labels.map({ $0?.name ?? "_"}))"
+      return ".tuple(\(labels.map({ $0?.name ?? "_"})))"
     case .anyType:
       return ".anyType"
     case .metatype(let base):
-      return ".metatype(base: \(base.debugDescription)"
+      return ".metatype(base: \(base.debugDescription))"
     case .nominalTypes(let members):
       return ".nominalTypes([\(members.map(\.debugDescription).joined(separator: ", "))])"
     case .failure(let failure):

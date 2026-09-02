@@ -481,12 +481,17 @@ extension Attached: ExpressibleByStringLiteral
 where
   Node: ParsableByAttached
 {
-  public static func parse(_ string: String, prefix: String? = nil) -> Self {
+  public static func parse(
+    _ string: String,
+    prefix: String? = nil,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) -> Self {
     // Wrap the type syntax in a file
     var parser = Parser(Node.fileContents(prefix: prefix, syntaxString: string))
     let sourceFile = SourceFileSyntax.parse(from: &parser)
     guard let castSyntax = sourceFile.children(ofType: Node.self).first else {
-      fatalError("Couldn't parse `\(string)` as \(Node.self).")
+      fatalError("Couldn't parse `\(string)` as \(Node.self).", file: file, line: line)
     }
     // We should now be able to cast to SourceFileRoot
     return Attached(castSyntax)!

@@ -268,7 +268,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
       )
 
       // Describe the states
-      (expectedDescription, actualDescription) = (actualState.debugDescription, expectedState.debugDescription)
+      (expectedDescription, actualDescription) = (expectedState.debugDescription, actualState.debugDescription)
     }
 
     // Give up if the expectation/actual results have undefined references

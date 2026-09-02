@@ -16,22 +16,74 @@ import SwiftSyntax
 // MARK: Requested Extensions
 
 extension SymbolTable {
-  /// Getter
-  var requestedExtensions: [Attached<ExtensionDeclSyntax>] { _requestedExtensions }
-  /// Appends a requested extensions
-  func appendRequestedExtensions(_ elements: [Attached<ExtensionDeclSyntax>]) {
-    for element in elements {
-      // Add the extension if not already in the set.
-      if _requestedExtensionsSet.contains(element) { continue }
-      _requestedExtensions.append(element)
+  struct RequestedExtensions {
+    fileprivate private(set) var current: Attached<ExtensionDeclSyntax>?
+    private var requestedArray: [Attached<ExtensionDeclSyntax>]
+    private var requestedSet: Set<Attached<ExtensionDeclSyntax>>
+
+    init() {
+      self.current = nil
+      (self.requestedArray, self.requestedSet) = ([], [])
     }
-  }
-  /// Removes the first requested extension if it exists, or returns `nil`.
-  func removeFirstRequestedExtension() -> Attached<ExtensionDeclSyntax>? {
-    guard !requestedExtensions.isEmpty else { return nil }
-    let first = _requestedExtensions.removeFirst()
-    _requestedExtensionsSet.remove(first)
-    return first
+
+    /// Appends the requested extensions
+    ///
+    /// Complexity: O(n) where `n` is the number of `elements`.
+    mutating func append(contentsOf elements: [Attached<ExtensionDeclSyntax>]) {
+      for element in elements {
+        // Don't add the currently processing array
+        guard current != element else { continue }
+        // Add the extension if not already in the set.
+        guard requestedSet.insert(element).inserted else { continue }
+        requestedArray.append(element)
+      }
+    }
+    // TODO: Remove
+    // /// Whether we're currently processing an extension given by `popLastRequestedExtension`.
+    // var currentlyProcessing: Bool {
+    //   current != nil
+    // }
+
+    /// Returns the last index and element of the requestedExtensions without
+    /// popping; `nil` if empty.
+    ///
+    /// Precondition: No extensions are currently bound, i.e., the previous
+    /// `current == nil`.
+    ///
+    /// Complexity: O(1) with respect to the number of requested extensions.
+    mutating func beginPop() -> Attached<ExtensionDeclSyntax>? {
+      // Both of the following calls are O(1)
+      guard let extensionDecl = requestedArray.popLast() else { return nil }
+      requestedSet.remove(extensionDecl)
+
+      if let current {
+        fatalError(
+          "[SwiftLexicalLookup] Internal error: Unexpectedly popped extension `\(extensionDecl._memberlessDescription)` while binding other extension `\(current._memberlessDescription)`"
+        )
+      }
+      current = extensionDecl
+      return extensionDecl
+    }
+    /// Removes the requested extension at the given index if it exists, or
+    /// returns `nil`.
+    ///
+    /// Precondition: The given extension is `current`.
+    ///
+    /// Complexity: O(1) with respect to the number of requested extensions.
+    mutating func finalizePop(
+      _ extensionDecl: Attached<ExtensionDeclSyntax>,
+      // TODO: Remove
+      // addingRequests newExtensionDecls: [Attached<ExtensionDeclSyntax>],
+      // _startRequests: [Attached<ExtensionDeclSyntax>]
+    ) {
+      // Ensure we're finalizing the right extension
+      precondition(
+        extensionDecl == current,
+        "[SwiftLexicalLookup] Internal error: Unexpectedly found different requested extension:  popped `\(extensionDecl._memberlessDescription)`; finalized `\(current?._memberlessDescription ?? "nil")`)"
+      )
+      // Reset the current
+      current = nil
+    }
   }
 }
 
@@ -159,9 +211,8 @@ extension SymbolTable {
 
     // Log results
     //
-    // TODO: Add behind verbose flag
-    //
     // Describe dependencies
+    // TODO: Clean this up
     let dependencyDescription = "[\(dependencies.dependencies.map(\.debugDescription).joined(separator: ", "))]"
     // Describe result
     let admissionResultDescriptions = admissionResult.map({ results in
@@ -170,8 +221,7 @@ extension SymbolTable {
       }).joined(separator: ", ")
     })
     // New graph description
-    // TODO: Remove once done debugging
-    if false || verbose {
+    if verbose {
       let (typeGraphDescription, hasErrors) = typeGraph._describe(symbolTable: self)
       print(String(repeating: "-", count: 80))
       print(
@@ -225,13 +275,13 @@ extension SymbolTable {
   ) {
     // Whether we will bind the requested extensions or we'll delegate to an
     // ongoing request
-    let willBindRequests = self.requestedExtensions.isEmpty
+    let willBindRequests = self.requestedExtensions.current == nil
 
     // Register the extensions to be processed.
     //
-    // Note: `requestedExtensions` is an `OrderedSet` so we don't introduce
+    // Note: `requestedExtensions.append` doesn't introduce
     // duplicates.
-    self.appendRequestedExtensions(extensionDecls)
+    self.requestedExtensions.append(contentsOf: extensionDecls)
 
     // Ensure there's no binding request underway
     guard willBindRequests else {
@@ -254,24 +304,17 @@ extension SymbolTable {
     // ```
     // Then, `Self` will only try to bind `extension A.B` but to resolve `A.B`, we
     // need to fully resolve `A` so we also have to bind `extension A`.
-    while let extensionDecl = self.requestedExtensions.first {
+    while let extensionDecl = self.requestedExtensions.beginPop() {
+      // The result can change after binding more extensions; ignore for now.
+      let _ = bindRequestedExtension(extensionDecl)
+
       // We remove at the end of the iteration because we want nested syntax-resolution
       // requests to see that we're actively trying to bind this extension.
-      defer {
-        // TODO: Ensure .last and .removeLast are ok (or if we should do a queue-like approach.
-        let poppedExtension = self.removeFirstRequestedExtension()
-        assert(
-          poppedExtension == extensionDecl,
-          "[SwiftLexicalLookup] Internal error: Unexpectedly found different requested extension when popping."
-        )
-      }
-
-      // The result can change after binding more extensions; ignore for now.
-      _ = _bindRequestedExtension(extensionDecl)
+      self.requestedExtensions.finalizePop(extensionDecl)
     }
 
     assert(
-      self.requestedExtensions.isEmpty,
+      self.requestedExtensions.current == nil,
       "[SwiftLexicalLookup] Internal error: Requested extensions still not admitted after `bindExtensions`."
     )
   }
@@ -304,8 +347,8 @@ extension SymbolTable {
   ) -> Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure> {
     // Uphold invariant
     assert(
-      self.requestedExtensions.contains(extensionDecl),
-      "[SwiftLexicalLookup] Internal error: Called `bindRequestedExtension` without first adding to `self.requestedExtensions`."
+      self.requestedExtensions.current == extensionDecl,
+      "[SwiftLexicalLookup] Internal error: Called `bindRequestedExtension` without first calling to `self.requestedExtensions.beginPop()`."
     )
 
     // TODO: Remove
@@ -323,8 +366,6 @@ extension SymbolTable {
     if let existingResolution = typeGraph.getExtensionResolvedType(extensionDecl) {
       return existingResolution.map(mapToNominalTypeReference(_:))
     }
-
-    // TODO: Extension binding uses its own visitedTypeSyntax; also pass `visitedTypeSyntax` to every function.
 
     // === Resolve Extension ===
 
@@ -363,12 +404,6 @@ extension SymbolTable {
         )
       case .admissionFailure(.cannotReadmit(let existingState)):
         // We check there's no state at the start of the function
-
-        // TODO: Remove
-        // print(
-        //   "[SwiftLexicalLookup] Internal error: Tried to readmit `\(extensionDecl._memberlessDescription)`; old state \(existingState)."
-        // )
-        // return symbolTable.typeGraph.getExtensionResolvedType(extensionDecl)!.map(mapToNominalTypeReference(_:))
         fatalError(
           "[SwiftLexicalLookup] Internal error: Tried to readmit `\(extensionDecl._memberlessDescription)`; old state \(existingState)."
         )
@@ -382,103 +417,8 @@ extension SymbolTable {
       "Resolved to \(extendedTypeResult); Dependencies: \(resolver.dependencyTracker.dependencies.map(\.debugDescription)); Invalidated: \(invalidatedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
     )
 
-    self.appendRequestedExtensions(invalidatedExtensions.map(\.extensionDecl))
+    self.requestedExtensions.append(contentsOf: invalidatedExtensions.map(\.extensionDecl))
     return resolvedType.map(mapToNominalTypeReference(_:))
-
-    // FIXME: Get rid of below code or sm.
-    //
-    // // === Fix Invalidated Extensions ===
-    // //
-    // // We use a for loop because fixing one invalidated extension may invalidate
-    // // other extensions.
-    // var invalidatedExtensionsStack = invalidatedExtensions
-    // // TODO: Pull out invalidateExtension into its own function
-    // while let invalidatedExtension = invalidatedExtensionsStack.first {
-    //   //  TODO: Could we straight-up pop during the while let loop-condition.
-    //   defer {
-    //     let poppedExtension = invalidatedExtensionsStack.removeFirst()
-    //     assert(
-    //       poppedExtension.extensionDecl == invalidatedExtension.extensionDecl,
-    //       "[SwiftLexicalLookup] Internal error: Unexpectedly found different invalidated extension when popping."
-    //     )
-    //   }
-    //
-    //   self.requestedExtensions.append(invalidatedExtension.extensionDecl)
-    //   _ = _bindExtension(invalidatedExtension.extensionDecl)
-    //   let removed = self.requestedExtensions.removeLast()
-    //   assert(
-    //     removed == invalidatedExtension.extensionDecl,
-    //     "[SwiftLexicalLookup] Internal error: Unexpectedly found different invalidated extension when popping."
-    //   )
-    //   continue
-    //
-    //   // TODO: Remove following
-    //
-    //   // Re-resolve with dependency tracking
-    //   log("Recomputing invalidated `\(invalidatedExtension.extensionDecl._memberlessDescription)`")
-    //   let (_, _, nestedInvalidatedExtensions) = withLogging(
-    //     request: "Fixing invalidated `\(invalidatedExtension.extensionDecl._memberlessDescription)`",
-    //     describe: {
-    //       (
-    //         extendedTypeResult: Result<ResolvedNominalTypeReference, Failure>,
-    //         extensionDependencies: DependencyTracker,
-    //         invalidatedExtensions: InvalidatedExtensions
-    //       ) in
-    //       "\(extendedTypeResult._debugDescription); Dependencies: \(extensionDependencies.dependencies.map(\.debugDescription))"
-    //     },
-    //     perform: {
-    //       var extensionDependencies = DependencyTracker()
-    //       let extendedTypeResult: Result<ResolvedNominalTypeReference, Failure> = $0._resolveExtendedTypeSyntax(
-    //         extensionDecl: invalidatedExtension.extensionDecl,
-    //         memberDependencies: &extensionDependencies
-    //       )
-    //
-    //       // Register in the symbol table
-    //       let nestedBindingResult =
-    //         $0.symbolTable.fixInvalidatedExtension(
-    //           invalidatedExtension.extensionDecl,
-    //           // Only get the name
-    //           to: extendedTypeResult.map({ (typeReference: ResolvedNominalTypeReference) in
-    //             // FIXME: This assert shouldn't exist; extension decl should just give us a global type.
-    //             guard case .topLevel(let extendedGlobalName) = typeReference.qualifiedName else {
-    //               fatalError(
-    //                 "[SwiftLexicalLookup] Internal error: Unexpectedly resolved extension to local type \(typeReference.qualifiedName)"
-    //               )
-    //             }
-    //             return (extendedGlobalName, typeReference.mainDecl)
-    //           }),
-    //           dependencies: extensionDependencies
-    //         ) as Result<BindingResult, SymbolTable3.ExtensionBindingFailure>
-    //
-    //       // Return results or handle failures
-    //       switch nestedBindingResult {
-    //       case .success(let success):
-    //         return (extendedTypeResult, extensionDependencies, success.invalidatedExtensions)
-    //       case .failure(let failure):
-    //         // Ensure we handle future failure types
-    //         switch failure {
-    //         case .nonRegisteredSyntaxRoot:
-    //           fatalError(
-    //             "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly not in symbol table"
-    //           )
-    //         case .admissionFailure(.cannotReadmit(let existingState)):
-    //           fatalError(
-    //             "[SwiftLexicalLookup] Internal error: Tried to fix admitted extension `\(extensionDecl._memberlessDescription)`; old state \(existingState)."
-    //           )
-    //         case .admissionFailure(.invalidDependencyExtension(let extensionState)):
-    //           fatalError(
-    //             "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly has wrong dependency; state \(extensionState.debugDescription)."
-    //           )
-    //         }
-    //       }
-    //     }
-    //   )
-    //
-    //   // Enqueue invalidated extensions
-    //   invalidatedExtensionsStack.append(contentsOf: nestedInvalidatedExtensions)
-    // }
-    //
-    // return resolvedType.map(mapToNominalTypeReference(_:))
   }
 }
 
@@ -502,7 +442,7 @@ extension SymbolTable {
       "[SwiftLexicalLookup] Internal error: Caller passed wrong module for `\(introducingTypeSyntax.trimmedDescription)`: got '\(introducingModule.name)' but expected \(fileModule?.name ?? "nil")"
     )
 
-    // TODO: Remove
+    // TODO: Remove?
     if _verbose {
       print("Finding member \(baseType) > \(memberTypeName.name)")
     }

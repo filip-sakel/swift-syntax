@@ -355,7 +355,7 @@ extension TypeResolver.Failure: CustomDebugStringConvertible {
     case .genericParameterOrAssociatedType:
       return ".genericParameterOrAssociatedType"
     case .ambiguousTypeDecl(let ambiguousDecls):
-      let ambiguousDeclsDescription = ambiguousDecls.map(\.trimmedDescription).joined(separator: ", ")
+      let ambiguousDeclsDescription = ambiguousDecls.map(\._memberlessDescription).joined(separator: ", ")
       return ".ambiguousTypeDecl([\(ambiguousDeclsDescription)])"
     case .syntaxNotInSymbolTable(let fileRoot):
       return ".syntaxNotInSymbolTable(rootKind: \(fileRoot))"
