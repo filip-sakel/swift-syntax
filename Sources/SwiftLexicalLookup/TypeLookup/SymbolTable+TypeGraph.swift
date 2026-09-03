@@ -315,47 +315,17 @@ extension SymbolTable {
   /// Handles extensions already admitted to the graph, and fixes
   /// invalidated extensions.
   ///
-  /// - Precondition: `extensionDecl` must be in `self.requestedExtensions`
-  private func bindRequestedExtension(
-    _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure> {
-    withLogging(
-      request: "Binding `\(extensionDecl._memberlessDescription)`",
-      describe: \._debugDescription
-    ) {
-      $0._bindRequestedExtension(extensionDecl)
-    }
-  }
-
-  /// Implements `bindRequestedExtension`
-  ///
-  /// - Precondition: `extensionDecl` must be in `self.requestedExtensions`
+  /// - Precondition: `extensionDecl` must be in `unresolvedExtensions` (i.e. not yet admitted)
   /// FIXME: Make _bindExtension handle other generated requests;
   /// e.g. if we're resolving `extension A.B {}`, we will prob have to fully resolve `A`.
-  private func _bindRequestedExtension(
+  private func bindRequestedExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure> {
+  ) {
     // Uphold invariant
     assert(
       self.requestedExtensions.current == extensionDecl,
       "[SwiftLexicalLookup] Internal error: Called `bindRequestedExtension` without first calling to `self.requestedExtensions.beginPop()`."
     )
-
-    // TODO: Remove
-    func mapToNominalTypeReference(
-      _ typeInfo: (globalReference: TypeGraph.GlobalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>)
-    ) -> TypeResolver.GloballyResolvedTypeSyntax {
-      TypeResolver.GloballyResolvedTypeSyntax(
-        type: typeInfo.globalReference,
-        syntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
-      )
-    }
-
-    // Return saved result if the extension was already admitted to the graph
-    // TODO: Should this ever happen?
-    if let existingResolution = typeGraph.getExtensionResolvedType(extensionDecl) {
-      return existingResolution.map(mapToNominalTypeReference(_:))
-    }
 
     // === Resolve Extension ===
 
@@ -388,14 +358,14 @@ extension SymbolTable {
     case .failure(let failure):
       // Ensure we handle future failure types
       switch failure {
+      case .admissionFailure(.cannotReadmit(let existingState)):
+        // We require this as a precondition
+        fatalError(
+          "[SwiftLexicalLookup] Internal error: Tried to readmit `\(extensionDecl._memberlessDescription)`; old state \(existingState)."
+        )
       case .nonRegisteredSyntaxRoot:
         fatalError(
           "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly not in symbol table"
-        )
-      case .admissionFailure(.cannotReadmit(let existingState)):
-        // We check there's no state at the start of the function
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Tried to readmit `\(extensionDecl._memberlessDescription)`; old state \(existingState)."
         )
       case .admissionFailure(.invalidDependencyExtension(let extensionState)):
         fatalError(
@@ -404,11 +374,10 @@ extension SymbolTable {
       }
     }
     log(
-      "Resolved to \(extendedTypeResult); Dependencies: \(resolver.dependencyTracker.dependencies.map(\.debugDescription)); Invalidated: \(invalidatedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
+      "Resolved to \(resolvedType); Dependencies: \(resolver.dependencyTracker.dependencies.map(\.debugDescription)); Invalidated: \(invalidatedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
     )
 
     self.requestedExtensions.append(contentsOf: invalidatedExtensions.map(\.extensionDecl))
-    return resolvedType.map(mapToNominalTypeReference(_:))
   }
 }
 

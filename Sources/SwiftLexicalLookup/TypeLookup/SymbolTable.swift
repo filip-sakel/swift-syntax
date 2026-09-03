@@ -33,15 +33,6 @@ public final class SymbolTable {
 
   /// Tracks requested extensions for extension binding.
   var requestedExtensions: RequestedExtensions = RequestedExtensions()
-  // TODO: Remove
-  // Don't access
-  // /// directly; use `requestedExtensions`, `appendRequestedExtension` and
-  // /// `removeRequestedExtension` instead.
-  // ///
-  // /// Invariant: Should not contain duplicates
-  // var _currentExtension: Attached<ExtensionDeclSyntax>? = nil
-  // var _requestedExtensions: [Attached<ExtensionDeclSyntax>] = []
-  // var _requestedExtensionsSet: Set<Attached<ExtensionDeclSyntax>> = []
 
   // TODO: Setters should be private
   //
