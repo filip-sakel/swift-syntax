@@ -294,8 +294,12 @@ extension TypeGraph.TypeRef: CustomDebugStringConvertible {
 
 extension TypeGraph.GlobalTypeName {
   /// Construct a `GlobalTypeName` whose `debugDescription` is the given string
-  /// for testing. Any use outside of testing is unchecked and may result in
-  /// crashes.
+  /// for testing.
+  ///
+  /// Important: Any use outside of testing is unchecked and may result in
+  /// crashes. Namely, the resulting `GlobalTypeName` has a single mock
+  /// component responsible for generating the --potentially multi-component--
+  /// debug description.
   @_spi(_QualifiedLookupTests)
   public static func _mock(nameDescription string: String, file: StaticString = #file, line: UInt = #line) -> Self {
     // This is very hacky but basically an external module + a type name will
