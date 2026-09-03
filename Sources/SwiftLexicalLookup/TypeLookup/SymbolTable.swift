@@ -27,7 +27,7 @@ public final class SymbolTable {
   /// 2. Each `SourceFileSyntax` is unique (across modules)
   public let moduleToSources: [ModuleName: [String: SourceFileSyntax]]
   /// The build configuration used for lookups in the symbol table's files.
-  public let buildConfiguration: (any BuildConfiguration)?
+  public let buildConfiguration: any BuildConfiguration
   /// Useful map for finding a file's name, configured regions and module in constant time.
   private let fileToInfo: [SourceFileSyntax: FileInfo]
 
@@ -49,7 +49,7 @@ public final class SymbolTable {
   private init(
     moduleName: ModuleName,
     moduleToSources: [ModuleName: [String: SourceFileSyntax]],
-    buildConfiguration: (any BuildConfiguration)?,
+    buildConfiguration: any BuildConfiguration,
     fileToInfo: [SourceFileSyntax: FileInfo]
   ) {
     self.moduleName = moduleName
@@ -63,7 +63,7 @@ extension SymbolTable {
   public convenience init?(
     moduleName: ModuleName,
     moduleToSources: [ModuleName: [String: SourceFileSyntax]],
-    buildConfiguration: (any BuildConfiguration)?
+    buildConfiguration: any BuildConfiguration
   ) {
     // Uphold invariant that `moduleToSources[moduleName] != nil`
     guard moduleToSources[moduleName] != nil else { return nil }
@@ -71,7 +71,7 @@ extension SymbolTable {
     var fileToInfo = [SourceFileSyntax: FileInfo]()
     for (module, sources) in moduleToSources {
       for (fileName, fileSyntax) in sources {
-        let configuredRegions = buildConfiguration.map({ fileSyntax.configuredRegions(in: $0) })
+        let configuredRegions = fileSyntax.configuredRegions(in: buildConfiguration)
         let oldFileInfo = fileToInfo.updateValue(
           FileInfo(name: fileName, configuredRegions: configuredRegions, module: module),
           forKey: fileSyntax
@@ -97,7 +97,7 @@ extension SymbolTable {
 /// `buildConfiguration`, and the module name.
 internal struct FileInfo {
   let name: String
-  let configuredRegions: ConfiguredRegions?
+  let configuredRegions: ConfiguredRegions
   let module: ModuleName
 }
 

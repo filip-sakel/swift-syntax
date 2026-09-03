@@ -156,10 +156,8 @@ extension TypeResolver {
     guard let fileInfo = symbolTable.getFileInfo(typeSyntax.fileRoot) else {
       return .failure(Failure.syntaxNotInSymbolTable(typeSyntax.fileRoot))
     }
-    // Further, if given `configuredRegions`, ensure the given syntax is active.
-    if let fileConfiguredRegions = fileInfo.configuredRegions,
-      fileConfiguredRegions.isActive(typeSyntax.node) != .active
-    {
+    // Further, ensure the given syntax is active.
+    guard fileInfo.configuredRegions.isActive(typeSyntax.node) == .active else {
       return .failure(Failure.syntaxInDisabledRegion)
     }
 

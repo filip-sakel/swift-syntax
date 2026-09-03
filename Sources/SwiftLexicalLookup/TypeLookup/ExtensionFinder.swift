@@ -15,28 +15,9 @@ import SwiftSyntax
 
 extension SourceFileSyntax {
   /// Helper visitor for `findExtensions`, handling `#if`
-  fileprivate final class _ExtensionVisitor: SyntaxVisitor {
-    let configuredRegions: ConfiguredRegions?
+  fileprivate final class _ExtensionVisitor: ActiveSyntaxVisitor {
     var extensionDecls = [Attached<ExtensionDeclSyntax>]()
 
-    init(viewMode: SyntaxTreeViewMode, configuredRegions: ConfiguredRegions?) {
-      self.configuredRegions = configuredRegions
-      super.init(viewMode: viewMode)
-    }
-
-    // Handle `#if` (closely resembles `ActiveSyntax[Any]Visitor`)
-    override func visit(_ node: IfConfigDeclSyntax) -> SyntaxVisitorContinueKind {
-      // If configuredRegions isn't set up, return everything.
-      guard let configuredRegions else { return .visitChildren }
-
-      // If there is an active clause, visit it's children.
-      if let activeClause = configuredRegions.activeClause(for: node), let elements = activeClause.elements {
-        walk(elements)
-      }
-
-      // Skip everything else in the #if.
-      return .skipChildren
-    }
     override func visit(_ node: ExtensionDeclSyntax) -> SyntaxVisitorContinueKind {
       // Force unwrap because this visitor should be called on `SourceFileSyntax`
       extensionDecls.append(Attached(node)!)
@@ -62,7 +43,7 @@ extension SourceFileSyntax {
   /// ``configuredRegions`` is provided.
   ///
   /// Returns: The file's extensions in-order and without duplicates.
-  func findExtensions(configuredRegions: ConfiguredRegions?) -> [Attached<ExtensionDeclSyntax>] {
+  func findExtensions(configuredRegions: ConfiguredRegions) -> [Attached<ExtensionDeclSyntax>] {
     let visitor = _ExtensionVisitor(viewMode: .all, configuredRegions: configuredRegions)
     visitor.walk(self)
     return visitor.extensionDecls
@@ -80,7 +61,7 @@ extension SymbolTable {
   func findAllExtensions(
     accessibleFrom lookupFile: SourceFileSyntax
   ) -> [Attached<ExtensionDeclSyntax>] {
-    func extractConfiguredRegions(file: SourceFileSyntax) -> ConfiguredRegions? {
+    func extractConfiguredRegions(file: SourceFileSyntax) -> ConfiguredRegions {
       guard let fileInfo = getFileInfo(file) else {
         fatalError(
           "[SwiftLexicalLookup] Internal error: Unexpectedly couldn't find configured regions for file: \(file.trimmedDescription)"

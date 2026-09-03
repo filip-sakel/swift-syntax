@@ -298,7 +298,11 @@ extension TypeResolutionMatcher: LexicalMatcher {
 func assertTypeResolution(
   _ lookupSources: KeyValuePairs<String, LexicalLookupSource<TypeResolutionMatcher>>,
   moduleName: StaticString = "MyModule",
-  buildConfiguration: StaticBuildConfiguration? = nil,
+  buildConfiguration: StaticBuildConfiguration = StaticBuildConfiguration(
+    customConditions: [],
+    languageVersion: VersionTuple(5, 5),
+    compilerVersion: VersionTuple(6, 0)
+  ),
   file: StaticString = #file,
   line: UInt = #line,
   verbose: Bool = false
