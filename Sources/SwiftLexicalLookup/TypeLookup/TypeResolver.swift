@@ -49,50 +49,6 @@ public struct TypeResolver {
   /// The set of type syntax we visited; only access through
   /// `insertVisitedTypeSyntax` and `removeVisitedTypeSyntax`.
   private var _visitedTypeSyntaxToIndex: [Attached<TypeSyntax>: Int] = [:]
-  /// Marks the type syntax as visited, or returns the already-visited type syntax
-  /// if there's a cycle. Make sure to add a matching `removeVisitedTypeSyntax`.
-  private mutating func insertVisitedTypeSyntax(_ typeSyntax: Attached<TypeSyntax>) -> [TypeSyntax]? {
-    // If we've already seen this syntax, there's a cycle so return it
-    if let existingIndex = _visitedTypeSyntaxToIndex[typeSyntax] {
-      // We might have valid references before the actual cycle; chop those off
-      // to isolate the cycle.
-      //
-      // E.g.:
-      //   typealias A = B
-      //   typealias B = A
-      //   func f(_: A) // <- Lookup here
-      // Starting from `A`, `visitedTypeSyntax` would be:
-      //   [
-      //     A // from f(_: A),
-      //     B // from typealias A = B
-      //     A // from typealias B = A
-      //   ]
-      // And we isolate to the cycle [B, A]
-      return _visitedTypeSyntax[existingIndex...].map(\.node)
-    }
-    // Add this syntax to the hash map and the array
-    _visitedTypeSyntaxToIndex[typeSyntax] = _visitedTypeSyntax.count
-    _visitedTypeSyntax.append(typeSyntax)
-    return nil
-  }
-  private mutating func removeLastVisitedTypeSyntax(
-    _ typeSyntax: Attached<TypeSyntax>,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) {
-    let expectedIndex = _visitedTypeSyntax.count - 1
-    // Get the syntax's index, or trap
-    guard _visitedTypeSyntaxToIndex[typeSyntax] == expectedIndex else {
-      fatalError(
-        "[SwiftLexicalLookup] Internal error: Unexpectedly asked to remove non-visited/non-last `\(typeSyntax.debugDescription)` with visited \(_visitedTypeSyntax).",
-        file: file,
-        line: line
-      )
-    }
-    // Remove
-    _visitedTypeSyntax.remove(at: expectedIndex)
-    _visitedTypeSyntaxToIndex[typeSyntax] = nil
-  }
   private(set) var dependencyTracker: DependencyTracker = DependencyTracker()
 
   let _verbose: Bool
@@ -118,6 +74,65 @@ public struct TypeResolver {
   }
 }
 
+// MARK: Visited Syntax
+
+extension TypeResolver {
+  /// Marks the type syntax as visited, or returns the already-visited type syntax
+  /// if there's a cycle. Make sure to add a matching `removeVisitedTypeSyntax`.
+  private mutating func pushTypeSyntax(_ typeSyntax: Attached<TypeSyntax>) -> [TypeSyntax]? {
+    // If we've already seen this syntax, there's a cycle so return it
+    if let existingIndex = _visitedTypeSyntaxToIndex[typeSyntax] {
+      // We might have valid references before the actual cycle; chop those off
+      // to isolate the cycle.
+      //
+      // E.g.:
+      //   typealias A = B
+      //   typealias B = A
+      //   func f(_: A) // <- Lookup here
+      // Starting from `A`, `visitedTypeSyntax` would be:
+      //   [
+      //     A // from f(_: A),
+      //     B // from typealias A = B
+      //     A // from typealias B = A
+      //   ]
+      // And we isolate to the cycle [B, A]
+      return _visitedTypeSyntax[existingIndex...].map(\.node)
+    }
+    // Add this syntax to the hash map and the array
+    _visitedTypeSyntaxToIndex[typeSyntax] = _visitedTypeSyntax.count
+    _visitedTypeSyntax.append(typeSyntax)
+    return nil
+  }
+  private mutating func popVisitedTypeSyntax(
+    _ typeSyntax: Attached<TypeSyntax>,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) {
+    let expectedIndex = _visitedTypeSyntax.count - 1
+    // Get the syntax's index, or trap
+    guard _visitedTypeSyntaxToIndex[typeSyntax] == expectedIndex else {
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Unexpectedly asked to remove non-visited/non-last `\(typeSyntax.debugDescription)` with visited \(_visitedTypeSyntax).",
+        file: file,
+        line: line
+      )
+    }
+    // Remove
+    _visitedTypeSyntax.remove(at: expectedIndex)
+    _visitedTypeSyntaxToIndex[typeSyntax] = nil
+  }
+}
+
+// MARK: Disambiguation
+
+extension TypeResolver {
+  /// Disambiguate the given declarations. This allows for custom shadowing/member-visibility handlers.
+  fileprivate func disambiguateResults<T>(results: [T], declOfResult: (T) -> TypeDeclSyntax, callsite: Syntax) -> [T] {
+    // TODO: Filter out according to access control, and by shadowing in external top-level types
+    results
+  }
+}
+
 // MARK: Type Syntax
 
 extension TypeResolver {
@@ -136,11 +151,11 @@ extension TypeResolver {
     typeSyntax: Attached<TypeSyntax>
   ) -> TypeResult {
     // Ensure we're not forming a cycle
-    if let cycle = insertVisitedTypeSyntax(typeSyntax) {
+    if let cycle = pushTypeSyntax(typeSyntax) {
       return .failure(Failure.cyclicalTypeReference(cycle: cycle))
     }
     // Append this type syntax
-    defer { removeLastVisitedTypeSyntax(typeSyntax) }
+    defer { popVisitedTypeSyntax(typeSyntax) }
 
     // We assert the file root is registered in the symbol table.
     guard let fileInfo = symbolTable.getFileInfo(typeSyntax.fileRoot) else {
@@ -320,13 +335,19 @@ extension TypeResolver {
     case .declGroup(let declGroup):
       return declGroup._memberlessDescription
     case .codeBlock(let codeBlock):
-      // TODO: Use `_prettyScope`
+      // Get the file scope (global)
       guard let sourceFileScope = codeBlock.parent?.as(SourceFileSyntax.self) else {
-        // `codeBlock.parent` shouldn't be `nil` in a valid program because of `Attached<_>`
-        return "<\(codeBlock.parent?.parent?.kind ?? .missing)>"
+        // Get the scope description (local)
+        return codeBlock.node._prettyScope.prettyDescription
       }
       return extractFileInfo(syntax: sourceFileScope).name
     }
+  }
+
+  /// Performs top-level unqualified lookup for types in external module.
+  func topLevelModuleTypeLookup(module: Identifier, name: Identifier) -> [UnqualifiedTypeLookupResult] {
+    // TODO: Implement
+    []
   }
 
   /// Implements `resolveUnqualifiedReference`
@@ -343,7 +364,6 @@ extension TypeResolver {
     //   }
     let lookupResults: [UnqualifiedTypeLookupResult]
     if let module = typeComponent.module {
-      // Top-level unqualified lookup in external module
       //
       // Top-level means that we look for declarations at the file scope of the
       // external module. For instance:
@@ -351,13 +371,7 @@ extension TypeResolver {
       //   extension Int {
       //     func f() { MyModule::f() } // ❌ Member `f` not imported through `MyModule`
       //   }
-      fatalError("Top-level external-module not lookup (while looking up \(module.name))")
-      // FIXME: Remove
-      // baseLookupResults = findExternalTopLevelUnqualifiedType(
-      //   module: module,
-      //   topLevelName: typeName,
-      //   fromSyntax: originatingSyntax
-      // )
+      lookupResults = topLevelModuleTypeLookup(module: module, name: typeComponent.name)
     } else {
       // Scoped unqualified lookup in this module
       lookupResults = typeComponent.introducingSyntax.findUnqualifiedType(
@@ -641,23 +655,27 @@ extension TypeResolver {
     }
 
     // Process the results
-    //
-    // 1. Return `nil` if no such declaration exists.
-    guard let firstTypeDecl = memberTypeDecls.first else {
+    // 1. Disambiguate so we don't give false positive .ambiguousTypeDecl
+    let disambiguatedTypeDecls = disambiguateResults(
+      results: memberTypeDecls,
+      declOfResult: \.typeDecl.node,
+      callsite: Syntax(memberIntroducingSyntax.node)
+    )
+    // 2. Return `nil` if no such declaration exists.
+    guard let firstTypeDecl = disambiguatedTypeDecls.first else {
       return Result.success(nil)
     }
-    // 2. Cannot have multiple type declarations named the same.
+    // 3. Cannot have multiple type declarations named the same.
     //    E.g.
     //    struct A {
     //      typealias B = Int
     //      typealias B = Bool
     //      let b: B // ❌ ambiguous
     //    }
-    // TODO: Add ability to disambiguite shadowing/fileprivate
-    guard memberTypeDecls.count == 1 else {
+    guard disambiguatedTypeDecls.count == 1 else {
       // TODO: Find more efficient solution (perhaps force `symbolTable.findMembers` to sort for us).
       return Result.failure(
-        Failure.ambiguousTypeDecl(symbolTable.sortDeclarations(memberTypeDecls.map(\.typeDecl)).map(\.node))
+        Failure.ambiguousTypeDecl(symbolTable.sortDeclarations(disambiguatedTypeDecls.map(\.typeDecl)).map(\.node))
       )
     }
     // There's just one member; return that
@@ -710,6 +728,7 @@ extension TypeResolver {
       // Diagnose redeclarations
       guard scopeTypeDecls == [TypeDeclSyntax(nominalDecl.node)] else {
         // Results are already sorted from lookup
+        // TODO: Check for redecls?
         return .failure(Failure.ambiguousTypeDecl(scopeTypeDecls))
       }
 
@@ -909,21 +928,9 @@ extension TypeResolver {
     baseType: TypeResult,
     typeMember: TypeReference
   ) -> TypeResult {
-    // Describe the base type(s)
-    // FIXME: Extract out into `TypeResult._succinctDescription`
-    let baseDescription: String
-    switch baseType {
-    case TypeResult.nominalTypes(let baseTypes):
-      baseDescription = baseTypes.map(\.type._succinctDescription).joined(separator: " & ")
-    case .failure:
-      baseDescription = "<failure>"
-    default:
-      baseDescription = "<non-nominal>"
-    }
-
-    return withLogging(
+    withLogging(
       request:
-        "Member `\(baseDescription)` > `\(typeMember.debugDescription)`",
+        "Member `\(baseType._succinctDescription)` > `\(typeMember.debugDescription)`",
       describe: \.debugDescription,
       perform: { $0._resolveMember(baseType: baseType, typeMember: typeMember) }
     )
@@ -1073,10 +1080,16 @@ extension TypeResolver {
       )
     }
 
+    // Disambiguate (so we don't erroneously complain about ambiguous declarations)
+    let disambiguatedDecls = disambiguateResults(
+      results: declsAndResults,
+      declOfResult: \.decl.node,
+      callsite: Syntax(typeMember.introducingSyntax.node)
+    )
     // Diagnose if we get no results
     // E.g. `(Any & Sendable).MyType` yields no results for either `Any.MyType` or
     //   `Sendable.MyType`; hence, `MyType` isn't a member of `Any & Sendable`.
-    guard let (_, firstResult) = declsAndResults.first else {
+    guard let (_, firstResult) = disambiguatedDecls.first else {
       return .failure(
         Failure.noTypeMember(
           member: typeMember,
@@ -1084,11 +1097,8 @@ extension TypeResolver {
         )
       )
     }
-    // TODO: Ensure we're properly shadowing and not giving false-positive errors
-    guard declsAndResults.count == 1 else {
-      return .failure(
-        Failure.ambiguousTypeDecl(declsAndResults.map(\.decl.node))
-      )
+    guard disambiguatedDecls.count == 1 else {
+      return .failure(Failure.ambiguousTypeDecl(disambiguatedDecls.map(\.decl.node)))
     }
 
     return firstResult
