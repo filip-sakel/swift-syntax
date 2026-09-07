@@ -21,16 +21,6 @@ import SwiftSyntax
 public struct TypeResolver {
   var logPrefix = [String]()
 
-  fileprivate mutating func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
-    guard _verbose else { return }
-    // Keep log text separately
-    let newLine = "\(logPrefix.map({ "[\($0)]" }).joined()) \(component)\n"
-    // Print new line
-    print(newLine)
-    // TODO: Remove
-    fflush(stdout)
-  }
-
   fileprivate mutating func withLogging<T>(
     request: String,
     describe: (T) -> String,
@@ -44,9 +34,9 @@ public struct TypeResolver {
       )
     }
     logPrefix.append(request)
-    log("Resolving...", file: file, line: line)
+    symbolTable.log("Resolving...", file: file, line: line)
     let result = action(&self)
-    log("Resolved \(describe(result))", file: file, line: line)
+    symbolTable.log("Resolved \(describe(result))", file: file, line: line)
     logPrefix.removeLast()
     return result
   }
@@ -226,9 +216,7 @@ extension TypeResolver {
             failures.append(
               (
                 childSyntax: childTypeSyntax.node,
-                childFailure: Failure.cannotComposeNonClassOrProtocol(
-                  resolved: TypeResult.nominalTypes(nominals)
-                )
+                childFailure: Failure.cannotComposeNonClassOrProtocol(resolved: childTypeResult)
               )
             )
           }
@@ -242,30 +230,14 @@ extension TypeResolver {
           }
           types.append(nominal)
         }
-      // Tuples/function
-      case .function(let argumentCount):
+      // Tuples/function/metatypes
+      case .function, .tuple, .metatype:
         failures.append(
           (
             childSyntax: childTypeSyntax.node,
             childFailure: Failure.cannotComposeNonClassOrProtocol(
-              resolved: TypeResult.function(argumentCount: argumentCount)
+              resolved: childTypeResult
             )
-          )
-        )
-      case .tuple(let labels):
-        failures.append(
-          (
-            childSyntax: childTypeSyntax.node,
-            childFailure: Failure.cannotComposeNonClassOrProtocol(
-              resolved: TypeResult.tuple(labels: labels)
-            )
-          )
-        )
-      case .metatype(let base):
-        failures.append(
-          (
-            childSyntax: childTypeSyntax.node,
-            childFailure: Failure.cannotComposeNonClassOrProtocol(resolved: TypeResult.metatype(base: base))
           )
         )
       // `Any` doesn't contribute any types but IS valid
@@ -348,6 +320,7 @@ extension TypeResolver {
     case .declGroup(let declGroup):
       return declGroup._memberlessDescription
     case .codeBlock(let codeBlock):
+      // TODO: Use `_prettyScope`
       guard let sourceFileScope = codeBlock.parent?.as(SourceFileSyntax.self) else {
         // `codeBlock.parent` shouldn't be `nil` in a valid program because of `Attached<_>`
         return "<\(codeBlock.parent?.parent?.kind ?? .missing)>"
@@ -379,6 +352,7 @@ extension TypeResolver {
       //     func f() { MyModule::f() } // ❌ Member `f` not imported through `MyModule`
       //   }
       fatalError("Top-level external-module not lookup (while looking up \(module.name))")
+      // FIXME: Remove
       // baseLookupResults = findExternalTopLevelUnqualifiedType(
       //   module: module,
       //   topLevelName: typeName,
@@ -392,7 +366,7 @@ extension TypeResolver {
       )
     }
 
-    log("Lookup results: \(lookupResults.map(\.debugDescription))")
+    symbolTable.log("Lookup results: \(lookupResults.map(\.debugDescription))")
 
     // Find first matching type declaration
     for lookupResult: UnqualifiedTypeLookupResult in lookupResults {
@@ -577,7 +551,9 @@ extension TypeResolver {
   ) -> Result<ResolvedTypeSyntax, Failure> {
     let declContext: DeclContext = _findDeclContext(ofDeclGroup: declGroup)
 
-    log("Found decl context `\(_describeDeclContext(declContext))` containing `\(declGroup._memberlessDescription)`")
+    symbolTable.log(
+      "Found decl context `\(_describeDeclContext(declContext))` containing `\(declGroup._memberlessDescription)`"
+    )
 
     if let nominalTypeDecl = declGroup.as(NominalTypeDeclSyntax.self) {
       return resolveNominalTypeDecl(
@@ -894,7 +870,7 @@ extension TypeResolver {
       }
     } else if let typeAlias = typeDecl.as(TypeAliasDeclSyntax.self) {
       let aliasedTypeSyntax = typeAlias.node.initializer.value
-      log(
+      symbolTable.log(
         "Found aliased type `\(aliasedTypeSyntax)`"
       )
 
@@ -934,6 +910,7 @@ extension TypeResolver {
     typeMember: TypeReference
   ) -> TypeResult {
     // Describe the base type(s)
+    // FIXME: Extract out into `TypeResult._succinctDescription`
     let baseDescription: String
     switch baseType {
     case TypeResult.nominalTypes(let baseTypes):
@@ -1048,7 +1025,7 @@ extension TypeResolver {
         memberName: typeMember.name,
         memberIntroducingSyntax: Attached<TypeLikeSyntax>(typeMember.introducingSyntax)
       )
-      log("Type members matching '\(typeMember.name.name)': \(memberTypeDeclResult._debugDescription)")
+      symbolTable.log("Type members matching '\(typeMember.name.name)': \(memberTypeDeclResult._debugDescription)")
       // Collect; skip if it doesn't exist; throw on failure
       let (memberDeclGroupParent, memberTypeDecl): (Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)
       switch memberTypeDeclResult {
@@ -1244,11 +1221,12 @@ extension TypeResolver {
       return .failure(Failure.noTypeInScope)
     }
 
+    // FIXME: Symbol table should have `findAllExtensions(accessibleFrom:)`
     // Find all the extensions we need to bind
     let accessibleExtensions = symbolTable.findAllExtensions(
       accessibleFrom: typeReference.syntax.fileRoot
     )
-    log("Accessible extensions: \(accessibleExtensions.map(\._memberlessDescription))")
+    symbolTable.log("Accessible extensions: \(accessibleExtensions.map(\._memberlessDescription))")
 
     // Queue up the extensions that need binding
     let unadmittedExtensions: [Attached<ExtensionDeclSyntax>] = accessibleExtensions.filter({
@@ -1258,7 +1236,7 @@ extension TypeResolver {
 
     // Return if no extensions are available
     guard !unadmittedExtensions.isEmpty else {
-      log("No extensions to bind.")
+      symbolTable.log("No extensions to bind.")
       return .success(wrapReference(currentNominal))
     }
 
@@ -1298,6 +1276,7 @@ extension TypeResolver {
       return alreadyBoundResult
     }
 
+    // TODO: Look into whether we can outsource this to `SymbolTable+TypeGraph`
     symbolTable.admitExtensions([extensionDecl])
 
     // If there's not an existing extension-binding request, the extension
