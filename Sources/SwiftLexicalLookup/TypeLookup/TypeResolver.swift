@@ -434,9 +434,12 @@ extension TypeResolver {
         // To find the member
         lookForSelectedMember = !lookForSelf
 
-      case .genericParameters(firstMatch: _, redeclarations: _, genericClause: _):
-        // TODO: Should we throw if we get redeclarations?
-        // (do the same in `.lookForGenericParameters`)
+      case .genericParameters(let firstMatch, let redeclarations, genericClause: _):
+        guard redeclarations.isEmpty else {
+          return .failure(
+            .ambiguousTypeDecl([TypeDeclSyntax(firstMatch.node)] + redeclarations.map({ TypeDeclSyntax.init($0.node) }))
+          )
+        }
         return .failure(.genericParameterOrAssociatedType)
 
       case .lookForGenericParameters(let extensionDecl):
@@ -456,11 +459,19 @@ extension TypeResolver {
               return Result.failure(Failure.nested(.invalidBaseType(failure)))
             }
 
-            // Get first matching generic parameter
-            let matchingGenericParameter = baseType.type.mainDecl.node.findGenericParameters(
+            // Get the matching generic parameters
+            let matchingGenericParameters = baseType.type.mainDecl.node.findGenericParameters(
               withName: typeComponent.name
-            ).first
-            return .success(matchingGenericParameter)
+            )
+            // Diagnose ambiguities
+            guard matchingGenericParameters.count <= 1 else {
+              return .failure(
+                .ambiguousTypeDecl(matchingGenericParameters.map(TypeDeclSyntax.init(_:)))
+              )
+            }
+
+            // Return the first generic parameter or `nil`
+            return .success(matchingGenericParameters.first)
           }
         )
 
