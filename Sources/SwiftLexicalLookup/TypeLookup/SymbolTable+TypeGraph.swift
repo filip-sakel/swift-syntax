@@ -39,6 +39,19 @@ extension SymbolTable {
       self.unresolvedExtensions = unresolvedExtensions
     }
 
+    /// Appends the requested extensions
+    ///
+    /// Complexity: O(n) where `n` is the number of `elements`.
+    private mutating func append(contentsOf elements: [Attached<ExtensionDeclSyntax>]) {
+      for element in elements {
+        // Don't add the currently processing array
+        guard current != element else { continue }
+        // Add the extension if not already in the set.
+        guard requestedSet.insert(element).inserted else { continue }
+        requestedArray.append(element)
+      }
+    }
+
     /// Complexity: O(n) where `n` is the number of extensions in `sourceFile`.
     mutating func request(sourceFile: SourceFileSyntax) {
       guard let sourceFileExtensions = unresolvedExtensions.removeValue(forKey: sourceFile) else {
@@ -63,26 +76,13 @@ extension SymbolTable {
       append(contentsOf: [extensionDecl])
     }
 
-    /// Complexity: O(n) where `n` is the number of `extensions`.
-    fileprivate mutating func request(invalidatedExtensions: [Attached<ExtensionDeclSyntax>]) {
-      append(contentsOf: invalidatedExtensions)
+    /// Complexity: O(n) where `n` is the number of extensions.
+    fileprivate mutating func request(evictedExtensions: [Attached<ExtensionDeclSyntax>]) {
+      append(contentsOf: evictedExtensions)
     }
 
     fileprivate var alreadyProcessing: Bool {
       current != nil
-    }
-
-    /// Appends the requested extensions
-    ///
-    /// Complexity: O(n) where `n` is the number of `elements`.
-    private mutating func append(contentsOf elements: [Attached<ExtensionDeclSyntax>]) {
-      for element in elements {
-        // Don't add the currently processing array
-        guard current != element else { continue }
-        // Add the extension if not already in the set.
-        guard requestedSet.insert(element).inserted else { continue }
-        requestedArray.append(element)
-      }
     }
 
     /// Returns the last index and element of the requestedExtensions without
@@ -139,7 +139,7 @@ extension SymbolTable {
     }
 
     // Admit requests (if no request is already underway)
-    if !alreadyProcessing { admitRequestedExtensions() }
+    if !alreadyProcessing { _admitRequestedExtensions() }
   }
 
   /// Returns the nominal-type reference with the extension's extended-type
@@ -162,7 +162,7 @@ extension SymbolTable {
     self.requestedExtensions.request(extensionDecl: extensionDecl)
 
     // Admit requests (if no request is already underway)
-    if !alreadyProcessing { admitRequestedExtensions() }
+    if !alreadyProcessing { _admitRequestedExtensions() }
 
     // If there's not an existing extension-binding request, the extension
     // should be admitted. Otherwise, return a failure for now.
@@ -182,50 +182,14 @@ extension SymbolTable {
   }
 }
 
-// MARK: Qualified Requests
+// MARK: Extension Binding
 
 extension SymbolTable {
-  func findMemberType(
-    baseType: TypeGraph.TypeRef,
-    memberTypeName: Identifier,
-    introducingTypeSyntax: Attached<TypeLikeSyntax>,
-    introducingModule: ModuleName,
-    dependencyTracker: inout DependencyTracker
-  ) -> Result<
-    [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)],
-    TypeGraph.QualifiedTypeLookupFailure
-  > {
-    // Assert we have the right module
-    let fileModule = getFileInfo(introducingTypeSyntax.fileRoot)?.module
-    assert(
-      fileModule == introducingModule,
-      "[SwiftLexicalLookup] Internal error: Caller passed wrong module for `\(introducingTypeSyntax.trimmedDescription)`: got '\(introducingModule.name)' but expected \(fileModule?.name ?? "nil")"
-    )
-
-    // TODO: Remove?
-    log("Finding member \(baseType) > \(memberTypeName.name)")
-    defer { log("New deps for member-type lookup: \(dependencyTracker.dependencies)") }
-
-    return typeGraph.findMemberType(
-      baseType: baseType,
-      memberTypeName: memberTypeName,
-      origin: (typeSyntax: introducingTypeSyntax, module: introducingModule),
-      dependencyTracker: &dependencyTracker,
-      symbolTable: self
-    )
-  }
-}
-
-// MARK: Extension Binding 2
-
-extension SymbolTable {
-  /// Tries to bind the given extension; returns `nil` or failure.
-  ///
-  /// If no binding request is already underway, the given extensions
-  /// should be admitted to the graph after this call. Otherwise, the provided
-  /// extensions are queued up for the existing request to handle.
-  fileprivate func admitRequestedExtensions() {
+  /// Tries to admit all requested extensions, handling new requests in the
+  /// process.
+  fileprivate func _admitRequestedExtensions() {
     log("Admitting all requested extensions")
+
     // Handle all binding requests
     //
     // We use a while loop since a single binding request may generate more
@@ -239,14 +203,7 @@ extension SymbolTable {
     // ```
     // Then, `Self` will only try to bind `extension A.B` but to resolve `A.B`, we
     // need to fully resolve `A` so we also have to bind `extension A`.
-    while let extensionDecl = self.requestedExtensions.beginPop() {
-      // The result can change after binding more extensions; ignore for now.
-      let _ = bindRequestedExtension(extensionDecl)
-
-      // We remove at the end of the iteration because we want nested syntax-resolution
-      // requests to see that we're actively trying to bind this extension.
-      self.requestedExtensions.finalizePop(extensionDecl)
-    }
+    while self._admitCurrentExtension() {}
 
     assert(
       self.requestedExtensions.current == nil,
@@ -255,22 +212,21 @@ extension SymbolTable {
   }
 
   /// Admits the given extension added to `self.requestedExtensions`. Only
-  /// `bindExtensions` should call this method.
+  /// `_admitCurrentExtension` should call this method.
   ///
-  /// Handles extensions already admitted to the graph, and fixes
-  /// invalidated extensions.
+  /// Handles extensions already admitted to the graph, and requests
+  /// that evicted extensions be re-admitted.
   ///
-  /// - Precondition: `extensionDecl` must be in `unresolvedExtensions` (i.e. not yet admitted)
-  /// FIXME: Make _bindExtension handle other generated requests;
-  /// e.g. if we're resolving `extension A.B {}`, we will prob have to fully resolve `A`.
-  private func bindRequestedExtension(
-    _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) {
-    // Uphold invariant
-    assert(
-      self.requestedExtensions.current == extensionDecl,
-      "[SwiftLexicalLookup] Internal error: Called `bindRequestedExtension` without first calling to `self.requestedExtensions.beginPop()`."
-    )
+  /// - Precondition: No extensions are currently bound, i.e., the
+  /// `requestedExtensions.current == nil`
+  private func _admitCurrentExtension() -> Bool {
+    // Begin popping the current extension
+    guard let extensionDecl = self.requestedExtensions.beginPop() else { return false }
+    // We remove at the end because we want nested syntax-resolution
+    // requests to see that we're actively trying to bind this extension.
+    defer { self.requestedExtensions.finalizePop(extensionDecl) }
+
+    log("Binding `\(extensionDecl._memberlessDescription)`")
 
     // === Resolve Extension ===
 
@@ -305,10 +261,10 @@ extension SymbolTable {
     )
 
     // Extract the invalidated extensions or handle failures
-    let (resolvedType, invalidatedExtensions): BindingResult
+    let (resolvedType, evictedExtensions): BindingResult
     switch bindingResult {
     case .success(let success):
-      (resolvedType, invalidatedExtensions) = success
+      (resolvedType, evictedExtensions) = success
     case .failure(let failure):
       // Ensure we handle future failure types
       switch failure {
@@ -324,14 +280,49 @@ extension SymbolTable {
       }
     }
     log(
-      "Resolved to \(resolvedType); Dependencies: \(resolver.dependencyTracker.dependencies.map(\.debugDescription)); Invalidated: \(invalidatedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
+      "Resolved to \(resolvedType); Dependencies: \(resolver.dependencyTracker.dependencies.map(\.debugDescription)); Invalidated: \(evictedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
     )
 
-    self.requestedExtensions.request(invalidatedExtensions: invalidatedExtensions.map(\.extensionDecl))
+    self.requestedExtensions.request(evictedExtensions: evictedExtensions.map(\.extensionDecl))
+
+    return true
   }
 }
 
-// MARK: Registering Nominal
+// MARK: Qualified-Lookup Requests
+
+extension SymbolTable {
+  func findMemberType(
+    baseType: TypeGraph.TypeRef,
+    memberTypeName: Identifier,
+    introducingTypeSyntax: Attached<TypeLikeSyntax>,
+    introducingModule: ModuleName,
+    dependencyTracker: inout DependencyTracker
+  ) -> Result<
+    [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)],
+    TypeGraph.QualifiedTypeLookupFailure
+  > {
+    // Assert we have the right module
+    let fileModule = getFileInfo(introducingTypeSyntax.fileRoot)?.module
+    assert(
+      fileModule == introducingModule,
+      "[SwiftLexicalLookup] Internal error: Caller passed wrong module for `\(introducingTypeSyntax.trimmedDescription)`: got '\(introducingModule.name)' but expected \(fileModule?.name ?? "nil")"
+    )
+
+    log("Finding member \(baseType) > \(memberTypeName.name)")
+    defer { log("New deps for member-type lookup: \(dependencyTracker.dependencies)") }
+
+    return typeGraph.findMemberType(
+      baseType: baseType,
+      memberTypeName: memberTypeName,
+      origin: (typeSyntax: introducingTypeSyntax, module: introducingModule),
+      dependencyTracker: &dependencyTracker,
+      symbolTable: self
+    )
+  }
+}
+
+// MARK: Registration Requests
 
 extension SymbolTable {
   /// Registers nominal type by forwarding to `TypeGraph/registerNominalType`
@@ -400,9 +391,4 @@ extension SymbolTable {
       )
     })
   }
-}
-
-// MARK: Qualified Type Lookup
-
-extension SymbolTable {
 }
