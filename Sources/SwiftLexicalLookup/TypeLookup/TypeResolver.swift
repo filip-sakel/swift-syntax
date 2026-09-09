@@ -682,9 +682,8 @@ extension TypeResolver {
     //      let b: B // ❌ ambiguous
     //    }
     guard disambiguatedTypeDecls.count == 1 else {
-      // TODO: Find more efficient solution (perhaps force `symbolTable.findMembers` to sort for us).
       return Result.failure(
-        Failure.ambiguousTypeDecl(symbolTable.sortDeclarations(disambiguatedTypeDecls.map(\.typeDecl)).map(\.node))
+        Failure.ambiguousTypeDecl(disambiguatedTypeDecls.map(\.typeDecl).map(\.node))
       )
     }
     // There's just one member; return that
