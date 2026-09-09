@@ -403,7 +403,7 @@ extension TypeResolver {
       // `lookForSelectedMember` is false if we can return the enclosing type
       // itself; true if we need to perform qualified lookup and return a type
       // member.
-      let enclosingTypeResult: TypeResult
+      let enclosingType: TypeResult
       let lookForSelectedMember: Bool
 
       logPrefix.append("Trying \(lookupResult._describeSuccinctly(lookedUpName: typeComponent.name))")
@@ -411,7 +411,7 @@ extension TypeResolver {
 
       switch lookupResult {
       case .nonNestedTypeDecl(let typeDecl, redeclarations: _, let parentCodeBlock):
-        enclosingTypeResult = resolveTypeDecl(
+        enclosingType = resolveTypeDecl(
           typeDecl: typeDecl,
           declContext: DeclContext.codeBlock(parentCodeBlock),
           originatingSyntax: Attached<TypeLikeSyntax>(typeComponent.introducingSyntax)
@@ -440,9 +440,9 @@ extension TypeResolver {
         // Set the enclosing type
         switch declGroupResult {
         case .success(let nominalType):
-          enclosingTypeResult = .nominalTypes([nominalType])
+          enclosingType = .nominalTypes([nominalType])
         case .failure(let failure):
-          enclosingTypeResult = .failure(failure)
+          enclosingType = .failure(failure)
         }
         // To find the member
         lookForSelectedMember = !lookForSelf
@@ -481,27 +481,15 @@ extension TypeResolver {
         symbolTable.log("Found generic parameter `\(matchingGenericParameter.trimmedDescription)`")
 
         // We don't resolve generic parameters (same as ``resolveTypeDecl``).
-        enclosingTypeResult = .failure(.genericParameterOrAssociatedType)
+        enclosingType = .failure(.genericParameterOrAssociatedType)
         lookForSelectedMember = false
       }
 
-      // Whether we have to look for a member or not, we can't succeed without
-      // knowing the enclosing type
-      // TODO: Defer these failures for `resolveMember` to handle
-      let enclosingType: TypeResult
-      switch (enclosingTypeResult, lookForSelectedMember) {
-      // Continue to next scope if unqualified lookup didn't find the type in this scope
-      case (.failure(.noTypeInScope), _):
-        continue
-      // Return failure directly if we're not looking for the selected member
-      case (.failure(let failure), false):
-        return .failure(failure)
-      // Forward success
-      case (let result, _):
-        enclosingType = result
-      }
+      // Continue to next scope if unqualified lookup didn't find the
+      // (enclosing/not) type in this scope
+      if case .failure(.noTypeInScope) = enclosingType { continue }
 
-      // If we don't have to look for a member, return
+      // If we don't have to look for a member, return the type
       if !lookForSelectedMember { return enclosingType }
 
       // Look for the member
