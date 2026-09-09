@@ -458,7 +458,7 @@ extension TypeResolver {
       case .lookForGenericParameters(let extensionDecl):
         // Resolve extended type
         let baseType: GloballyResolvedTypeSyntax
-        switch bindExtension(extensionDecl) {
+        switch symbolTable.bindExtension(extensionDecl) {
         case .success(let type):
           baseType = type
         case .failure(let failure):
@@ -593,7 +593,7 @@ extension TypeResolver {
         return .failure(Failure.extensionNotAtFileScope(extensionDecl: extensionDecl.node))
       }
       // Wrap the global reference
-      return bindExtension(extensionDecl).map(ResolvedTypeSyntax.init(global:))
+      return symbolTable.bindExtension(extensionDecl).map(ResolvedTypeSyntax.init(global:))
     } else {
       fatalError(
         "[SwiftLexicalLookup] Internal error: Expected decl group to be either a nominal type or extension decl; instead found \(declGroup.kind)."
@@ -1202,7 +1202,7 @@ extension TypeResolver {
   }
 }
 
-// MARK: Resolve Extension / Nominal
+// MARK: Resolve Nominal
 
 extension TypeResolver {
   /// Resolve a qualified-type name to a nominal type with all accessible
@@ -1230,48 +1230,7 @@ extension TypeResolver {
       return .success(typeReference)
     }
 
-    // Wrap the new reference in a `ResolvedNominalTypeReference`
-    func wrapReference(_ nominalRef: TypeGraph.TypeRef) -> ResolvedTypeSyntax {
-      ResolvedTypeSyntax(
-        type: nominalRef,
-        syntax: typeReference.syntax
-      )
-    }
-
-    // Get the nominal type from the symbol table (or register accordingly)
-    let currentNominalResult: Result<TypeGraph.TypeRef, TypeGraph.NominalTypeRefUpdateFailure> =
-      symbolTable.typeGraph.updateNominalTypeReference(oldReference: typeReference.type)
-
-    // Handle reregistration (we should diagnose reregistrations and not save them in the table)
-    let currentNominal: TypeGraph.TypeRef
-    switch currentNominalResult {
-    case .success(let success):
-      currentNominal = success
-    case .failure(.removed):
-      // If the reference changed, report those failures
-      return .failure(Failure.noTypeInScope)
-    }
-
-    // FIXME: Symbol table should have `findAllExtensions(accessibleFrom:)`
-    // Find all the extensions we need to bind
-    let accessibleExtensions = symbolTable.findAllExtensions(
-      accessibleFrom: typeReference.syntax.fileRoot
-    )
-    symbolTable.log("Accessible extensions: \(accessibleExtensions.map(\._memberlessDescription))")
-
-    // Queue up the extensions that need binding
-    let unadmittedExtensions: [Attached<ExtensionDeclSyntax>] = accessibleExtensions.filter({
-      accessibleExtension in
-      symbolTable.unresolvedExtensions[accessibleExtension.fileRoot, default: []].contains(accessibleExtension)
-    })
-
-    // Return if no extensions are available
-    guard !unadmittedExtensions.isEmpty else {
-      symbolTable.log("No extensions to bind.")
-      return .success(wrapReference(currentNominal))
-    }
-
-    symbolTable.admitExtensions(unadmittedExtensions)
+    symbolTable.admitExtensions(accessibleFrom: typeReference.syntax.fileRoot)
 
     // After binding all extensions, get the new nominal type
     guard
@@ -1285,45 +1244,12 @@ extension TypeResolver {
       )
     }
 
-    return .success(wrapReference(finalizedNominalRef))
-  }
-
-  /// Returns the nominal-type reference with the extension's extended-type
-  /// syntax as the originating syntax.
-  @_spi(_QualifiedLookupTests) public mutating func bindExtension(
-    _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<GloballyResolvedTypeSyntax, Failure> {
-    withLogging(
-      request: "Binding extension `\(extensionDecl._memberlessDescription)`",
-      describe: \._debugDescription,
-      perform: { $0._bindExtension(extensionDecl) }
-    )
-  }
-
-  fileprivate mutating func _bindExtension(
-    _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<GloballyResolvedTypeSyntax, Failure> {
-    if let alreadyBoundResult = symbolTable.getExtensionResolvedType(extensionDecl) {
-      return alreadyBoundResult
-    }
-
-    // TODO: Look into whether we can outsource this to `SymbolTable+TypeGraph`
-    symbolTable.admitExtensions([extensionDecl])
-
-    // If there's not an existing extension-binding request, the extension
-    // should be admitted. Otherwise, return a failure for now.
-    guard let boundTypeResult = symbolTable.typeGraph.getExtensionResolvedType(extensionDecl) else {
-      // The extension graph tracks dependencies so this result should be
-      // invalidated and fixed after the primary extension-binding request
-      // completes.
-      return .failure(Failure.extensionNotBoundYet)
-    }
-
-    return boundTypeResult.map({ (globalReference, mainDecl) in
-      GloballyResolvedTypeSyntax(
-        type: globalReference,
-        syntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
+    // Wrap the new reference in a `ResolvedNominalTypeReference`
+    return .success(
+      ResolvedTypeSyntax(
+        type: finalizedNominalRef,
+        syntax: typeReference.syntax
       )
-    })
+    )
   }
 }

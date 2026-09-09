@@ -18,12 +18,23 @@ import SwiftSyntax
 extension SymbolTable {
   struct RequestedExtensions {
     fileprivate private(set) var current: Attached<ExtensionDeclSyntax>?
+    private var unresolvedExtensions: [ModuleName: [SourceFileSyntax: [Attached<ExtensionDeclSyntax>]]]
     private var requestedArray: [Attached<ExtensionDeclSyntax>]
     private var requestedSet: Set<Attached<ExtensionDeclSyntax>>
 
     init() {
       self.current = nil
       (self.requestedArray, self.requestedSet) = ([], [])
+      // TODO: Replace `SymbolTable/unresolvedExtensions`
+      self.unresolvedExtensions = [:]
+    }
+
+    mutating func request(sourceFile: SourceFileSyntax, module: ModuleName) {
+      guard let sourceFileExtensions = unresolvedExtensions[module, default: [:]].removeValue(forKey: sourceFile) else {
+        // Return if already removed
+        return
+      }
+      append(contentsOf: sourceFileExtensions)
     }
 
     /// Appends the requested extensions
@@ -74,6 +85,60 @@ extension SymbolTable {
       // Reset the current
       current = nil
     }
+  }
+}
+
+// MARK: Symbol Table Requests
+
+extension SymbolTable {
+  func admitExtensions(accessibleFrom sourceFile: SourceFileSyntax) {
+    // FIXME: Symbol table should have `findAllExtensions(accessibleFrom:)`
+    // Find all the extensions we need to bind
+    let accessibleExtensions = findAllExtensions(accessibleFrom: sourceFile)
+    log("Accessible extensions: \(accessibleExtensions.map(\._memberlessDescription))")
+
+    // Queue up the extensions that need binding
+    let unadmittedExtensions: [Attached<ExtensionDeclSyntax>] = accessibleExtensions.filter({
+      accessibleExtension in
+      unresolvedExtensions[accessibleExtension.fileRoot, default: []].contains(accessibleExtension)
+    })
+
+    // Return if no extensions are available
+    guard !unadmittedExtensions.isEmpty else {
+      log("No extensions to bind.")
+      return
+    }
+
+    admitExtensions(unadmittedExtensions)
+  }
+
+  /// Returns the nominal-type reference with the extension's extended-type
+  /// syntax as the originating syntax.
+  func bindExtension(
+    _ extensionDecl: Attached<ExtensionDeclSyntax>
+  ) -> Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure> {
+    if let alreadyBoundResult = getExtensionResolvedType(extensionDecl) {
+      return alreadyBoundResult
+    }
+
+    // TODO: Look into whether we can simplify
+    admitExtensions([extensionDecl])
+
+    // If there's not an existing extension-binding request, the extension
+    // should be admitted. Otherwise, return a failure for now.
+    guard let boundTypeResult = typeGraph.getExtensionResolvedType(extensionDecl) else {
+      // The extension graph tracks dependencies so this result should be
+      // invalidated and fixed after the primary extension-binding request
+      // completes.
+      return .failure(.extensionNotBoundYet)
+    }
+
+    return boundTypeResult.map({ (globalReference, mainDecl) in
+      TypeResolver.GloballyResolvedTypeSyntax(
+        type: globalReference,
+        syntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
+      )
+    })
   }
 }
 
