@@ -311,13 +311,15 @@ extension SymbolTable {
     log("Finding member \(baseType) > \(memberTypeName.name)")
     defer { log("New deps for member-type lookup: \(dependencyTracker.dependencies)") }
 
-    return typeGraph.findMemberType(
+    let unsortedResults = typeGraph.findMemberType(
       baseType: baseType,
       memberTypeName: memberTypeName,
       origin: (typeSyntax: introducingTypeSyntax, module: introducingModule),
       dependencyTracker: &dependencyTracker,
       symbolTable: self
     )
+    // TODO: Find more efficient approach
+    return unsortedResults.map({ $0.sorted(by: { $0.typeDecl.position < $1.typeDecl.position }) })
   }
 }
 
@@ -367,5 +369,11 @@ extension SymbolTable {
         syntax: originatingSyntax
       )
     })
+  }
+  /// Updates a registered nominal type by forwarding to `TypeGraph/updateNominalTypeReference`.
+  func updateNominalTypeReference(
+    oldReference: TypeGraph.TypeRef
+  ) -> Result<TypeGraph.TypeRef, TypeGraph.NominalTypeRefUpdateFailure> {
+    return typeGraph.updateNominalTypeReference(oldReference: oldReference)
   }
 }

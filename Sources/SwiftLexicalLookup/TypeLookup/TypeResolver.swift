@@ -1234,7 +1234,7 @@ extension TypeResolver {
 
     // After binding all extensions, get the new nominal type
     guard
-      case .success(let finalizedNominalRef) = symbolTable.typeGraph.updateNominalTypeReference(
+      case .success(let finalizedNominalRef) = symbolTable.updateNominalTypeReference(
         oldReference: TypeGraph.TypeRef.global(qualifiedGlobalRef)
       )
     else {

@@ -26,6 +26,7 @@ extension SymbolTable {
   /// (a) Module name (alphabetically), (b) File id (alphabetically), and (c) File position (offset).
   ///
   /// Helps maintain deterministic outputs.
+  // TODO: Remove
   func sortDeclarations(_ typeDecls: [Attached<TypeDeclSyntax>]) -> [Attached<TypeDeclSyntax>] {
     typeDecls.sorted(by: { a, b in
       // Compare modules
