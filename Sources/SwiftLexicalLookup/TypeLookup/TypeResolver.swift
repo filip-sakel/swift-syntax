@@ -306,7 +306,16 @@ extension TypeResolver {
   /// calls: one for `A` and one for `MyModule::B`. Type members are handled
   /// in other functions.
   ///
-  /// Note: We don't resolve generic parameters.
+  /// Notes:
+  /// 1. We don't resolve generic parameters.
+  /// 2. To resolve a type, we have to know its declaration context, e.g.:
+  ///   ```swift
+  ///   extension String.UTF8View { <- (3) Resolve
+  ///     struct A { // <- (2) Resolve
+  ///       struct B {} // <- (1) Look up here
+  ///     }
+  ///   }
+  ///   ```
   fileprivate mutating func resolveUnqualifiedReference(
     typeComponent: TypeReference
   ) -> TypeResult {
@@ -345,7 +354,7 @@ extension TypeResolver {
   }
 
   /// Performs top-level unqualified lookup for types in external module.
-  func topLevelModuleTypeLookup(module: Identifier, name: Identifier) -> [UnqualifiedTypeLookupResult] {
+  func findTopLevelTypes(moduleSelector: Identifier?, name: Identifier) -> [Attached<TypeDeclSyntax>] {
     // TODO: Implement
     []
   }
@@ -354,36 +363,44 @@ extension TypeResolver {
   fileprivate mutating func _resolveUnqualifiedReference(
     typeComponent: TypeReference
   ) -> TypeResult {
-    // Perfom unqualified lookup up to find the base type's declaration
-    //
-    // e.g.
-    //   extension String.UTF8View { <- Resolve
-    //     struct A { // <- Resolve
-    //       struct B {} // <- Look up here
-    //     }
-    //   }
-    let lookupResults: [UnqualifiedTypeLookupResult]
+    let fileResults: [UnqualifiedTypeLookupResult]
     if let module = typeComponent.module {
-      //
       // Top-level means that we look for declarations at the file scope of the
       // external module. For instance:
       //   // MyModule>MyFile.swift
       //   extension Int {
       //     func f() { MyModule::f() } // ❌ Member `f` not imported through `MyModule`
       //   }
-      lookupResults = topLevelModuleTypeLookup(module: module, name: typeComponent.name)
+      let topLevelTypes = findTopLevelTypes(moduleSelector: module, name: typeComponent.name)
+      let diambiguatedTopLevelTypes = disambiguateResults(
+        results: topLevelTypes,
+        declOfResult: \.node,
+        callsite: Syntax(typeComponent.introducingSyntax.node)
+      )
+      guard let topLevelType = diambiguatedTopLevelTypes.first else {
+        return .failure(Failure.noTypeInScope)
+      }
+      guard diambiguatedTopLevelTypes.count == 1 else {
+        return .failure(Failure.ambiguousTypeDecl(diambiguatedTopLevelTypes.map(\.node)))
+      }
+      symbolTable.log("Found top-level type `\(topLevelType._memberlessDescription)`")
+      return resolveTypeDecl(
+        typeDecl: topLevelType,
+        declContext: DeclContext.codeBlock(topLevelType.fileRootStatements),
+        originatingSyntax: Attached<TypeLikeSyntax>(typeComponent.introducingSyntax)
+      )
     } else {
       // Scoped unqualified lookup in this module
-      lookupResults = typeComponent.introducingSyntax.findUnqualifiedType(
+      fileResults = typeComponent.introducingSyntax.findUnqualifiedType(
         typeComponent.name,
         configuredRegions: extractFileInfo(syntax: typeComponent.introducingSyntax).configuredRegions
       )
     }
 
-    symbolTable.log("Lookup results: \(lookupResults.map(\.debugDescription))")
+    symbolTable.log("Lookup results: \(fileResults.map(\.debugDescription))")
 
     // Find first matching type declaration
-    for lookupResult: UnqualifiedTypeLookupResult in lookupResults {
+    for lookupResult: UnqualifiedTypeLookupResult in fileResults {
       // The enclosing type, and whether to look for the selected member.
       //
       // `lookForSelectedMember` is false if we can return the enclosing type
@@ -392,7 +409,6 @@ extension TypeResolver {
       let enclosingTypeResult: TypeResult
       let lookForSelectedMember: Bool
 
-      // TODO: Use withLogging
       logPrefix.append("Trying \(lookupResult._describeSuccinctly(lookedUpName: typeComponent.name))")
       defer { logPrefix.removeLast() }
 
@@ -443,53 +459,35 @@ extension TypeResolver {
         return .failure(.genericParameterOrAssociatedType)
 
       case .lookForGenericParameters(let extensionDecl):
-        // TODO: Implement logging for all unqualified lookup results
-        let matchingGenericParameterResult: Result<GenericParameterSyntax?, Failure> = withLogging(
-          request: "Generic parameters",
-          describe: { result in
-            result.map({ $0?.trimmedDescription })._debugDescription
-          },
-          perform: {
-            // Resolve extended type
-            let baseType: GloballyResolvedTypeSyntax
-            switch $0.bindExtension(extensionDecl) {
-            case .success(let type):
-              baseType = type
-            case .failure(let failure):
-              return Result.failure(Failure.nested(.invalidBaseType(failure)))
-            }
-
-            // Get the matching generic parameters
-            let matchingGenericParameters = baseType.type.mainDecl.node.findGenericParameters(
-              withName: typeComponent.name
-            )
-            // Diagnose ambiguities
-            guard matchingGenericParameters.count <= 1 else {
-              return .failure(
-                .ambiguousTypeDecl(matchingGenericParameters.map(TypeDeclSyntax.init(_:)))
-              )
-            }
-
-            // Return the first generic parameter or `nil`
-            return .success(matchingGenericParameters.first)
-          }
-        )
-
-        // Get the generic parameter (continue if we got no generic parameters;
-        // forward failures)
-        switch matchingGenericParameterResult {
-        case .success(_?):
-          break
-        case .success(nil):
-          continue
+        // Resolve extended type
+        let baseType: GloballyResolvedTypeSyntax
+        switch bindExtension(extensionDecl) {
+        case .success(let type):
+          baseType = type
         case .failure(let failure):
-          return .failure(failure)
+          return .failure(Failure.nested(.invalidBaseType(failure)))
         }
+
+        // Get the matching generic parameters
+        let matchingGenericParameters = baseType.type.mainDecl.node.findGenericParameters(
+          withName: typeComponent.name
+        )
+        // If the result is empty, continue
+        guard let matchingGenericParameter = matchingGenericParameters.first else { continue }
+        // Diagnose ambiguities
+        guard matchingGenericParameters.count <= 1 else {
+          return .failure(
+            .ambiguousTypeDecl(matchingGenericParameters.map(TypeDeclSyntax.init(_:)))
+          )
+        }
+
+        symbolTable.log("Found generic parameter `\(matchingGenericParameter.trimmedDescription)`")
 
         // We don't resolve generic parameters (same as ``resolveTypeDecl``).
         enclosingTypeResult = .failure(.genericParameterOrAssociatedType)
         lookForSelectedMember = false
       case .lookInModule:
+        findTopLevelTypes(moduleSelector: nil, name: typeComponent.name)
         // TODO: Handle
         continue
       }
