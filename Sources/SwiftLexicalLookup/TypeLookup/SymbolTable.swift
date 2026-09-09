@@ -32,12 +32,9 @@ public final class SymbolTable {
   private let fileToInfo: [SourceFileSyntax: FileInfo]
 
   /// Tracks requested extensions for extension binding.
-  var requestedExtensions: RequestedExtensions = RequestedExtensions()
+  var requestedExtensions: RequestedExtensions
 
-  // TODO: Setters should be private
-  //
-  /// The extensions that have not yet been admitted to the type graph.
-  public internal(set) lazy var unresolvedExtensions = _findUnresolvedExtensions()
+  // TODO: Setter should be private
   /// A graph that keeps tracks of types and their extensions.
   public internal(set) var typeGraph = TypeGraph()
 
@@ -56,6 +53,7 @@ public final class SymbolTable {
     self.moduleToSources = moduleToSources
     self.buildConfiguration = buildConfiguration
     self.fileToInfo = fileToInfo
+    self.requestedExtensions = RequestedExtensions(fileToInfo: fileToInfo)
   }
 }
 

@@ -166,7 +166,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
     if verbose {
       print("Extension `\(extensionDecl.node._memberlessDescription)` not already bound; initating binding.")
     }
-    symbolTable.admitExtensions([extensionDecl])
+    _ = symbolTable.bindExtension(extensionDecl)
 
     // After binding, we should we have a state
     guard let producedState = symbolTable.typeGraph.extensionsToState[extensionDecl] else {

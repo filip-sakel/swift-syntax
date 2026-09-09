@@ -18,29 +18,62 @@ import SwiftSyntax
 extension SymbolTable {
   struct RequestedExtensions {
     fileprivate private(set) var current: Attached<ExtensionDeclSyntax>?
-    private var unresolvedExtensions: [ModuleName: [SourceFileSyntax: [Attached<ExtensionDeclSyntax>]]]
+    /// The extensions that have not yet been admitted to the type graph.
+    fileprivate private(set) var unresolvedExtensions: [SourceFileSyntax: [Attached<ExtensionDeclSyntax>]]
     private var requestedArray: [Attached<ExtensionDeclSyntax>]
     private var requestedSet: Set<Attached<ExtensionDeclSyntax>>
 
-    init() {
+    /// Initialize `RequestedExtensions`, keeping track of unresolved extensions.
+    ///
+    /// Complexity: O(n) where `n` is the number of extensions across all files.
+    init(fileToInfo: [SourceFileSyntax: FileInfo]) {
+      // Find all the unresolved extensions
+      var unresolvedExtensions = [SourceFileSyntax: [Attached<ExtensionDeclSyntax>]]()
+      for (file, fileInfo) in fileToInfo {
+        // Note: findExtensions gurantees in-order and no duplicates
+        unresolvedExtensions[file] = file.findExtensions(configuredRegions: fileInfo.configuredRegions)
+      }
+
       self.current = nil
       (self.requestedArray, self.requestedSet) = ([], [])
-      // TODO: Replace `SymbolTable/unresolvedExtensions`
-      self.unresolvedExtensions = [:]
+      self.unresolvedExtensions = unresolvedExtensions
     }
 
-    mutating func request(sourceFile: SourceFileSyntax, module: ModuleName) {
-      guard let sourceFileExtensions = unresolvedExtensions[module, default: [:]].removeValue(forKey: sourceFile) else {
+    /// Complexity: O(n) where `n` is the number of extensions in `sourceFile`.
+    fileprivate mutating func request(sourceFile: SourceFileSyntax) {
+      guard let sourceFileExtensions = unresolvedExtensions.removeValue(forKey: sourceFile) else {
         // Return if already removed
         return
       }
       append(contentsOf: sourceFileExtensions)
     }
 
+    fileprivate mutating func request(extensionDecl: Attached<ExtensionDeclSyntax>) {
+      // Return if the file is resolved
+      guard var sourceFileExtensions = unresolvedExtensions[extensionDecl.fileRoot] else { return }
+      // Return if the extension is resolved (in an unresolved file)
+      guard let unresolvedExtensionIndex = sourceFileExtensions.firstIndex(of: extensionDecl) else { return }
+      // Mark as resolved
+      sourceFileExtensions.remove(at: unresolvedExtensionIndex)
+      unresolvedExtensions[extensionDecl.fileRoot] = sourceFileExtensions
+
+      // Add the request
+      append(contentsOf: [extensionDecl])
+    }
+
+    /// Complexity: O(n) where `n` is the number of `extensions`.
+    fileprivate mutating func request(invalidatedExtensions: [Attached<ExtensionDeclSyntax>]) {
+      append(contentsOf: invalidatedExtensions)
+    }
+
+    fileprivate var alreadyProcessing: Bool {
+      current != nil
+    }
+
     /// Appends the requested extensions
     ///
     /// Complexity: O(n) where `n` is the number of `elements`.
-    mutating func append(contentsOf elements: [Attached<ExtensionDeclSyntax>]) {
+    private mutating func append(contentsOf elements: [Attached<ExtensionDeclSyntax>]) {
       for element in elements {
         // Don't add the currently processing array
         guard current != element else { continue }
@@ -57,7 +90,7 @@ extension SymbolTable {
     /// `current == nil`.
     ///
     /// Complexity: O(1) with respect to the number of requested extensions.
-    mutating func beginPop() -> Attached<ExtensionDeclSyntax>? {
+    fileprivate mutating func beginPop() -> Attached<ExtensionDeclSyntax>? {
       // Both of the following calls are O(1)
       guard let extensionDecl = requestedArray.popLast() else { return nil }
       requestedSet.remove(extensionDecl)
@@ -76,7 +109,7 @@ extension SymbolTable {
     /// Precondition: The given extension is `current`.
     ///
     /// Complexity: O(1) with respect to the number of requested extensions.
-    mutating func finalizePop(_ extensionDecl: Attached<ExtensionDeclSyntax>) {
+    fileprivate mutating func finalizePop(_ extensionDecl: Attached<ExtensionDeclSyntax>) {
       // Ensure we're finalizing the right extension
       precondition(
         extensionDecl == current,
@@ -91,7 +124,7 @@ extension SymbolTable {
 // MARK: Symbol Table Requests
 
 extension SymbolTable {
-  func admitExtensions(accessibleFrom sourceFile: SourceFileSyntax) {
+  @_spi(_QualifiedLookupTests) public func admitExtensions(accessibleFrom sourceFile: SourceFileSyntax) {
     // FIXME: Symbol table should have `findAllExtensions(accessibleFrom:)`
     // Find all the extensions we need to bind
     let accessibleExtensions = findAllExtensions(accessibleFrom: sourceFile)
@@ -100,7 +133,7 @@ extension SymbolTable {
     // Queue up the extensions that need binding
     let unadmittedExtensions: [Attached<ExtensionDeclSyntax>] = accessibleExtensions.filter({
       accessibleExtension in
-      unresolvedExtensions[accessibleExtension.fileRoot, default: []].contains(accessibleExtension)
+      requestedExtensions.unresolvedExtensions[accessibleExtension.fileRoot, default: []].contains(accessibleExtension)
     })
 
     // Return if no extensions are available
@@ -109,20 +142,40 @@ extension SymbolTable {
       return
     }
 
-    admitExtensions(unadmittedExtensions)
+    log("Admitting \(unadmittedExtensions.map(\._memberlessDescription))")
+
+    // Whether we will bind the requested extensions or we'll delegate to an
+    // ongoing request
+    let alreadyProcessing = self.requestedExtensions.alreadyProcessing
+
+    // Request all accessible files
+    for extensionDecl in unadmittedExtensions {
+      // TODO: Clean up; get accessible files directly
+      self.requestedExtensions.request(sourceFile: extensionDecl.fileRoot)
+    }
+
+    // Admit requests (if no request is already underway)
+    if !alreadyProcessing { admitRequestedExtensions() }
   }
 
   /// Returns the nominal-type reference with the extension's extended-type
   /// syntax as the originating syntax.
-  func bindExtension(
+  @_spi(_QualifiedLookupTests) public func bindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
   ) -> Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure> {
     if let alreadyBoundResult = getExtensionResolvedType(extensionDecl) {
       return alreadyBoundResult
     }
 
-    // TODO: Look into whether we can simplify
-    admitExtensions([extensionDecl])
+    // Whether we will bind the requested extensions or we'll delegate to an
+    // ongoing request
+    let alreadyProcessing = self.requestedExtensions.alreadyProcessing
+
+    // Request extension
+    self.requestedExtensions.request(extensionDecl: extensionDecl)
+
+    // Admit requests (if no request is already underway)
+    if !alreadyProcessing { admitRequestedExtensions() }
 
     // If there's not an existing extension-binding request, the extension
     // should be admitted. Otherwise, return a failure for now.
@@ -142,24 +195,113 @@ extension SymbolTable {
   }
 }
 
-// MARK: Extension Finder
+// MARK: Extension Binding 2
 
 extension SymbolTable {
-  /// Returns a map of each file to the file's extensions (in-order and without duplicates).
-  internal func _findUnresolvedExtensions() -> [SourceFileSyntax: [Attached<ExtensionDeclSyntax>]] {
-    var result = [SourceFileSyntax: [Attached<ExtensionDeclSyntax>]]()
-    for (_, files) in moduleToSources {
-      for (_, file) in files {
-        guard let fileInfo = getFileInfo(file) else {
-          fatalError(
-            "[SwiftLexicalLookup] Internal error: Unexpectedly cannot get configured regions for registered file."
-          )
-        }
-        // Note: findExtensions gurantees in-order and no duplicates
-        result[file] = file.findExtensions(configuredRegions: fileInfo.configuredRegions)
+  /// Tries to bind the given extension; returns `nil` or failure.
+  ///
+  /// If no binding request is already underway, the given extensions
+  /// should be admitted to the graph after this call. Otherwise, the provided
+  /// extensions are queued up for the existing request to handle.
+  fileprivate func admitRequestedExtensions() {
+    log("Admitting all requested extensions")
+    // Handle all binding requests
+    //
+    // We use a while loop since a single binding request may generate more
+    // binding requests. E.g., Say we want to resolve:
+    // ```swift
+    // struct A {}
+    // extension A.B {
+    //   func f(_: Self) {} // <- Look up here
+    // }
+    // extension A { struct B {} }
+    // ```
+    // Then, `Self` will only try to bind `extension A.B` but to resolve `A.B`, we
+    // need to fully resolve `A` so we also have to bind `extension A`.
+    while let extensionDecl = self.requestedExtensions.beginPop() {
+      // The result can change after binding more extensions; ignore for now.
+      let _ = bindRequestedExtension(extensionDecl)
+
+      // We remove at the end of the iteration because we want nested syntax-resolution
+      // requests to see that we're actively trying to bind this extension.
+      self.requestedExtensions.finalizePop(extensionDecl)
+    }
+
+    assert(
+      self.requestedExtensions.current == nil,
+      "[SwiftLexicalLookup] Internal error: Requested extensions still not admitted after `bindExtensions`."
+    )
+  }
+
+  /// Admits the given extension added to `self.requestedExtensions`. Only
+  /// `bindExtensions` should call this method.
+  ///
+  /// Handles extensions already admitted to the graph, and fixes
+  /// invalidated extensions.
+  ///
+  /// - Precondition: `extensionDecl` must be in `unresolvedExtensions` (i.e. not yet admitted)
+  /// FIXME: Make _bindExtension handle other generated requests;
+  /// e.g. if we're resolving `extension A.B {}`, we will prob have to fully resolve `A`.
+  private func bindRequestedExtension(
+    _ extensionDecl: Attached<ExtensionDeclSyntax>
+  ) {
+    // Uphold invariant
+    assert(
+      self.requestedExtensions.current == extensionDecl,
+      "[SwiftLexicalLookup] Internal error: Called `bindRequestedExtension` without first calling to `self.requestedExtensions.beginPop()`."
+    )
+
+    // === Resolve Extension ===
+
+    // Resolve the extended type, tracking dependencies
+    //
+    // Note: We don't add these dependencies to our dependencies since
+    // this is considered a completely separate type resolution. We
+    // track these dependencies in the symbol table's corresponding
+    // extension state.
+    var resolver = TypeResolver(symbolTable: self)
+    let extendedTypeResult = resolver._resolveExtendedTypeSyntax(extensionDecl: extensionDecl)
+
+    // Register in the symbol table to get invalidated extensions
+    let bindingResult: Result<BindingResult, SymbolTable.ExtensionBindingFailure>
+    bindingResult = _admitExtension(
+      extensionDecl,
+      // Only get the name and main decl
+      to: extendedTypeResult.map({ extendedTypeReference in
+        return (extendedTypeReference.type.name, extendedTypeReference.type.mainDecl)
+      }),
+      dependencies: resolver.dependencyTracker,
+      verbose: _verbose
+    )
+
+    // Extract the invalidated extensions or handle failures
+    let (resolvedType, invalidatedExtensions): BindingResult
+    switch bindingResult {
+    case .success(let success):
+      (resolvedType, invalidatedExtensions) = success
+    case .failure(let failure):
+      // Ensure we handle future failure types
+      switch failure {
+      case .admissionFailure(.cannotReadmit(let existingState)):
+        // We require this as a precondition
+        fatalError(
+          "[SwiftLexicalLookup] Internal error: Tried to readmit `\(extensionDecl._memberlessDescription)`; old state \(existingState)."
+        )
+      case .nonRegisteredSyntaxRoot:
+        fatalError(
+          "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly not in symbol table"
+        )
+      case .admissionFailure(.invalidDependencyExtension(let extensionState)):
+        fatalError(
+          "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly has wrong dependency; state \(extensionState.debugDescription)."
+        )
       }
     }
-    return result
+    log(
+      "Resolved to \(resolvedType); Dependencies: \(resolver.dependencyTracker.dependencies.map(\.debugDescription)); Invalidated: \(invalidatedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
+    )
+
+    self.requestedExtensions.request(invalidatedExtensions: invalidatedExtensions.map(\.extensionDecl))
   }
 }
 
@@ -268,181 +410,41 @@ extension SymbolTable {
     //
     // Describe dependencies
     // TODO: Clean this up
-    let dependencyDescription = "[\(dependencies.dependencies.map(\.debugDescription).joined(separator: ", "))]"
-    // Describe result
-    let admissionResultDescriptions = admissionResult.map({ results in
-      results.invalidatedExtensions.map({ result in
-        "\(result.extensionDecl._memberlessDescription) -> \(result.resolvedType)"
-      }).joined(separator: ", ")
-    })
-    // New graph description
-    if verbose {
-      let (typeGraphDescription, hasErrors) = typeGraph._describe(symbolTable: self)
-      print(String(repeating: "-", count: 80))
-      print(
-        "After admitting extension `\(extensionDecl._memberlessDescription)` to \(result.map(\.qualifiedName.debugDescription)) with dependencies: \(dependencyDescription); admission result (i.e. invalidated exts): \(admissionResultDescriptions), new dependency graph is:"
-      )
-      print(typeGraphDescription)
-      print(String(repeating: "-", count: 80) + "\n")
-      precondition(!hasErrors, "[SwiftLexicalLookup] Internal error: Detected dependency-graph corruption.")
+    do {
+      let dependencyDescription = "[\(dependencies.dependencies.map(\.debugDescription).joined(separator: ", "))]"
+      // Describe result
+      let admissionResultDescriptions = admissionResult.map({ results in
+        results.invalidatedExtensions.map({ result in
+          "\(result.extensionDecl._memberlessDescription) -> \(result.resolvedType)"
+        }).joined(separator: ", ")
+      })
+      // New graph description
+      if verbose {
+        let (typeGraphDescription, hasErrors) = typeGraph._describe(symbolTable: self)
+        print(String(repeating: "-", count: 80))
+        print(
+          "After admitting extension `\(extensionDecl._memberlessDescription)` to \(result.map(\.qualifiedName.debugDescription)) with dependencies: \(dependencyDescription); admission result (i.e. invalidated exts): \(admissionResultDescriptions), new dependency graph is:"
+        )
+        print(typeGraphDescription)
+        print(String(repeating: "-", count: 80) + "\n")
+        precondition(!hasErrors, "[SwiftLexicalLookup] Internal error: Detected dependency-graph corruption.")
+      }
     }
 
     switch admissionResult {
     case .success(let success):
-      // If successfully bound, remove from `unresolvedExtensions`
+      // TODO: Remove
       //
-      // Note: This removal takes linear time. If a file has a lot of extensions, this operation
-      // could end up being slow.
-      unresolvedExtensions[extensionDecl.fileRoot, default: []].removeAll(where: { $0 == extensionDecl })
+      // // If successfully bound, remove from `unresolvedExtensions`
+      // //
+      // // Note: This removal takes linear time. If a file has a lot of extensions, this operation
+      // // could end up being slow.
+      // unresolvedExtensions[extensionDecl.fileRoot, default: []].removeAll(where: { $0 == extensionDecl })
 
       return .success(success)
     case .failure(let admissionFailure):
       return .failure(ExtensionBindingFailure.admissionFailure(admissionFailure))
     }
-  }
-}
-
-// MARK: Extension Binding 2
-
-extension SymbolTable {
-  /// Tries to bind the given extension; returns `nil` or failure.
-  ///
-  /// If no binding request is already underway, the given extensions
-  /// should be admitted to the graph after this call. Otherwise, the provided
-  /// extensions are queued up for the existing request to handle.
-  @_spi(_QualifiedLookupTests) public func admitExtensions(
-    _ extensionDecls: [Attached<ExtensionDeclSyntax>]
-  ) {
-    withLogging(
-      request: "Admitting extensions: \(extensionDecls.map(\._memberlessDescription))",
-      describe: { _ in "" },
-      perform: {
-        $0._admitExtensions(extensionDecls)
-      }
-    )
-  }
-
-  /// Implements `admitExtensions`
-  // TODO: At least find a way to cache available extensions. (E.g. don't
-  // recalculate accessible extensions if ongoing request targetted the same file)
-  fileprivate func _admitExtensions(
-    _ extensionDecls: [Attached<ExtensionDeclSyntax>]
-  ) {
-    // Whether we will bind the requested extensions or we'll delegate to an
-    // ongoing request
-    let willBindRequests = self.requestedExtensions.current == nil
-
-    // Register the extensions to be processed.
-    //
-    // Note: `requestedExtensions.append` doesn't introduce
-    // duplicates.
-    self.requestedExtensions.append(contentsOf: extensionDecls)
-
-    // Ensure there's no binding request underway
-    guard willBindRequests else {
-      // This request will be handled after the current binding (see
-      // `admitExtensions` docstring).
-      // TODO: Is this the right failure type?
-      return
-    }
-
-    // Handle all binding requests
-    //
-    // We use a while loop since a single binding request may generate more
-    // binding requests. E.g., Say we want to resolve:
-    // ```swift
-    // struct A {}
-    // extension A.B {
-    //   func f(_: Self) {} // <- Look up here
-    // }
-    // extension A { struct B {} }
-    // ```
-    // Then, `Self` will only try to bind `extension A.B` but to resolve `A.B`, we
-    // need to fully resolve `A` so we also have to bind `extension A`.
-    while let extensionDecl = self.requestedExtensions.beginPop() {
-      // The result can change after binding more extensions; ignore for now.
-      let _ = bindRequestedExtension(extensionDecl)
-
-      // We remove at the end of the iteration because we want nested syntax-resolution
-      // requests to see that we're actively trying to bind this extension.
-      self.requestedExtensions.finalizePop(extensionDecl)
-    }
-
-    assert(
-      self.requestedExtensions.current == nil,
-      "[SwiftLexicalLookup] Internal error: Requested extensions still not admitted after `bindExtensions`."
-    )
-  }
-
-  /// Admits the given extension added to `self.requestedExtensions`. Only
-  /// `bindExtensions` should call this method.
-  ///
-  /// Handles extensions already admitted to the graph, and fixes
-  /// invalidated extensions.
-  ///
-  /// - Precondition: `extensionDecl` must be in `unresolvedExtensions` (i.e. not yet admitted)
-  /// FIXME: Make _bindExtension handle other generated requests;
-  /// e.g. if we're resolving `extension A.B {}`, we will prob have to fully resolve `A`.
-  private func bindRequestedExtension(
-    _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) {
-    // Uphold invariant
-    assert(
-      self.requestedExtensions.current == extensionDecl,
-      "[SwiftLexicalLookup] Internal error: Called `bindRequestedExtension` without first calling to `self.requestedExtensions.beginPop()`."
-    )
-
-    // === Resolve Extension ===
-
-    // Resolve the extended type, tracking dependencies
-    //
-    // Note: We don't add these dependencies to our dependencies since
-    // this is considered a completely separate type resolution. We
-    // track these dependencies in the symbol table's corresponding
-    // extension state.
-    var resolver = TypeResolver(symbolTable: self)
-    let extendedTypeResult = resolver._resolveExtendedTypeSyntax(extensionDecl: extensionDecl)
-
-    // Register in the symbol table to get invalidated extensions
-    let bindingResult: Result<BindingResult, SymbolTable.ExtensionBindingFailure>
-    bindingResult = _admitExtension(
-      extensionDecl,
-      // Only get the name and main decl
-      to: extendedTypeResult.map({ extendedTypeReference in
-        return (extendedTypeReference.type.name, extendedTypeReference.type.mainDecl)
-      }),
-      dependencies: resolver.dependencyTracker,
-      verbose: _verbose
-    )
-
-    // Extract the invalidated extensions or handle failures
-    let (resolvedType, invalidatedExtensions): BindingResult
-    switch bindingResult {
-    case .success(let success):
-      (resolvedType, invalidatedExtensions) = success
-    case .failure(let failure):
-      // Ensure we handle future failure types
-      switch failure {
-      case .admissionFailure(.cannotReadmit(let existingState)):
-        // We require this as a precondition
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Tried to readmit `\(extensionDecl._memberlessDescription)`; old state \(existingState)."
-        )
-      case .nonRegisteredSyntaxRoot:
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly not in symbol table"
-        )
-      case .admissionFailure(.invalidDependencyExtension(let extensionState)):
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly has wrong dependency; state \(extensionState.debugDescription)."
-        )
-      }
-    }
-    log(
-      "Resolved to \(resolvedType); Dependencies: \(resolver.dependencyTracker.dependencies.map(\.debugDescription)); Invalidated: \(invalidatedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
-    )
-
-    self.requestedExtensions.append(contentsOf: invalidatedExtensions.map(\.extensionDecl))
   }
 }
 
