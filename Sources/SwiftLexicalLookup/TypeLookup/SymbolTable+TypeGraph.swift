@@ -40,7 +40,7 @@ extension SymbolTable {
     }
 
     /// Complexity: O(n) where `n` is the number of extensions in `sourceFile`.
-    fileprivate mutating func request(sourceFile: SourceFileSyntax) {
+    mutating func request(sourceFile: SourceFileSyntax) {
       guard let sourceFileExtensions = unresolvedExtensions.removeValue(forKey: sourceFile) else {
         // Return if already removed
         return
@@ -48,7 +48,9 @@ extension SymbolTable {
       append(contentsOf: sourceFileExtensions)
     }
 
-    fileprivate mutating func request(extensionDecl: Attached<ExtensionDeclSyntax>) {
+    /// Complexity: O(n) where `n` is the number of extensions in `extensionDecl`
+    /// file root.
+    mutating func request(extensionDecl: Attached<ExtensionDeclSyntax>) {
       // Return if the file is resolved
       guard var sourceFileExtensions = unresolvedExtensions[extensionDecl.fileRoot] else { return }
       // Return if the extension is resolved (in an unresolved file)
@@ -125,33 +127,14 @@ extension SymbolTable {
 
 extension SymbolTable {
   @_spi(_QualifiedLookupTests) public func admitExtensions(accessibleFrom sourceFile: SourceFileSyntax) {
-    // FIXME: Symbol table should have `findAllExtensions(accessibleFrom:)`
-    // Find all the extensions we need to bind
-    let accessibleExtensions = findAllExtensions(accessibleFrom: sourceFile)
-    log("Accessible extensions: \(accessibleExtensions.map(\._memberlessDescription))")
-
-    // Queue up the extensions that need binding
-    let unadmittedExtensions: [Attached<ExtensionDeclSyntax>] = accessibleExtensions.filter({
-      accessibleExtension in
-      requestedExtensions.unresolvedExtensions[accessibleExtension.fileRoot, default: []].contains(accessibleExtension)
-    })
-
-    // Return if no extensions are available
-    guard !unadmittedExtensions.isEmpty else {
-      log("No extensions to bind.")
-      return
-    }
-
-    log("Admitting \(unadmittedExtensions.map(\._memberlessDescription))")
-
     // Whether we will bind the requested extensions or we'll delegate to an
     // ongoing request
     let alreadyProcessing = self.requestedExtensions.alreadyProcessing
 
-    // Request all accessible files
-    for extensionDecl in unadmittedExtensions {
-      // TODO: Clean up; get accessible files directly
-      self.requestedExtensions.request(sourceFile: extensionDecl.fileRoot)
+    // Request all accessible files (for now, this is just internal files)
+    // TODO: Include external/imported modules
+    for (_, sourceFile) in moduleToSources[moduleName, default: [:]] {
+      self.requestedExtensions.request(sourceFile: sourceFile)
     }
 
     // Admit requests (if no request is already underway)
@@ -163,6 +146,8 @@ extension SymbolTable {
   @_spi(_QualifiedLookupTests) public func bindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
   ) -> Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure> {
+    // We check here because `request(extensionDecl:)` takes `O(n)` time to update
+    // the unresolvedFiles dictionary.
     if let alreadyBoundResult = getExtensionResolvedType(extensionDecl) {
       return alreadyBoundResult
     }
@@ -431,20 +416,7 @@ extension SymbolTable {
       }
     }
 
-    switch admissionResult {
-    case .success(let success):
-      // TODO: Remove
-      //
-      // // If successfully bound, remove from `unresolvedExtensions`
-      // //
-      // // Note: This removal takes linear time. If a file has a lot of extensions, this operation
-      // // could end up being slow.
-      // unresolvedExtensions[extensionDecl.fileRoot, default: []].removeAll(where: { $0 == extensionDecl })
-
-      return .success(success)
-    case .failure(let admissionFailure):
-      return .failure(ExtensionBindingFailure.admissionFailure(admissionFailure))
-    }
+    return admissionResult.mapError(ExtensionBindingFailure.admissionFailure)
   }
 }
 
