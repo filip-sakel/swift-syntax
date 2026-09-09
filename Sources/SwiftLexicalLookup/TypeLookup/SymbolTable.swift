@@ -122,6 +122,7 @@ extension SymbolTable {
 
 extension SymbolTable {
   func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
+    #if DEBUG
     guard _verbose else { return }
     // Calculate log text
     let newLine = "\(logPrefix.map({ "[\($0)]" }).joined()) \(component)\n"
@@ -129,6 +130,7 @@ extension SymbolTable {
     print(newLine)
     // TODO: Remove
     fflush(stdout)
+    #endif
   }
 
   func withLogging<T>(

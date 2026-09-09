@@ -128,18 +128,14 @@ extension SymbolTable {
 extension SymbolTable {
   @_spi(_QualifiedLookupTests)
   public func admitExtensions(accessibleFrom sourceFile: SourceFileSyntax) {
-    // Whether we will bind the requested extensions or we'll delegate to an
-    // ongoing request
-    let alreadyProcessing = self.requestedExtensions.alreadyProcessing
-
     // Request all accessible files (for now, this is just internal files)
     // TODO: Include external/imported modules
     for (_, sourceFile) in moduleToSources[moduleName, default: [:]] {
       self.requestedExtensions.request(sourceFile: sourceFile)
     }
 
-    // Admit requests (if no request is already underway)
-    if !alreadyProcessing { _admitRequestedExtensions() }
+    // Admit requests
+    _admitRequestedExtensions()
   }
 
   /// Returns the nominal-type reference with the extension's extended-type
@@ -154,15 +150,9 @@ extension SymbolTable {
       return alreadyBoundResult
     }
 
-    // Whether we will bind the requested extensions or we'll delegate to an
-    // ongoing request
-    let alreadyProcessing = self.requestedExtensions.alreadyProcessing
-
-    // Request extension
+    // Request extension and admit requests
     self.requestedExtensions.request(extensionDecl: extensionDecl)
-
-    // Admit requests (if no request is already underway)
-    if !alreadyProcessing { _admitRequestedExtensions() }
+    _admitRequestedExtensions()
 
     // If there's not an existing extension-binding request, the extension
     // should be admitted. Otherwise, return a failure for now.
@@ -180,6 +170,17 @@ extension SymbolTable {
       )
     })
   }
+
+  func getExtensionResolvedType(
+    _ extensionDecl: Attached<ExtensionDeclSyntax>
+  ) -> Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure>? {
+    typeGraph.getExtensionResolvedType(extensionDecl)?.map({ (globalReference, mainDecl) in
+      TypeResolver.GloballyResolvedTypeSyntax(
+        type: globalReference,
+        syntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
+      )
+    })
+  }
 }
 
 // MARK: Extension Binding
@@ -188,8 +189,6 @@ extension SymbolTable {
   /// Tries to admit all requested extensions, handling new requests in the
   /// process.
   fileprivate func _admitRequestedExtensions() {
-    log("Admitting all requested extensions")
-
     // Handle all binding requests
     //
     // We use a while loop since a single binding request may generate more
@@ -204,11 +203,6 @@ extension SymbolTable {
     // Then, `Self` will only try to bind `extension A.B` but to resolve `A.B`, we
     // need to fully resolve `A` so we also have to bind `extension A`.
     while self._admitCurrentExtension() {}
-
-    assert(
-      self.requestedExtensions.current == nil,
-      "[SwiftLexicalLookup] Internal error: Requested extensions still not admitted after `bindExtensions`."
-    )
   }
 
   /// Admits the given extension added to `self.requestedExtensions`. Only
@@ -217,11 +211,16 @@ extension SymbolTable {
   /// Handles extensions already admitted to the graph, and requests
   /// that evicted extensions be re-admitted.
   ///
-  /// - Precondition: No extensions are currently bound, i.e., the
-  /// `requestedExtensions.current == nil`
+  /// - Returns: Whether the extension was admitted (`false` if another function
+  /// is already processing this request or we processed all requests).
   private func _admitCurrentExtension() -> Bool {
     // Begin popping the current extension
-    guard let extensionDecl = self.requestedExtensions.beginPop() else { return false }
+    guard
+      !self.requestedExtensions.alreadyProcessing,
+      let extensionDecl = self.requestedExtensions.beginPop()
+    else {
+      return false
+    }
     // We remove at the end because we want nested syntax-resolution
     // requests to see that we're actively trying to bind this extension.
     defer { self.requestedExtensions.finalizePop(extensionDecl) }
@@ -366,28 +365,6 @@ extension SymbolTable {
       TypeResolver.ResolvedTypeSyntax(
         type: nominalRef,
         syntax: originatingSyntax
-      )
-    })
-  }
-}
-
-// MARK: Extension Binding
-
-extension SymbolTable {
-  @_spi(_QualifiedLookupTests) public enum ExtensionBindingFailure: Error {
-    /// Either root isn't a source file, or said source file isn't registered
-    case nonRegisteredSyntaxRoot
-
-    case admissionFailure(TypeGraph.ExtensionAdmissionFailure)
-  }
-
-  func getExtensionResolvedType(
-    _ extensionDecl: Attached<ExtensionDeclSyntax>
-  ) -> Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure>? {
-    typeGraph.getExtensionResolvedType(extensionDecl)?.map({ (globalReference, mainDecl) in
-      TypeResolver.GloballyResolvedTypeSyntax(
-        type: globalReference,
-        syntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
       )
     })
   }
