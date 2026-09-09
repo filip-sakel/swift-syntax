@@ -123,10 +123,11 @@ extension SymbolTable {
   }
 }
 
-// MARK: Symbol Table Requests
+// MARK: Extension Requests
 
 extension SymbolTable {
-  @_spi(_QualifiedLookupTests) public func admitExtensions(accessibleFrom sourceFile: SourceFileSyntax) {
+  @_spi(_QualifiedLookupTests)
+  public func admitExtensions(accessibleFrom sourceFile: SourceFileSyntax) {
     // Whether we will bind the requested extensions or we'll delegate to an
     // ongoing request
     let alreadyProcessing = self.requestedExtensions.alreadyProcessing
@@ -143,7 +144,8 @@ extension SymbolTable {
 
   /// Returns the nominal-type reference with the extension's extended-type
   /// syntax as the originating syntax.
-  @_spi(_QualifiedLookupTests) public func bindExtension(
+  @_spi(_QualifiedLookupTests)
+  public func bindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>
   ) -> Result<TypeResolver.GloballyResolvedTypeSyntax, TypeResolver.Failure> {
     // We check here because `request(extensionDecl:)` takes `O(n)` time to update
@@ -177,6 +179,40 @@ extension SymbolTable {
         syntax: Attached<TypeLikeSyntax>(extensionDecl.extendedType)
       )
     })
+  }
+}
+
+// MARK: Qualified Requests
+
+extension SymbolTable {
+  func findMemberType(
+    baseType: TypeGraph.TypeRef,
+    memberTypeName: Identifier,
+    introducingTypeSyntax: Attached<TypeLikeSyntax>,
+    introducingModule: ModuleName,
+    dependencyTracker: inout DependencyTracker
+  ) -> Result<
+    [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)],
+    TypeGraph.QualifiedTypeLookupFailure
+  > {
+    // Assert we have the right module
+    let fileModule = getFileInfo(introducingTypeSyntax.fileRoot)?.module
+    assert(
+      fileModule == introducingModule,
+      "[SwiftLexicalLookup] Internal error: Caller passed wrong module for `\(introducingTypeSyntax.trimmedDescription)`: got '\(introducingModule.name)' but expected \(fileModule?.name ?? "nil")"
+    )
+
+    // TODO: Remove?
+    log("Finding member \(baseType) > \(memberTypeName.name)")
+    defer { log("New deps for member-type lookup: \(dependencyTracker.dependencies)") }
+
+    return typeGraph.findMemberType(
+      baseType: baseType,
+      memberTypeName: memberTypeName,
+      origin: (typeSyntax: introducingTypeSyntax, module: introducingModule),
+      dependencyTracker: &dependencyTracker,
+      symbolTable: self
+    )
   }
 }
 
@@ -238,6 +274,13 @@ extension SymbolTable {
 
     // === Resolve Extension ===
 
+    // Get extension file info
+    guard let fileInfo = getFileInfo(extensionDecl.fileRoot) else {
+      fatalError(
+        "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly not in symbol table"
+      )
+    }
+
     // Resolve the extended type, tracking dependencies
     //
     // Note: We don't add these dependencies to our dependencies since
@@ -247,16 +290,18 @@ extension SymbolTable {
     var resolver = TypeResolver(symbolTable: self)
     let extendedTypeResult = resolver._resolveExtendedTypeSyntax(extensionDecl: extensionDecl)
 
-    // Register in the symbol table to get invalidated extensions
-    let bindingResult: Result<BindingResult, SymbolTable.ExtensionBindingFailure>
-    bindingResult = _admitExtension(
+    // Admit to the type graph and get evicted extensions
+    let bindingResult: Result<BindingResult, TypeGraph.ExtensionAdmissionFailure>
+    bindingResult = typeGraph.admitExtension(
       extensionDecl,
-      // Only get the name and main decl
+      extensionDeclModule: fileInfo.module,
+      extensionFileConfiguredRegions: fileInfo.configuredRegions,
+      // Extract the name and main decl
       to: extendedTypeResult.map({ extendedTypeReference in
         return (extendedTypeReference.type.name, extendedTypeReference.type.mainDecl)
       }),
-      dependencies: resolver.dependencyTracker,
-      verbose: _verbose
+      dependencyTracker: resolver.dependencyTracker,
+      symbolTable: self
     )
 
     // Extract the invalidated extensions or handle failures
@@ -267,16 +312,12 @@ extension SymbolTable {
     case .failure(let failure):
       // Ensure we handle future failure types
       switch failure {
-      case .admissionFailure(.cannotReadmit(let existingState)):
+      case .cannotReadmit(let existingState):
         // We require this as a precondition
         fatalError(
           "[SwiftLexicalLookup] Internal error: Tried to readmit `\(extensionDecl._memberlessDescription)`; old state \(existingState)."
         )
-      case .nonRegisteredSyntaxRoot:
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly not in symbol table"
-        )
-      case .admissionFailure(.invalidDependencyExtension(let extensionState)):
+      case .invalidDependencyExtension(let extensionState):
         fatalError(
           "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl._memberlessDescription) unexpectedly has wrong dependency; state \(extensionState.debugDescription)."
         )
@@ -359,97 +400,9 @@ extension SymbolTable {
       )
     })
   }
-
-  /// Add extension to the type graph and, if possible, bind it
-  /// to the resolved nominal type.
-  ///
-  /// Notes
-  /// 1. Helper for  that forwards to `TypeGraph/admitExtension`
-  /// 2. Handles failed resolutions and resolutions that cause cycles.
-  ///
-  /// Returns: Evicted extensions or binding failure.
-  /// TODO: Consider inlining into `_bindRequestedExtension`
-  fileprivate func _admitExtension(
-    _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    to result: Result<
-      (qualifiedName: TypeGraph.GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
-      TypeResolver.Failure
-    >,
-    dependencies: DependencyTracker,
-    verbose: Bool
-  ) -> Result<BindingResult, ExtensionBindingFailure> {
-    // Get extension module and its file's configured regions
-    guard let fileInfo = getFileInfo(extensionDecl.fileRoot) else {
-      return .failure(ExtensionBindingFailure.nonRegisteredSyntaxRoot)
-    }
-    let admissionResult = typeGraph.admitExtension(
-      extensionDecl,
-      extensionDeclModule: fileInfo.module,
-      extensionFileConfiguredRegions: fileInfo.configuredRegions,
-      to: result,
-      dependencyTracker: dependencies,
-      symbolTable: self
-    )
-
-    // Log results
-    //
-    // Describe dependencies
-    // TODO: Clean this up
-    do {
-      let dependencyDescription = "[\(dependencies.dependencies.map(\.debugDescription).joined(separator: ", "))]"
-      // Describe result
-      let admissionResultDescriptions = admissionResult.map({ results in
-        results.invalidatedExtensions.map({ result in
-          "\(result.extensionDecl._memberlessDescription) -> \(result.resolvedType)"
-        }).joined(separator: ", ")
-      })
-      // New graph description
-      if verbose {
-        let (typeGraphDescription, hasErrors) = typeGraph._describe(symbolTable: self)
-        print(String(repeating: "-", count: 80))
-        print(
-          "After admitting extension `\(extensionDecl._memberlessDescription)` to \(result.map(\.qualifiedName.debugDescription)) with dependencies: \(dependencyDescription); admission result (i.e. invalidated exts): \(admissionResultDescriptions), new dependency graph is:"
-        )
-        print(typeGraphDescription)
-        print(String(repeating: "-", count: 80) + "\n")
-        precondition(!hasErrors, "[SwiftLexicalLookup] Internal error: Detected dependency-graph corruption.")
-      }
-    }
-
-    return admissionResult.mapError(ExtensionBindingFailure.admissionFailure)
-  }
 }
 
 // MARK: Qualified Type Lookup
 
 extension SymbolTable {
-  func findMemberType(
-    baseType: TypeGraph.TypeRef,
-    memberTypeName: Identifier,
-    introducingTypeSyntax: Attached<TypeLikeSyntax>,
-    introducingModule: ModuleName,
-    dependencyTracker: inout DependencyTracker
-  ) -> Result<
-    [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)],
-    TypeGraph.QualifiedTypeLookupFailure
-  > {
-    // Assert we have the right module
-    let fileModule = getFileInfo(introducingTypeSyntax.fileRoot)?.module
-    assert(
-      fileModule == introducingModule,
-      "[SwiftLexicalLookup] Internal error: Caller passed wrong module for `\(introducingTypeSyntax.trimmedDescription)`: got '\(introducingModule.name)' but expected \(fileModule?.name ?? "nil")"
-    )
-
-    // TODO: Remove?
-    log("Finding member \(baseType) > \(memberTypeName.name)")
-    defer { log("New deps for member-type lookup: \(dependencyTracker.dependencies)") }
-
-    return typeGraph.findMemberType(
-      baseType: baseType,
-      memberTypeName: memberTypeName,
-      origin: (typeSyntax: introducingTypeSyntax, module: introducingModule),
-      dependencyTracker: &dependencyTracker,
-      symbolTable: self
-    )
-  }
 }
