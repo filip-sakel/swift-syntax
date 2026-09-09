@@ -335,7 +335,7 @@ extension SymbolTable {
     // this is considered a completely separate type resolution. We
     // track these dependencies in the symbol table's corresponding
     // extension state.
-    var resolver = TypeResolver(symbolTable: self, _verbose: _verbose)
+    var resolver = TypeResolver(symbolTable: self)
     let extendedTypeResult = resolver._resolveExtendedTypeSyntax(extensionDecl: extensionDecl)
 
     // Register in the symbol table to get invalidated extensions

@@ -523,7 +523,7 @@ final class TypeResolutionTests: XCTestCase {
       // Tuples, functions, and metatypes don't have type members
       var x: \(failure: .noTypeMember(member: myTypeMember, in: .tuple(labels: [nil, nil])))
              (A, B).MyType
-      var y: \(failure: .partialTypeResolutionFailure(.functionType))
+      var y: \(failure: .nested(.invalidBaseType(.partialTypeResolutionFailure(.functionType))))
              ((A) -> B).MyType
       var z: \(failure: .noTypeMember(member: myTypeMember, in: .metatype(base: .nominalTypes(["_(MyFile.swift)::A"]))))
              A.Type.MyType
@@ -1046,10 +1046,11 @@ final class TypeResolutionTests: XCTestCase {
                           // so we evict `A.B.C` > `D`
         }
 
-        let _: \(failure: .nested(.invalidMembers([
-               ("A.B.C", .ambiguousTypeDecl(["struct C {}", "typealias C = A"]))
-             ])))
-               A.B.C.D
+        let _: \(failure: .nested(.invalidBaseType(
+                .nested(.invalidMembers([
+                  ("A.B.C", .ambiguousTypeDecl(["struct C {}", "typealias C = A"]))
+                ]))
+              )))A.B.C.D
         """
       ]
     )

@@ -10,8 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-// TODO: Remove Glibc import
-@preconcurrency import Glibc
 import SwiftIfConfig
 import SwiftSyntax
 
@@ -51,15 +49,13 @@ public struct TypeResolver {
   private var _visitedTypeSyntaxToIndex: [Attached<TypeSyntax>: Int] = [:]
   private(set) var dependencyTracker: DependencyTracker = DependencyTracker()
 
-  let _verbose: Bool
   /// The number of `withLogging` calls we can nest. Useful for debugging infinite loops
   /// that otherwise fill up standard output and become illegible.
   let _logNestingLimit: Int?
   let _checkNominalInCompositionIsClassOrProtocol = true
 
-  public init(symbolTable: SymbolTable, _verbose: Bool, _logNestingLimit: Int? = nil) {
+  public init(symbolTable: SymbolTable, _logNestingLimit: Int? = nil) {
     self.symbolTable = symbolTable
-    self._verbose = _verbose
     self._logNestingLimit = _logNestingLimit
   }
 
@@ -353,7 +349,10 @@ extension TypeResolver {
     }
   }
 
-  /// Performs top-level unqualified lookup for types in external module.
+  /// Performs top-level unqualified lookup for types, optionally
+  /// just in an external module.
+  ///
+  /// Note: `moduleSelector` can be set to the internal module.
   func findTopLevelTypes(
     originatingFile: SourceFileSyntax,
     moduleSelector: Identifier?,
@@ -497,9 +496,6 @@ extension TypeResolver {
       // Return failure directly if we're not looking for the selected member
       case (.failure(let failure), false):
         return .failure(failure)
-      // Otherwise, wrap in a '.invalidBaseType'
-      case (.failure(let failure), true):
-        return .failure(Failure.nested(.invalidBaseType(failure)))
       // Forward success
       case (let result, _):
         enclosingType = result
@@ -745,15 +741,29 @@ extension TypeResolver {
         }
       )
       // If we're at top-level, consider other internal declarations
+      //
+      // We don't need to check external declarations because internal
+      // declarations shadow external declarations.
       if isGlobal {
-        // TODO: Look in the module, and add those decls
-        // IMPORTANT: Make sure results are correctly sorted
+        let topLevelTypes = findTopLevelTypes(
+          originatingFile: codeBlockScope.fileRoot,
+          moduleSelector: declFileInfo.module,
+          name: declName
+        )
+        scopeTypeDecls.append(contentsOf: topLevelTypes.map(\.node))
       }
 
       // Diagnose redeclarations
-      guard scopeTypeDecls == [TypeDeclSyntax(nominalDecl.node)] else {
+
+      let disambiguatedTypeDecls = disambiguateResults(
+
+        results: scopeTypeDecls,
+        declOfResult: \.self,
+        callsite: Syntax(nominalDecl.node)
+      )
+
+      guard disambiguatedTypeDecls == [TypeDeclSyntax(nominalDecl.node)] else {
         // Results are already sorted from lookup
-        // TODO: Check for redecls?
         return .failure(Failure.ambiguousTypeDecl(scopeTypeDecls))
       }
 
@@ -976,19 +986,17 @@ extension TypeResolver {
     case .nominalTypes(let types):
       baseTypes = types
     case .anyType:
-      return .failure(Failure.noTypeMember(member: typeMember, in: TypeResult.anyType))
+      return TypeResult.failure(.noTypeMember(member: typeMember, in: TypeResult.anyType))
     case .function(let argumentCount):
-      return .failure(
-        Failure.noTypeMember(member: typeMember, in: TypeResult.function(argumentCount: argumentCount))
+      return TypeResult.failure(
+        .noTypeMember(member: typeMember, in: TypeResult.function(argumentCount: argumentCount))
       )
     case .tuple(let labels):
-      return .failure(Failure.noTypeMember(member: typeMember, in: TypeResult.tuple(labels: labels)))
+      return TypeResult.failure(.noTypeMember(member: typeMember, in: TypeResult.tuple(labels: labels)))
     case .metatype(let base):
-      return .failure(
-        Failure.noTypeMember(member: typeMember, in: TypeResult.metatype(base: base))
-      )
+      return TypeResult.failure(.noTypeMember(member: typeMember, in: TypeResult.metatype(base: base)))
     case .failure(let failure):
-      return TypeResult.failure(failure)
+      return TypeResult.failure(.nested(NestedFailure.invalidBaseType(failure)))
     }
 
     // Perform qualified type lookup and mark the dependencies
