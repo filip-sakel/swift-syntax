@@ -354,7 +354,11 @@ extension TypeResolver {
   }
 
   /// Performs top-level unqualified lookup for types in external module.
-  func findTopLevelTypes(moduleSelector: Identifier?, name: Identifier) -> [Attached<TypeDeclSyntax>] {
+  func findTopLevelTypes(
+    originatingFile: SourceFileSyntax,
+    moduleSelector: Identifier?,
+    name: Identifier
+  ) -> [Attached<TypeDeclSyntax>] {
     // TODO: Implement
     []
   }
@@ -363,43 +367,37 @@ extension TypeResolver {
   fileprivate mutating func _resolveUnqualifiedReference(
     typeComponent: TypeReference
   ) -> TypeResult {
+    /// Get the results for this file
     let fileResults: [UnqualifiedTypeLookupResult]
+    ///
+    /// If fileResults is empty, specifies the module to search in.
+    /// The module is `nil` if we should perform regular lookup or
+    /// specified if we want to search in a particular external module.
+    let topLevelModuleLookup: ModuleName?
     if let module = typeComponent.module {
-      // Top-level means that we look for declarations at the file scope of the
+      // Top-level means that we look for declarations at the file scope of an
       // external module. For instance:
       //   // MyModule>MyFile.swift
       //   extension Int {
       //     func f() { MyModule::f() } // ❌ Member `f` not imported through `MyModule`
       //   }
-      let topLevelTypes = findTopLevelTypes(moduleSelector: module, name: typeComponent.name)
-      let diambiguatedTopLevelTypes = disambiguateResults(
-        results: topLevelTypes,
-        declOfResult: \.node,
-        callsite: Syntax(typeComponent.introducingSyntax.node)
-      )
-      guard let topLevelType = diambiguatedTopLevelTypes.first else {
-        return .failure(Failure.noTypeInScope)
-      }
-      guard diambiguatedTopLevelTypes.count == 1 else {
-        return .failure(Failure.ambiguousTypeDecl(diambiguatedTopLevelTypes.map(\.node)))
-      }
-      symbolTable.log("Found top-level type `\(topLevelType._memberlessDescription)`")
-      return resolveTypeDecl(
-        typeDecl: topLevelType,
-        declContext: DeclContext.codeBlock(topLevelType.fileRootStatements),
-        originatingSyntax: Attached<TypeLikeSyntax>(typeComponent.introducingSyntax)
-      )
+      fileResults = []
+      topLevelModuleLookup = module
     } else {
       // Scoped unqualified lookup in this module
       fileResults = typeComponent.introducingSyntax.findUnqualifiedType(
         typeComponent.name,
         configuredRegions: extractFileInfo(syntax: typeComponent.introducingSyntax).configuredRegions
       )
+      // Perform
+      topLevelModuleLookup = nil
     }
 
     symbolTable.log("Lookup results: \(fileResults.map(\.debugDescription))")
 
-    // Find first matching type declaration
+    // === File Lookup ===
+    //
+    // Find first matching type declaration in file
     for lookupResult: UnqualifiedTypeLookupResult in fileResults {
       // The enclosing type, and whether to look for the selected member.
       //
@@ -486,10 +484,6 @@ extension TypeResolver {
         // We don't resolve generic parameters (same as ``resolveTypeDecl``).
         enclosingTypeResult = .failure(.genericParameterOrAssociatedType)
         lookForSelectedMember = false
-      case .lookInModule:
-        findTopLevelTypes(moduleSelector: nil, name: typeComponent.name)
-        // TODO: Handle
-        continue
       }
 
       // Whether we have to look for a member or not, we can't succeed without
@@ -531,8 +525,30 @@ extension TypeResolver {
       return memberType
     }
 
-    // No type matched
-    return .failure(Failure.noTypeInScope)
+    // === Top-Level Lookup ===
+    let topLevelTypes: [Attached<TypeDeclSyntax>] = findTopLevelTypes(
+      originatingFile: typeComponent.introducingSyntax.fileRoot,
+      moduleSelector: topLevelModuleLookup,
+      name: typeComponent.name
+    )
+    let diambiguatedTopLevelTypes = disambiguateResults(
+      results: topLevelTypes,
+      declOfResult: \.node,
+      callsite: Syntax(typeComponent.introducingSyntax.node)
+    )
+    guard let topLevelType = diambiguatedTopLevelTypes.first else {
+      // No type matched
+      return .failure(Failure.noTypeInScope)
+    }
+    guard diambiguatedTopLevelTypes.count == 1 else {
+      return .failure(Failure.ambiguousTypeDecl(diambiguatedTopLevelTypes.map(\.node)))
+    }
+    symbolTable.log("Found top-level type `\(topLevelType._memberlessDescription)`")
+    return resolveTypeDecl(
+      typeDecl: topLevelType,
+      declContext: DeclContext.codeBlock(topLevelType.fileRootStatements),
+      originatingSyntax: Attached<TypeLikeSyntax>(typeComponent.introducingSyntax)
+    )
   }
 
   fileprivate mutating func resolveDeclGroup(
