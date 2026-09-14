@@ -243,7 +243,7 @@ extension SymbolTable {
     // track these dependencies in the symbol table's corresponding
     // extension state.
     var resolver = TypeResolver(symbolTable: self)
-    let extendedTypeResult = resolver._resolveExtendedTypeSyntax(extensionDecl: extensionDecl)
+    let extendedTypeResult = resolver.resolveExtendedTypeSyntax(extensionDecl: extensionDecl)
 
     // Admit to the type graph and get evicted extensions
     let bindingResult: Result<BindingResult, TypeGraph.ExtensionAdmissionFailure>
