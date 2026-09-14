@@ -21,6 +21,48 @@ private import SwiftDiagnostics
 import SwiftDiagnostics
 #endif
 
+// MARK: Logging
+
+extension SymbolTable {
+  var _verbose: Bool { false }
+  var logPrefix: [String] {
+    get { [] }
+    set {}
+  }
+  var _logNestingLimit: Int? { nil }
+  func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
+    #if DEBUG
+    guard _verbose else { return }
+    // Calculate log text
+    let newLine = "\(logPrefix.map({ "[\($0)]" }).joined()) \(component)\n"
+    // Print new line
+    print(newLine)
+    // TODO: Remove
+    fflush(stdout)
+    #endif
+  }
+
+  func withLogging<T>(
+    request: String,
+    describe: (T) -> String,
+    perform action: (_ mutableSelf: borrowing SymbolTable) -> T,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) -> T {
+    if let nestingLimit = self._logNestingLimit, logPrefix.count >= nestingLimit {
+      fatalError(
+        "Exceeded log nesting limit of \(nestingLimit), suggesting there's an infinite loop. If you think this is a mistake, you may change the limit in `TypeQualifier`."
+      )
+    }
+    logPrefix.append(request)
+    log("Resolving...", file: file, line: line)
+    let result = action(self)
+    log("Resolved \(describe(result))", file: file, line: line)
+    logPrefix.removeLast()
+    return result
+  }
+}
+
 extension SymbolTable {
   /// Sorts results in increasing order by
   /// (a) Module name (alphabetically), (b) File id (alphabetically), and (c) File position (offset).
