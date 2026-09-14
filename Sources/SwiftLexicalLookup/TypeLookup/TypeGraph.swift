@@ -356,8 +356,7 @@ public struct TypeGraph {
     internal private(set) var version = 0
 
     /// Invariants: count >= 1; sorted by position in increasing order
-    /// TODO: Should use an enum of `case mainDecl(MappedDeclGroup<NominalTypeDeclSyntax>)` or
-    /// `case redeclarations([MappedDeclGroup<NominalTypeDeclSyntax>])`
+    /// TODO: Should replace MappedDeclGroup with `mainDecl` and `mainDeclMembers`
     fileprivate let mainDecl: MappedDeclGroup<NominalTypeDeclSyntax>
 
     private(set) var boundExtensions: [ModuleName: [Attached<ExtensionDeclSyntax>: TypeTable]]
