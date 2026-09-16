@@ -16,6 +16,14 @@ import SwiftSyntax
 /// The symbol table drives lookup. Given a collection of files, their modules,
 /// and the build configuration, it can resolve type syntax by correctly
 /// tracking types and their extensions.
+///
+/// # Determinism
+///
+/// SymbolTable should be deterministic. That is, given the same data, different
+/// runs of `resolve` should still issue the same requests, in the same order.
+/// The main source of non-determinism are `Set` and `Dictionary`. These types
+/// have a non-deterministic iteration order and should only be used to check
+/// for members, or paired with an array that tracks insertion order.
 @_spi(_QualifiedLookupTests)
 public final class SymbolTable {
   /// The "internal" module.

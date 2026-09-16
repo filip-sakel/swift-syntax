@@ -129,19 +129,6 @@ extension Array {
 }
 
 @_spi(_QualifiedLookupTests) public typealias IntroducingExtensionOrMainDecl = Attached<ExtensionDeclSyntax>?
-@_spi(_QualifiedLookupTests) public struct TypeMemberDecl: Hashable, Sendable {
-  let introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl
-  let typeDeclSyntax: Attached<TypeDeclSyntax>
-}
-@_spi(_QualifiedLookupTests) public struct TypeMember: Hashable, Sendable {
-  let name: Identifier
-  fileprivate(set) var decls: [TypeMemberDecl]
-
-  @_spi(_QualifiedLookupTests) public init(name: Identifier, decls: [TypeMemberDecl]) {
-    self.name = name
-    self.decls = decls
-  }
-}
 
 /// An extension dependency stores cached information such as what declaration
 /// group the given member was introduced. Normally, we don't store cached
@@ -154,15 +141,40 @@ extension Array {
 /// with any dependencies).
 @_spi(_QualifiedLookupTests)
 public struct ExtensionDependency: Sendable {
-  let dependencyTypeName: TypeGraph.GlobalTypeName
-  fileprivate(set) var members: [TypeMember]
+  /// The base type on whose members we depend.
+  let baseTypeName: TypeGraph.GlobalTypeName
+
+  /// The type members of base type on which we depend, in lookup order.
+  ///
+  /// This is an ordered list rather than a `[Identifier: ...]` dictionary,
+  /// because want a deterministic order when evicting extensions to
+  /// uphold `SymbolTable`'s determinism requirement.
+  fileprivate(set) var members: [(name: Identifier, decls: [Member])]
 
   @_spi(_QualifiedLookupTests) public init(
     dependencyTypeName: TypeGraph.GlobalTypeName,
-    members: [TypeMember]
+    members: [(name: Identifier, decls: [Member])]
   ) {
-    self.dependencyTypeName = dependencyTypeName
+    self.baseTypeName = dependencyTypeName
     self.members = members
+  }
+}
+
+extension ExtensionDependency {
+  /// One declaration contributing to a dependency's member, together with
+  /// the declaration group that introduced it.
+  ///
+  /// A member can have more than one contributing declaration when it's
+  /// ambiguous. For instance, a type alias declared both in a type's own
+  /// body and again in one of its extensions.
+  @_spi(_QualifiedLookupTests) public struct Member: Hashable, Sendable {
+    /// The extension that introduced `typeDecl`, or `nil` if `typeDecl`
+    /// was declared in the nominal-type declaration.
+    ///
+    /// Note: We care about extensions and not nominal-type declarations,
+    /// because cycles can only form between extensions.
+    @_spi(_QualifiedLookupTests) public let introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl
+    @_spi(_QualifiedLookupTests) public let typeDecl: Attached<TypeDeclSyntax>
   }
 }
 
@@ -229,10 +241,13 @@ public struct ExtensionState: Sendable {
       ExtensionDependency(
         dependencyTypeName: typeName,
         members: members.map({ (name, typeDecls) in
-          TypeMember(
+          (
             name: name,
-            decls: typeDecls.map({
-              TypeMemberDecl(introducingExtensionOrMainDecl: $0.0.as(ExtensionDeclSyntax.self), typeDeclSyntax: $0.1)
+            decls: typeDecls.map({ typeDecl in
+              ExtensionDependency.Member(
+                introducingExtensionOrMainDecl: typeDecl.0.as(ExtensionDeclSyntax.self),
+                typeDecl: typeDecl.1
+              )
             })
           )
         })
@@ -246,23 +261,17 @@ public struct ExtensionState: Sendable {
   }
 }
 
-@_spi(_QualifiedLookupTests) public struct TypeTable: Hashable {
-  fileprivate(set) var typeMembersToDecls: [Identifier: TypeMember]
+/// The direct type members declared by a *single* declaration group (nominal
+/// type or extension).
+struct TypeTable {
+  /// Maps each member's name to every declaration introducing it in this
+  /// declaration group. More than one declaration for the same name means
+  /// the member is ambiguous (redeclared) within this one declaration group.
+  ///
+  /// Note: This is a `Dictionary`, so it must generally not be iterated to
+  /// uphold `SymbolTable`'s determinism requirement.
+  fileprivate(set) var typeMembersToDecls: [Identifier: [Attached<TypeDeclSyntax>]]
 
-  init(
-    from namesToDecls: [Identifier: [Attached<TypeDeclSyntax>]],
-    introducedIn introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl
-  ) {
-    typeMembersToDecls = [:]
-    for (name, typeDecls) in namesToDecls {
-      typeMembersToDecls[name] = TypeMember(
-        name: name,
-        decls: typeDecls.map({
-          TypeMemberDecl(introducingExtensionOrMainDecl: introducingExtensionOrMainDecl, typeDeclSyntax: $0)
-        })
-      )
-    }
-  }
   func collidesWithDependency(
     _ dependency: QualifiedLookupDependency,
     whenBoundTo baseTypeName: TypeGraph.GlobalTypeName
@@ -664,8 +673,8 @@ extension TypeGraph {
       for (declGroup, declGroupMembers) in sortedDeclGroups {
         // Add the matching decls
         let introducedDecls =
-          declGroupMembers.typeMembersToDecls[memberTypeName]?.decls.map({
-            (declGroup, $0.typeDeclSyntax)
+          declGroupMembers.typeMembersToDecls[memberTypeName]?.map({
+            (declGroup, $0)
           }) ?? []
         typeDecls.append(contentsOf: introducedDecls)
       }
@@ -852,8 +861,7 @@ extension TypeGraph {
       let freshNominal = NominalType(
         mainDecl: mainDecl,
         mainDeclMembers: TypeTable(
-          from: mainDecl._groupTypeMembers(configuredRegions: declFileConfiguredRegions),
-          introducedIn: nil
+          typeMembersToDecls: mainDecl._groupTypeMembers(configuredRegions: declFileConfiguredRegions)
         )
       )
       namesToTypes[globalTypeName] = freshNominal
@@ -922,13 +930,13 @@ extension TypeGraph {
   }
 
   struct DependencyPathElement: CustomDebugStringConvertible {
-    let introducingMemberType: TypeMemberDecl?
+    let introducingMemberType: ExtensionDependency.Member?
     let boundType: TypeGraph.GlobalTypeRef
     let extensionDecl: Attached<ExtensionDeclSyntax>
     let state: ExtensionState
 
     var debugDescription: String {
-      "\(introducingMemberType?.typeDeclSyntax._memberlessDescription ?? "nil") introduced \(extensionDecl._memberlessDescription) (bound to \(boundType.debugDescription))"
+      "\(introducingMemberType?.typeDecl._memberlessDescription ?? "nil") introduced \(extensionDecl._memberlessDescription) (bound to \(boundType.debugDescription))"
     }
   }
   /// Calls visit with the current dependency path until it
@@ -1018,7 +1026,7 @@ extension TypeGraph {
         // Collisions require that the base type match and that members share a name.
         log("Visiting `\(dependency._declarationlessDescription)` [path \(path)]")
         guard
-          boundTypeRef.name == dependency.dependencyTypeName,
+          boundTypeRef.name == dependency.baseTypeName,
           let firstConflictingMember = dependency.members.first(where: { member in
             extensionMembers.typeMembersToDecls[member.name] != nil
           })
@@ -1029,7 +1037,7 @@ extension TypeGraph {
         let mappedPath: [TypeResolver.ExtensionCycleElement] = path.dropFirst().map({ chainElement in
           TypeResolver.ExtensionCycleElement(
             // Only the first element has `nil` by `_findFirstDependency` invariant.
-            introducingTypeDecl: chainElement.introducingMemberType!.typeDeclSyntax.node,
+            introducingTypeDecl: chainElement.introducingMemberType!.typeDecl.node,
             extensionDecl: chainElement.extensionDecl.node,
             boundType: chainElement.boundType,
           )
@@ -1054,7 +1062,7 @@ extension TypeGraph {
     members: TypeTable,
     symbolTable: SymbolTable
   ) -> TypeGraph.GlobalTypeName? {
-    for (memberName, member) in members.typeMembersToDecls {
+    for (memberName, memberDecls) in members.typeMembersToDecls {
       // Construct the type the member would have
       let potentialMemberTypeName = declGroupTypeName.addingComponent(
         TypeGraph.GlobalTypeName.Component(
@@ -1075,8 +1083,8 @@ extension TypeGraph {
       // Note: The complexity of the following check is O(n*m) where `n` is the number of `_mainDecls`
       // and `m` the number of decls named `memberName` in the given extension. But we usually have a
       // single main declaration and single same-name declaration in an nominal-type/extension decl.
-      let memberIsRegistered = member.decls.contains(where: {
-        $0.typeDeclSyntax.as(NominalTypeDeclSyntax.self) == memberType.mainDecl
+      let memberIsRegistered = memberDecls.contains(where: {
+        $0.as(NominalTypeDeclSyntax.self) == memberType.mainDecl
       })
 
       guard memberIsRegistered else { continue }
@@ -1184,9 +1192,9 @@ extension TypeGraph {
     // Unregister as a dependent from all our dependencies
     for dependency in extensionState.dependencies {
       // Get dependency type
-      guard let dependencyType = namesToTypes[dependency.dependencyTypeName] else {
+      guard let dependencyType = namesToTypes[dependency.baseTypeName] else {
         return .failure(
-          ExtensionRemovalFailure.dependencyToUnregistered(dependencyTpeName: dependency.dependencyTypeName)
+          ExtensionRemovalFailure.dependencyToUnregistered(dependencyTpeName: dependency.baseTypeName)
         )
       }
 
@@ -1194,13 +1202,13 @@ extension TypeGraph {
       let originalDependentsCount = dependencyType.dependents.count
       var newDependents = dependencyType.dependents
       newDependents.removeAll(where: { $0.dependentExtension == extensionDecl })
-      log("New dependents for '\(dependency.dependencyTypeName)': \(newDependents)")
+      log("New dependents for '\(dependency.baseTypeName)': \(newDependents)")
       guard newDependents.count < originalDependentsCount else {
-        return .failure(ExtensionRemovalFailure.notInDependentsList(dependencyTypeName: dependency.dependencyTypeName))
+        return .failure(ExtensionRemovalFailure.notInDependentsList(dependencyTypeName: dependency.baseTypeName))
       }
 
       // Update dependency type
-      namesToTypes[dependency.dependencyTypeName] = dependencyType._updatingDependents(newDependents)
+      namesToTypes[dependency.baseTypeName] = dependencyType._updatingDependents(newDependents)
     }
 
     // Unbind from type (if bound)
@@ -1312,12 +1320,13 @@ extension TypeGraph {
     baseTypeDecl: Attached<DeclGroupSyntaxType>,
     baseTypeFileInfo: FileInfo,
     baseType: NominalType,
-    member: TypeMember,
+    memberName: Identifier,
+    memberDecls: [Attached<TypeDeclSyntax>],
     evictedExtensions: inout EvictedExtensions,
     symbolTable: SymbolTable
   ) {
     return withLogging(
-      request: "Unbinding member type '\(baseTypeName.debugDescription)' > '\(member.name.name)'",
+      request: "Unbinding member type '\(baseTypeName.debugDescription)' > '\(memberName.name)'",
       describe: { "" },
       perform: { `self` in
         self._introspect(symbolTable: symbolTable, onlyLogIfCorrupted: true)
@@ -1327,7 +1336,8 @@ extension TypeGraph {
           baseTypeDecl: baseTypeDecl,
           baseTypeFileInfo: baseTypeFileInfo,
           baseType: baseType,
-          member: member,
+          memberName: memberName,
+          memberDecls: memberDecls,
           evictedExtensions: &evictedExtensions,
           symbolTable: symbolTable
         )
@@ -1340,17 +1350,15 @@ extension TypeGraph {
     baseTypeDecl: Attached<DeclGroupSyntaxType>,
     baseTypeFileInfo: FileInfo,
     baseType: NominalType,
-    member: TypeMember,
+    memberName: Identifier,
+    memberDecls: [Attached<TypeDeclSyntax>],
     evictedExtensions: inout EvictedExtensions,
     symbolTable: SymbolTable
   ) {
     // Evict dependent extensions
     _evictDependents(
       modifiedTypeName: baseTypeName,
-      modifiedMembers: TypeTable(
-        from: [member.name: member.decls.map(\.typeDeclSyntax)],
-        introducedIn: baseTypeDecl.as(ExtensionDeclSyntax.self)
-      ),
+      modifiedMembers: TypeTable(typeMembersToDecls: [memberName: memberDecls]),
       modifiedExtensionModule: baseTypeFileInfo.module,
       evictedExtensions: &evictedExtensions,
       symbolTable: symbolTable
@@ -1359,7 +1367,7 @@ extension TypeGraph {
     // If there's no registered nominal type our name, we're done
     let memberNominalTypeName = baseTypeName.addingComponent(
       GlobalTypeName.Component(
-        name: member.name,
+        name: memberName,
         file: baseTypeDecl.fileRoot,
         fileInfo: baseTypeFileInfo,
         symbolTable: symbolTable
@@ -1390,8 +1398,8 @@ extension TypeGraph {
     // '_(File.swift)::A' > 'B', and we find a type '_(File.swift)::A._(File.swift)::B',
     // but we don't have any nominal-type declaration to unbind.
     // TODO: Consider updating now that `NominalType/mainDecl` implies no redecls
-    let memberNominalDecls: [Attached<NominalTypeDeclSyntax>] = member.decls.compactMap({
-      $0.typeDeclSyntax.as(NominalTypeDeclSyntax.self)
+    let memberNominalDecls: [Attached<NominalTypeDeclSyntax>] = memberDecls.compactMap({
+      $0.as(NominalTypeDeclSyntax.self)
     })
     if memberNominalDecls.contains(memberNominal.mainDecl) {
       // Assert we don't have any nominal-type *re*declarations (checked in `registerNominalTypeReference`)
@@ -1402,16 +1410,17 @@ extension TypeGraph {
 
       // Remove all nested member types
       log("Found main decl `\(memberNominal.mainDecl._memberlessDescription)`; removing member types.")
-      for (_, nestedMember) in memberNominal.mainDeclMembers.typeMembersToDecls {
+      for (nestedMemberName, nestedMemberDecls) in memberNominal.mainDeclMembers.typeMembersToDecls {
         log(
-          "Visiting member type `\(memberNominal.mainDecl._memberlessDescription)` > '\(nestedMember.name.name)'"
+          "Visiting member type `\(memberNominal.mainDecl._memberlessDescription)` > '\(nestedMemberName.name)'"
         )
         _unbindMemberType(
           baseTypeName: memberNominalTypeName,
           baseTypeDecl: Attached<DeclGroupSyntaxType>(memberNominal.mainDecl),
           baseTypeFileInfo: baseTypeFileInfo,
           baseType: memberNominal,
-          member: nestedMember,
+          memberName: nestedMemberName,
+          memberDecls: nestedMemberDecls,
           evictedExtensions: &evictedExtensions,
           symbolTable: symbolTable
         )
@@ -1538,13 +1547,14 @@ extension TypeGraph {
         )
       }
 
-      for (_, typeMember) in extensionMembers.typeMembersToDecls {
+      for (memberName, memberDecls) in extensionMembers.typeMembersToDecls {
         _unbindMemberType(
           baseTypeName: extendedTypeName,
           baseTypeDecl: Attached<DeclGroupSyntaxType>(extensionDecl),
           baseTypeFileInfo: extensionFileInfo,
           baseType: extendedType,
-          member: typeMember,
+          memberName: memberName,
+          memberDecls: memberDecls,
           evictedExtensions: &evictedExtensions,
           symbolTable: symbolTable
         )
@@ -1715,8 +1725,7 @@ extension TypeGraph {
 
     // Prepare to store extension state
     let extensionMembers = TypeTable(
-      from: extensionDecl._groupTypeMembers(configuredRegions: extensionFileConfiguredRegions),
-      introducedIn: extensionDecl
+      typeMembersToDecls: extensionDecl._groupTypeMembers(configuredRegions: extensionFileConfiguredRegions)
     )
 
     // === Diagnose Dependency Cycles ===
@@ -1913,10 +1922,10 @@ extension ExtensionDependency: CustomDebugStringConvertible {
       return "'\(member.name.name)'\(includeMemberDecls ? declDescription : "")"
     }).joined(separator: ", ")
     return
-      "ExtensionDependency(dependencyTypeName: '\(dependencyTypeName.debugDescription)', members: [\(membersDescriptions)])"
+      "ExtensionDependency(dependencyTypeName: '\(baseTypeName.debugDescription)', members: [\(membersDescriptions)])"
   }
 
-  /// Debug description but removes the `TypeDeclSyntax` from `TypeMember` for easier testing.
+  /// Debug description but removes the `TypeDeclSyntax` from each `Member` for easier testing.
   fileprivate var _declarationlessDescription: String {
     _describe(includeMemberDecls: false)
   }
@@ -1950,7 +1959,7 @@ extension ExtensionState {
     visitName: (TypeGraph.GlobalTypeName) -> Void
   ) {
     for dependency in dependencies {
-      visitName(dependency.dependencyTypeName)
+      visitName(dependency.baseTypeName)
     }
     switch resolvedType {
     case .success(let name):
@@ -1993,9 +2002,9 @@ extension TypeGraph {
     /// E.g. The type alias in 'struct A { typealias B = Int }' gets
     /// annotated `Type member '_(MyFile.swift)::A' > 'B'`.
     func _markMemberTypes(baseTypeName: String, baseTypeMembers: TypeTable) {
-      for (memberName, member) in baseTypeMembers.typeMembersToDecls {
-        for memberDecl in member.decls {
-          _attachNote(to: memberDecl.typeDeclSyntax, message: "Type member '\(baseTypeName)' > '\(memberName.name)'")
+      for (memberName, memberDecls) in baseTypeMembers.typeMembersToDecls {
+        for memberDecl in memberDecls {
+          _attachNote(to: memberDecl, message: "Type member '\(baseTypeName)' > '\(memberName.name)'")
         }
       }
     }
@@ -2050,7 +2059,7 @@ extension TypeGraph {
         // The extension state must have a dependency to this type with the right type member.
         guard
           dependentExtensionState.dependencies.contains(where: { dependency in
-            dependency.dependencyTypeName == typeName
+            dependency.baseTypeName == typeName
               && dependency.members.contains(where: { member in member.name == dependent.memberType })
           })
         else {
@@ -2137,17 +2146,17 @@ extension TypeGraph {
       // Mark dependencies
       // TODO: Check if dependency<->dependent links are valid and acyclic (put check in loop below
       // and just keep track of (&diagnose) unmatched dependents)
-      let flattenedDependencies: [(GlobalTypeName, TypeMember, IntroducingExtensionOrMainDecl)] =
+      let flattenedDependencies =
         extensionState
         .dependencies.flatMap({ dependency in
           dependency.members.flatMap({ member in
             // Empty decls are implicitly in `IntroducingExtensionOrMainDecl.none`
             // (main decl)
             guard !member.decls.isEmpty else {
-              return [(dependency.dependencyTypeName, member, IntroducingExtensionOrMainDecl.none)]
+              return [(dependency.baseTypeName, member, IntroducingExtensionOrMainDecl.none)]
             }
             return member.decls.map({ typeDecl in
-              return (dependency.dependencyTypeName, member, typeDecl.introducingExtensionOrMainDecl)
+              return (dependency.baseTypeName, member, typeDecl.introducingExtensionOrMainDecl)
             })
           })
         })

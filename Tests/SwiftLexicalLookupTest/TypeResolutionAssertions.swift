@@ -442,8 +442,8 @@ struct IdentifierWrapper: ExpressibleByStringLiteral {
 
 extension ExtensionDependency {
   init(baseType: TypeGraph.GlobalTypeName, members: [IdentifierWrapper]) {
-    let mappedMembers: [TypeMember] = members.map({ member in
-      return TypeMember(name: member.identifier, decls: [])
+    let mappedMembers: [(name: Identifier, decls: [Member])] = members.map({ member in
+      (name: member.identifier, decls: [])
     })
     self.init(dependencyTypeName: baseType, members: mappedMembers)
   }
