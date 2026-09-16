@@ -21,285 +21,6 @@ private import SwiftDiagnostics
 import SwiftDiagnostics
 #endif
 
-// MARK: Logging
-
-extension SymbolTable {
-  var _verbose: Bool { false }
-  var logPrefix: [String] {
-    get { [] }
-    set {}
-  }
-  var _logNestingLimit: Int? { nil }
-  func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
-    #if DEBUG
-    guard _verbose else { return }
-    // Calculate log text
-    let newLine = "\(logPrefix.map({ "[\($0)]" }).joined()) \(component)\n"
-    // Print new line
-    print(newLine)
-    // TODO: Remove
-    fflush(stdout)
-    #endif
-  }
-
-  func withLogging<T>(
-    request: String,
-    describe: (T) -> String,
-    perform action: (_ mutableSelf: borrowing SymbolTable) -> T,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) -> T {
-    if let nestingLimit = self._logNestingLimit, logPrefix.count >= nestingLimit {
-      fatalError(
-        "Exceeded log nesting limit of \(nestingLimit), suggesting there's an infinite loop. If you think this is a mistake, you may change the limit in `TypeQualifier`."
-      )
-    }
-    logPrefix.append(request)
-    log("Resolving...", file: file, line: line)
-    let result = action(self)
-    log("Resolved \(describe(result))", file: file, line: line)
-    logPrefix.removeLast()
-    return result
-  }
-}
-
-extension SymbolTable {
-  /// Sorts results in increasing order by
-  /// (a) Module name (alphabetically), (b) File id (alphabetically), and (c) File position (offset).
-  ///
-  /// Helps maintain deterministic outputs.
-  // TODO: Remove
-  func sortDeclarations(_ typeDecls: [Attached<TypeDeclSyntax>]) -> [Attached<TypeDeclSyntax>] {
-    typeDecls.sorted(by: { a, b in
-      // Compare modules
-      let fileA = getFileInfo(a.fileRoot)!
-      let fileB = getFileInfo(b.fileRoot)!
-      guard fileA.module == fileA.module else {
-        return fileA.module.name < fileA.module.name
-      }
-
-      // If modules are equal, compare file names
-      guard fileA.name == fileB.name else {
-        return fileA.name < fileB.name
-      }
-
-      // If file names are equal, compare positions
-      return a.position < b.position
-    })
-  }
-}
-
-extension Array {
-  /// Appends if the array has no duplicates using the given key
-  private mutating func _indexAfterInsertingUnique<Key: Equatable, Value>(
-    key: Key,
-    default defaultValue: Value
-  ) -> Int where Element == (key: Key, value: Value) {
-    if let existingIndex = firstIndex(where: { $0.key == key }) {
-      return existingIndex
-    } else {
-      let newIndex = count
-      append((key, defaultValue))
-      return newIndex
-    }
-  }
-  /// Similar to dictionary's `subscript(_:default:)`.
-  ///
-  /// Only use for small array's and/or when it's important to maintain insertion order.
-  fileprivate subscript<Key: Equatable, Value>(
-    _key key: Key,
-    default defaultValue: Value
-  ) -> Value where Element == (key: Key, value: Value) {
-    get {
-      first(where: { $0.key == key })?.value ?? defaultValue
-    }
-    _modify {
-      let index: Int
-      if let existingIndex = firstIndex(where: { $0.key == key }) {
-        index = existingIndex
-      } else {
-        let newIndex = count
-        append((key, defaultValue))
-        index = newIndex
-      }
-
-      yield &self[index].value
-    }
-  }
-}
-
-@_spi(_QualifiedLookupTests) public typealias IntroducingExtensionOrMainDecl = Attached<ExtensionDeclSyntax>?
-
-/// An extension dependency stores cached information such as what declaration
-/// group the given member was introduced. Normally, we don't store cached
-/// information for types stored in the `TypeGraph` since we must
-/// later update a lot of cached data when we bind/evict an extension.
-/// However, extension dependencies are different because if the dependency
-/// type changes, we necessarily have to evict and recompute the extensions.
-/// Hence, extension dependencies should be created at extension binding and not
-/// be modified (we simply evict the extension and destroy its state along
-/// with any dependencies).
-@_spi(_QualifiedLookupTests)
-public struct ExtensionDependency: Sendable {
-  /// The base type on whose members we depend.
-  let baseTypeName: TypeGraph.GlobalTypeName
-
-  /// The type members of base type on which we depend, in lookup order.
-  ///
-  /// This is an ordered list rather than a `[Identifier: ...]` dictionary,
-  /// because want a deterministic order when evicting extensions to
-  /// uphold `SymbolTable`'s determinism requirement.
-  fileprivate(set) var members: [(name: Identifier, decls: [Member])]
-
-  @_spi(_QualifiedLookupTests) public init(
-    dependencyTypeName: TypeGraph.GlobalTypeName,
-    members: [(name: Identifier, decls: [Member])]
-  ) {
-    self.baseTypeName = dependencyTypeName
-    self.members = members
-  }
-}
-
-extension ExtensionDependency {
-  /// One declaration contributing to a dependency's member, together with
-  /// the declaration group that introduced it.
-  ///
-  /// A member can have more than one contributing declaration when it's
-  /// ambiguous. For instance, a type alias declared both in a type's own
-  /// body and again in one of its extensions.
-  @_spi(_QualifiedLookupTests) public struct Member: Hashable, Sendable {
-    /// The extension that introduced `typeDecl`, or `nil` if `typeDecl`
-    /// was declared in the nominal-type declaration.
-    ///
-    /// Note: We care about extensions and not nominal-type declarations,
-    /// because cycles can only form between extensions.
-    @_spi(_QualifiedLookupTests) public let introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl
-    @_spi(_QualifiedLookupTests) public let typeDecl: Attached<TypeDeclSyntax>
-  }
-}
-
-@_spi(_QualifiedLookupTests)
-public typealias EvictedExtensions = [Attached<ExtensionDeclSyntax>]
-
-@_spi(_QualifiedLookupTests) public typealias BindingResult = (
-  resolvedTypeName: Result<
-    (globalReference: TypeGraph.GlobalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>),
-    TypeResolver.Failure
-  >,
-  evictedExtensions: EvictedExtensions
-)
-
-/// The state of an admitted extension: what type it resolved to and the
-/// dependencies for that resolution result.
-///
-/// Note: Extension state uses `GlobalTypeName` instead of `GlobalTypeRef`
-/// since the type graph already stores information about types in a
-/// different property.
-@_spi(_QualifiedLookupTests)
-public struct ExtensionState: Sendable {
-  // Invariant: The extensions listed must be valid and successfully bound to a type in `extensionsToState`
-  // Invariant: There's only one dependency per type.
-  //
-  // See `ExtensionDependency` docstring for why these properties are *immutable*.
-  @_spi(_QualifiedLookupTests) public let dependencies: [ExtensionDependency],
-    /// The resolved type must be valid in `namesToTypes`
-    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
-
-  @_spi(_QualifiedLookupTests) public init(
-    _uncheckedDependencies dependencies: [ExtensionDependency],
-    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
-  ) {
-    self.dependencies = dependencies
-    self.resolvedType = resolvedType
-  }
-
-  @_spi(_QualifiedLookupTests) public init(
-    dependencies: [QualifiedLookupDependency],
-    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
-  ) {
-    // Group dependencies by base type and member name, while maintaing order
-    var groupedDependencies =
-      [
-        (
-          key: TypeGraph.GlobalTypeName,
-          value: [(key: Identifier, value: [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)])]
-        )
-      ]()
-
-    for dependency in dependencies {
-      // TODO: Clarify comment
-      // Note: We can assign directly because ``DependencyTracker/dependencies`` guarantees
-      // that type/member-name pairs have just a single entry.
-      groupedDependencies[_key: dependency.extendedTypeName, default: []][_key: dependency.member, default: []].append(
-        contentsOf: dependency.typeDecls
-      )
-    }
-
-    // Map to `ExtensionDependency`
-    // Satisfies invariant of one dependency per type
-    let orderedGroupedDependencies: [ExtensionDependency] = groupedDependencies.map({ (typeName, members) in
-      ExtensionDependency(
-        dependencyTypeName: typeName,
-        members: members.map({ (name, typeDecls) in
-          (
-            name: name,
-            decls: typeDecls.map({ typeDecl in
-              ExtensionDependency.Member(
-                introducingExtensionOrMainDecl: typeDecl.0.as(ExtensionDeclSyntax.self),
-                typeDecl: typeDecl.1
-              )
-            })
-          )
-        })
-      )
-    })
-
-    self.init(
-      _uncheckedDependencies: orderedGroupedDependencies,
-      resolvedType: resolvedType
-    )
-  }
-}
-
-/// The direct type members declared by a *single* declaration group (nominal
-/// type or extension).
-struct TypeTable {
-  /// Maps each member's name to every declaration introducing it in this
-  /// declaration group. More than one declaration for the same name means
-  /// the member is ambiguous (redeclared) within this one declaration group.
-  ///
-  /// Note: This is a `Dictionary`, so it must generally not be iterated to
-  /// uphold `SymbolTable`'s determinism requirement.
-  fileprivate(set) var typeMembersToDecls: [Identifier: [Attached<TypeDeclSyntax>]]
-
-  func collidesWithDependency(
-    _ dependency: QualifiedLookupDependency,
-    whenBoundTo baseTypeName: TypeGraph.GlobalTypeName
-  ) -> Bool {
-    dependency.extendedTypeName == baseTypeName && typeMembersToDecls[dependency.member] != nil
-  }
-}
-
-extension Attached where Node: DeclGroupSyntax {
-  internal func _groupTypeMembers(
-    configuredRegions: ConfiguredRegions?
-  ) -> [Identifier: [Attached<TypeDeclSyntax>]] {
-    var result = [Identifier: [Attached<TypeDeclSyntax>]]()
-    node.visitDirectMembers(
-      configuredRegions: configuredRegions,
-      visit: { valueDecl in
-        guard let typeDecl = valueDecl.as(TypeDeclSyntax.self) else { return }
-        guard let typeIdentifier = Identifier(validating: typeDecl.name) else { return }
-        // Since these are our children, they will also be scope in the file,
-        // so we can force-unwrap.
-        let wrappedTypeDecl = Attached<TypeDeclSyntax>(typeDecl)!
-        result[typeIdentifier, default: []].append(wrappedTypeDecl)
-      }
-    )
-    return result
-  }
-}
-
 /// A directed acyclic graph where types are nodes and extensions are edges.
 ///
 ///
@@ -365,15 +86,23 @@ extension Attached where Node: DeclGroupSyntax {
 ///    e. Finally, we bind `extension A.Inner` to '_(MyFile.swift)::A'
 @_spi(_QualifiedLookupTests)
 public struct TypeGraph {
-  struct TypeDependent: Sendable, Hashable, CustomDebugStringConvertible {
-    let memberType: Identifier
-    let dependentExtension: Attached<ExtensionDeclSyntax>
+  /// Updates when we register nominal types and bind extensions
+  var namesToTypes: [TypeGraph.GlobalTypeName: NominalType]
+  @_spi(_QualifiedLookupTests)
+  public var extensionsToState: [Attached<ExtensionDeclSyntax>: ExtensionState]
 
-    public var debugDescription: String {
-      "Self > '\(memberType.name)' => `\(dependentExtension.node._memberlessDescription)`"
-    }
+  // TODO: Remove
+  var logPrefix: [String] = [String]()
+
+  init() {
+    namesToTypes = [:]
+    extensionsToState = [:]
   }
+}
 
+// MARK: NominalType
+
+extension TypeGraph {
   struct NominalType {
     /// Keeps track of mutations to assert data didn't change between calls
     internal private(set) var version = 0
@@ -488,54 +217,170 @@ public struct TypeGraph {
       return copy
     }
   }
+}
 
-  /// Updates when we register nominal types and bind extensions
-  var namesToTypes: [TypeGraph.GlobalTypeName: NominalType]
-  // /// Updates when we register nominal types and bind extensions
-  // var parentsToTypeMembers: [QualifiedTypeName: TypeTable]
-  @_spi(_QualifiedLookupTests) public var extensionsToState: [Attached<ExtensionDeclSyntax>: ExtensionState]
+// MARK: IntroducingExtensionOrMainDecl
 
-  var _verbose: Bool = false
-  var logPrefix: [String] = [String]()
-  /// The number of `withLogging` calls we can nest. Useful for debugging infinite loops
-  /// that otherwise fill up standard output and become illegible.
-  let _logNestingLimit: Int? = 50
+@_spi(_QualifiedLookupTests)
+public typealias IntroducingExtensionOrMainDecl = Attached<ExtensionDeclSyntax>?
 
-  mutating func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
-    guard _verbose else { return }
-    // Keep log text separately
-    let newLine = "\(logPrefix.map({ "[\($0)]" }).joined()) \(component)\n"
-    // logText += newLine + "\n"
-    // Print new line
-    print(newLine)
-    // TODO: Remove
-    fflush(stdout)
+// MARK: TypeTable
+
+extension TypeGraph {
+  /// The direct type members declared by a *single* declaration group (nominal
+  /// type or extension).
+  struct TypeTable {
+    /// Maps each member's name to every declaration introducing it in this
+    /// declaration group. More than one declaration for the same name means
+    /// the member is ambiguous (redeclared) within this one declaration group.
+    ///
+    /// Note: This is a `Dictionary`, so it must generally not be iterated to
+    /// uphold `SymbolTable`'s determinism requirement.
+    fileprivate(set) var typeMembersToDecls: [Identifier: [Attached<TypeDeclSyntax>]]
   }
+}
 
-  mutating func withLogging<T>(
-    request: String,
-    describe: (T) -> String,
-    perform action: (_ mutableSelf: inout TypeGraph) -> T,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) -> T {
-    if let nestingLimit = self._logNestingLimit {
-      precondition(
-        logPrefix.count < nestingLimit,
-        "Exceeded log nesting limit, suggesting there's an infinite loop. If you think this is a mistake, you may change the limit in ``TypeQualifier``"
+// MARK: TypeDependent
+
+extension TypeGraph {
+  struct TypeDependent: Sendable, Hashable, CustomDebugStringConvertible {
+    let memberType: Identifier
+    let dependentExtension: Attached<ExtensionDeclSyntax>
+
+    public var debugDescription: String {
+      "Self > '\(memberType.name)' => `\(dependentExtension.node._memberlessDescription)`"
+    }
+  }
+}
+
+// MARK: ExtensionState
+
+extension TypeGraph {
+  /// The state of an admitted extension: what type it resolved to and the
+  /// dependencies for that resolution result.
+  ///
+  /// Note: Extension state uses `GlobalTypeName` instead of `GlobalTypeRef`
+  /// since the type graph already stores information about types in a
+  /// different property.
+  @_spi(_QualifiedLookupTests)
+  public struct ExtensionState: Sendable {
+    // Invariant: The extensions listed must be valid and successfully bound to a type in `extensionsToState`
+    // Invariant: There's only one dependency per type.
+    //
+    // See `ExtensionDependency` docstring for why these properties are *immutable*.
+    @_spi(_QualifiedLookupTests) public let dependencies: [ExtensionDependency],
+      /// The resolved type must be valid in `namesToTypes`
+      resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
+
+    @_spi(_QualifiedLookupTests) public init(
+      _uncheckedDependencies dependencies: [ExtensionDependency],
+      resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
+    ) {
+      self.dependencies = dependencies
+      self.resolvedType = resolvedType
+    }
+
+    init(
+      dependencies: [QualifiedLookupDependency],
+      resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
+    ) {
+      // Group dependencies by base type and member name, while maintaing order
+      var groupedDependencies =
+        [
+          (
+            key: TypeGraph.GlobalTypeName,
+            value: [(key: Identifier, value: [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)])]
+          )
+        ]()
+
+      for dependency in dependencies {
+        // TODO: Clarify comment
+        // Note: We can assign directly because ``DependencyTracker/dependencies`` guarantees
+        // that type/member-name pairs have just a single entry.
+        groupedDependencies[_key: dependency.extendedTypeName, default: []][_key: dependency.member, default: []]
+          .append(
+            contentsOf: dependency.typeDecls
+          )
+      }
+
+      // Map to `ExtensionDependency`
+      // Satisfies invariant of one dependency per type
+      let orderedGroupedDependencies: [ExtensionDependency] = groupedDependencies.map({ (typeName, members) in
+        ExtensionDependency(
+          dependencyTypeName: typeName,
+          members: members.map({ (name, typeDecls) in
+            (
+              name: name,
+              decls: typeDecls.map({ typeDecl in
+                ExtensionDependency.Member(
+                  introducingExtensionOrMainDecl: typeDecl.0.as(ExtensionDeclSyntax.self),
+                  typeDecl: typeDecl.1
+                )
+              })
+            )
+          })
+        )
+      })
+
+      self.init(
+        _uncheckedDependencies: orderedGroupedDependencies,
+        resolvedType: resolvedType
       )
     }
-    logPrefix.append(request)
-    log("Resolving...", file: file, line: line)
-    let result = action(&self)
-    log("Resolved \(describe(result))", file: file, line: line)
-    logPrefix.removeLast()
-    return result
   }
+}
 
-  init() {
-    namesToTypes = [:]
-    extensionsToState = [:]
+// MARK: ExtensionDependency
+
+/// An extension dependency stores cached information such as what declaration
+/// group the given member was introduced. Normally, we don't store cached
+/// information for types stored in the `TypeGraph` since we must
+/// later update a lot of cached data when we bind/evict an extension.
+/// However, extension dependencies are different because if the dependency
+/// type changes, we necessarily have to evict and recompute the extensions.
+/// Hence, extension dependencies should be created at extension binding and not
+/// be modified (we simply evict the extension and destroy its state along
+/// with any dependencies).
+extension TypeGraph {
+  @_spi(_QualifiedLookupTests)
+  public struct ExtensionDependency: Sendable {
+    /// The base type on whose members we depend.
+    let baseTypeName: TypeGraph.GlobalTypeName
+
+    /// The type members of base type on which we depend, in lookup order.
+    ///
+    /// This is an ordered list rather than a `[Identifier: ...]` dictionary,
+    /// because want a deterministic order when evicting extensions to
+    /// uphold `SymbolTable`'s determinism requirement.
+    fileprivate(set) var members: [(name: Identifier, decls: [Member])]
+
+    @_spi(_QualifiedLookupTests) public init(
+      dependencyTypeName: TypeGraph.GlobalTypeName,
+      members: [(name: Identifier, decls: [Member])]
+    ) {
+      self.baseTypeName = dependencyTypeName
+      self.members = members
+    }
+  }
+}
+
+// MARK: ExtensionDependency.Member
+
+extension TypeGraph.ExtensionDependency {
+  /// One declaration contributing to a dependency's member, together with
+  /// the declaration group that introduced it.
+  ///
+  /// A member can have more than one contributing declaration when it's
+  /// ambiguous. For instance, a type alias declared both in a type's own
+  /// body and again in one of its extensions.
+  @_spi(_QualifiedLookupTests) public struct Member: Hashable, Sendable {
+    /// The extension that introduced `typeDecl`, or `nil` if `typeDecl`
+    /// was declared in the nominal-type declaration.
+    ///
+    /// Note: We care about extensions and not nominal-type declarations,
+    /// because cycles can only form between extensions.
+    @_spi(_QualifiedLookupTests) public let introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl
+    @_spi(_QualifiedLookupTests) public let typeDecl: Attached<TypeDeclSyntax>
   }
 }
 
@@ -1021,7 +866,6 @@ extension TypeGraph {
     let cycleResult: TypeResolver.ExtensionCycle? = _findFirstDependency(
       path: boundExtensionInfo,
       where: { (dependency, path) -> TypeResolver.ExtensionCycle? in
-        // TODO: Factor out to or remove `collidesWithDependency` helper above.
         // Check if dependency collides with introduces `boundTypeName` > `extensionMembers`.
         // Collisions require that the base type match and that members share a name.
         log("Visiting `\(dependency._declarationlessDescription)` [path \(path)]")
@@ -1322,7 +1166,7 @@ extension TypeGraph {
     baseType: NominalType,
     memberName: Identifier,
     memberDecls: [Attached<TypeDeclSyntax>],
-    evictedExtensions: inout EvictedExtensions,
+    evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
     symbolTable: SymbolTable
   ) {
     return withLogging(
@@ -1352,7 +1196,7 @@ extension TypeGraph {
     baseType: NominalType,
     memberName: Identifier,
     memberDecls: [Attached<TypeDeclSyntax>],
-    evictedExtensions: inout EvictedExtensions,
+    evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
     symbolTable: SymbolTable
   ) {
     // Evict dependent extensions
@@ -1495,7 +1339,7 @@ extension TypeGraph {
 
   mutating func _unbindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    evictedExtensions: inout EvictedExtensions,
+    evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
     symbolTable: borrowing SymbolTable
   ) -> Attached<ExtensionDeclSyntax>? {
     return withLogging(
@@ -1515,7 +1359,7 @@ extension TypeGraph {
 
   mutating func __unbindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    evictedExtensions: inout EvictedExtensions,
+    evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
     symbolTable: borrowing SymbolTable
   ) -> Attached<ExtensionDeclSyntax>? {
     guard let extensionState = extensionsToState[extensionDecl] else {
@@ -1588,7 +1432,7 @@ extension TypeGraph {
     modifiedTypeName: GlobalTypeName,
     modifiedMembers: TypeTable,
     modifiedExtensionModule: ModuleName,
-    evictedExtensions: inout EvictedExtensions,
+    evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
     symbolTable: borrowing SymbolTable
   ) {  //-> [TypeDependent] {
     return withLogging(
@@ -1614,7 +1458,7 @@ extension TypeGraph {
     modifiedMembers: TypeTable,
     modifiedExtensionModule: ModuleName,
     // directDependents: [TypeDependent],
-    evictedExtensions: inout EvictedExtensions,
+    evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
     symbolTable: borrowing SymbolTable
   ) {  //-> [TypeDependent] {
     // TODO: Clean up if we go for immutable `get`
@@ -1705,6 +1549,15 @@ extension TypeGraph {
     case cannotReadmit(existingState: ExtensionState)
     case invalidDependencyExtension(extensionState: ExtensionState?)
   }
+
+  @_spi(_QualifiedLookupTests) public typealias BindingResult = (
+    resolvedTypeName: Result<
+      (globalReference: TypeGraph.GlobalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>),
+      TypeResolver.Failure
+    >,
+    evictedExtensions: [Attached<ExtensionDeclSyntax>]
+  )
+
   // TODO: Consider if any early error returns break invariants (lead to an
   // invalid graph state)
   mutating func admitExtension(
@@ -1793,7 +1646,7 @@ extension TypeGraph {
     }
 
     // === Evict Dependents & Bind ===
-    let evictedExtensions: EvictedExtensions
+    let evictedExtensions: [Attached<ExtensionDeclSyntax>]
     // If there's no cycle, we may type members so we need to evict
     switch result {
     case .success(let (extendedTypeRef, _)):
@@ -1805,7 +1658,7 @@ extension TypeGraph {
         )
       }
 
-      var evictedExtensionsTmp: EvictedExtensions = []
+      var evictedExtensionsTmp: [Attached<ExtensionDeclSyntax>] = []
       //let newTypeDependents =
       _introspect(symbolTable: symbolTable, onlyLogIfCorrupted: true)
       _evictDependents(
@@ -1912,7 +1765,7 @@ extension QualifiedLookupDependency: CustomDebugStringConvertible {
 }
 
 @_spi(_QualifiedLookupTests)
-extension ExtensionDependency: CustomDebugStringConvertible {
+extension TypeGraph.ExtensionDependency: CustomDebugStringConvertible {
   private func _describe(includeMemberDecls: Bool) -> String {
     let membersDescriptions = members.map({ member in
       let declDescriptions = member.decls.map({
@@ -1936,7 +1789,7 @@ extension ExtensionDependency: CustomDebugStringConvertible {
 }
 
 @_spi(_QualifiedLookupTests)
-extension ExtensionState: CustomDebugStringConvertible {
+extension TypeGraph.ExtensionState: CustomDebugStringConvertible {
   public var debugDescription: String {
     let dependenciesDescriptions = dependencies.map(\._declarationlessDescription).joined(separator: ",\n    ")
     // We don't use `String/replacing(_:with:)` because it's unavailable during
@@ -1952,7 +1805,7 @@ extension ExtensionState: CustomDebugStringConvertible {
       """
   }
 }
-extension ExtensionState {
+extension TypeGraph.ExtensionState {
   @_spi(_QualifiedLookupTests)
   public func _visitTypes(
     visitResolved: (TypeGraph.TypeRef) -> Void,
@@ -2146,23 +1999,29 @@ extension TypeGraph {
       // Mark dependencies
       // TODO: Check if dependency<->dependent links are valid and acyclic (put check in loop below
       // and just keep track of (&diagnose) unmatched dependents)
-      let flattenedDependencies =
-        extensionState
-        .dependencies.flatMap({ dependency in
-          dependency.members.flatMap({ member in
-            // Empty decls are implicitly in `IntroducingExtensionOrMainDecl.none`
-            // (main decl)
-            guard !member.decls.isEmpty else {
-              return [(dependency.baseTypeName, member, IntroducingExtensionOrMainDecl.none)]
-            }
-            return member.decls.map({ typeDecl in
-              return (dependency.baseTypeName, member, typeDecl.introducingExtensionOrMainDecl)
+      let flattenedDependencies:
+        [(
+          baseTypeName: GlobalTypeName, memberName: Identifier,
+          introducingExtensionOrMainDecl: Attached<ExtensionDeclSyntax>?
+        )] =
+          extensionState
+          .dependencies.flatMap({
+            dependency in
+            dependency.members.flatMap({
+              member -> [(
+                baseTypeName: GlobalTypeName, memberName: Identifier,
+                introducingExtensionOrMainDecl: Attached<ExtensionDeclSyntax>?
+              )] in
+              // Empty decls are implicitly in `nil` (main decl)
+              guard !member.decls.isEmpty else {
+                return [(dependency.baseTypeName, member.name, nil)]
+              }
+              return member.decls.map({ typeDecl in
+                return (dependency.baseTypeName, member.name, typeDecl.introducingExtensionOrMainDecl)
+              })
             })
           })
-        })
-      for (dependencyTypeName, member, introducingExtensionOrMainDecl) in flattenedDependencies {
-        let memberName = member.name.name
-
+      for (dependencyTypeName, memberName, introducingExtensionOrMainDecl) in flattenedDependencies {
         // Ensure extension dependency matches extension state
         if let dependencyExtension = introducingExtensionOrMainDecl {
           guard
@@ -2190,7 +2049,7 @@ extension TypeGraph {
         }
         guard
           dependencyType.dependents.contains(
-            TypeDependent(memberType: member.name, dependentExtension: extensionDecl)
+            TypeDependent(memberType: memberName, dependentExtension: extensionDecl)
           )
         else {
           _attachError(
@@ -2285,5 +2144,153 @@ extension TypeGraph {
     description += DiagnosticsFormatter(colorize: true).annotateSources(in: group)
 
     return (description, hasErrors)
+  }
+}
+
+// MARK: Logging
+
+extension TypeGraph {
+  var _verbose: Bool { false }
+  /// The number of `withLogging` calls we can nest. Useful for debugging infinite loops
+  /// that otherwise fill up standard output and become illegible.
+  var _logNestingLimit: Int? { 50 }
+
+  mutating func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
+    guard _verbose else { return }
+    // Keep log text separately
+    let newLine = "\(logPrefix.map({ "[\($0)]" }).joined()) \(component)\n"
+    // logText += newLine + "\n"
+    // Print new line
+    print(newLine)
+    // TODO: Remove
+    fflush(stdout)
+  }
+
+  mutating func withLogging<T>(
+    request: String,
+    describe: (T) -> String,
+    perform action: (_ mutableSelf: inout TypeGraph) -> T,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) -> T {
+    if let nestingLimit = self._logNestingLimit {
+      precondition(
+        logPrefix.count < nestingLimit,
+        "Exceeded log nesting limit, suggesting there's an infinite loop. If you think this is a mistake, you may change the limit in ``TypeQualifier``"
+      )
+    }
+    logPrefix.append(request)
+    log("Resolving...", file: file, line: line)
+    let result = action(&self)
+    log("Resolved \(describe(result))", file: file, line: line)
+    logPrefix.removeLast()
+    return result
+  }
+}
+
+extension SymbolTable {
+  var _verbose: Bool { false }
+  var logPrefix: [String] {
+    get { [] }
+    set {}
+  }
+  var _logNestingLimit: Int? { nil }
+  func log(_ component: Any, file: StaticString = #file, line: UInt = #line) {
+    #if DEBUG
+    guard _verbose else { return }
+    // Calculate log text
+    let newLine = "\(logPrefix.map({ "[\($0)]" }).joined()) \(component)\n"
+    // Print new line
+    print(newLine)
+    // TODO: Remove
+    fflush(stdout)
+    #endif
+  }
+
+  func withLogging<T>(
+    request: String,
+    describe: (T) -> String,
+    perform action: (_ mutableSelf: borrowing SymbolTable) -> T,
+    file: StaticString = #file,
+    line: UInt = #line
+  ) -> T {
+    if let nestingLimit = self._logNestingLimit, logPrefix.count >= nestingLimit {
+      fatalError(
+        "Exceeded log nesting limit of \(nestingLimit), suggesting there's an infinite loop. If you think this is a mistake, you may change the limit in `TypeQualifier`."
+      )
+    }
+    logPrefix.append(request)
+    log("Resolving...", file: file, line: line)
+    let result = action(self)
+    log("Resolved \(describe(result))", file: file, line: line)
+    logPrefix.removeLast()
+    return result
+  }
+}
+
+extension SymbolTable {
+  /// Sorts results in increasing order by
+  /// (a) Module name (alphabetically), (b) File id (alphabetically), and (c) File position (offset).
+  ///
+  /// Helps maintain deterministic outputs.
+  // TODO: Remove
+  func sortDeclarations(_ typeDecls: [Attached<TypeDeclSyntax>]) -> [Attached<TypeDeclSyntax>] {
+    typeDecls.sorted(by: { a, b in
+      // Compare modules
+      let fileA = getFileInfo(a.fileRoot)!
+      let fileB = getFileInfo(b.fileRoot)!
+      guard fileA.module == fileA.module else {
+        return fileA.module.name < fileA.module.name
+      }
+
+      // If modules are equal, compare file names
+      guard fileA.name == fileB.name else {
+        return fileA.name < fileB.name
+      }
+
+      // If file names are equal, compare positions
+      return a.position < b.position
+    })
+  }
+}
+
+// MARK: Array Helpers
+
+extension Array {
+  /// Appends if the array has no duplicates using the given key
+  private mutating func _indexAfterInsertingUnique<Key: Equatable, Value>(
+    key: Key,
+    default defaultValue: Value
+  ) -> Int where Element == (key: Key, value: Value) {
+    if let existingIndex = firstIndex(where: { $0.key == key }) {
+      return existingIndex
+    } else {
+      let newIndex = count
+      append((key, defaultValue))
+      return newIndex
+    }
+  }
+  /// Similar to dictionary's `subscript(_:default:)`.
+  ///
+  /// Only use for small array's and/or when it's important to maintain insertion order.
+  fileprivate subscript<Key: Equatable, Value>(
+    _key key: Key,
+    default defaultValue: Value
+  ) -> Value where Element == (key: Key, value: Value) {
+    get {
+      first(where: { $0.key == key })?.value ?? defaultValue
+    }
+    _modify {
+      let index: Int
+      if let existingIndex = firstIndex(where: { $0.key == key }) {
+        index = existingIndex
+      } else {
+        let newIndex = count
+        append((key, defaultValue))
+        index = newIndex
+      }
+
+      yield &self[index].value
+    }
   }
 }

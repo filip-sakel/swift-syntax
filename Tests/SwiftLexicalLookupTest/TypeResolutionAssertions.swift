@@ -29,7 +29,7 @@ struct TypeResolutionMatcher {
   /// also annotates `ExtensionDeclSyntax` with the desired `ExtensionBindingState`.
   enum Expectation {
     case syntaxResolution(TypeResolver.TypeResult)
-    case extensionBinding(ExtensionState)
+    case extensionBinding(TypeGraph.ExtensionState)
   }
 
   let symbolTable: SymbolTable
@@ -155,7 +155,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     verbose: Bool,
     failures: inout [ExpectationFailure]
-  ) -> ExtensionState? {
+  ) -> TypeGraph.ExtensionState? {
     // Try to get already-resolved state
     if let existingState = symbolTable.typeGraph.extensionsToState[extensionDecl] {
       return existingState
@@ -343,7 +343,7 @@ extension LexicalLookupSource.Interpolation where Matcher == TypeResolutionMatch
     append(definition: TypeResolutionMatcher.Definition(nominalType: mockedNominalType), file: file, line: line)
   }
   mutating func appendInterpolation(
-    extensionState: ExtensionState,
+    extensionState: TypeGraph.ExtensionState,
     file: StaticString = #file,
     line: UInt = #line
   ) {
@@ -440,7 +440,7 @@ struct IdentifierWrapper: ExpressibleByStringLiteral {
   }
 }
 
-extension ExtensionDependency {
+extension TypeGraph.ExtensionDependency {
   init(baseType: TypeGraph.GlobalTypeName, members: [IdentifierWrapper]) {
     let mappedMembers: [(name: Identifier, decls: [Member])] = members.map({ member in
       (name: member.identifier, decls: [])
@@ -449,7 +449,7 @@ extension ExtensionDependency {
   }
 }
 
-extension ExtensionState {
+extension TypeGraph.ExtensionState {
   /// Creates a mock extension state to check an extension's dependencies,
   /// bound type, or failure to bind due to cycles.
   ///
@@ -459,7 +459,7 @@ extension ExtensionState {
   /// type-resolution tests and only use this initializer to test extension
   /// binding.
   init(
-    dependencies: [ExtensionDependency],
+    dependencies: [TypeGraph.ExtensionDependency],
     resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>,
     file: StaticString = #file,
     line: UInt = #line
@@ -471,19 +471,19 @@ extension ExtensionState {
   }
 
   static func bound(
-    dependencies: [ExtensionDependency],
+    dependencies: [TypeGraph.ExtensionDependency],
     typeName: TypeGraph.GlobalTypeName
-  ) -> ExtensionState {
-    ExtensionState(dependencies: dependencies, resolvedType: .success(typeName))
+  ) -> TypeGraph.ExtensionState {
+    TypeGraph.ExtensionState(dependencies: dependencies, resolvedType: .success(typeName))
   }
 
   static func invalidCycle(
-    dependencies: [ExtensionDependency],
+    dependencies: [TypeGraph.ExtensionDependency],
     cycleElements: [(introducingDecl: String?, extension: String, base: TypeGraph.GlobalTypeRef)],
     conflictingMember: IdentifierWrapper,
     file: StaticString = #file,
     line: UInt = #line
-  ) -> ExtensionState {
+  ) -> TypeGraph.ExtensionState {
     let dependencyPath: [TypeResolver.ExtensionCycleElement] = cycleElements.map({
       (
         introducingTypeDeclText,
@@ -525,7 +525,7 @@ extension ExtensionState {
       dependencyMember: conflictingMember.identifier
     )
 
-    return ExtensionState(
+    return TypeGraph.ExtensionState(
       dependencies: dependencies,
       resolvedType: Result.failure(TypeResolver.Failure.cyclicalExtensionDependency(cycle))
     )

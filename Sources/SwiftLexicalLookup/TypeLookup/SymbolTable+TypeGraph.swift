@@ -246,7 +246,7 @@ extension SymbolTable {
     let extendedTypeResult = resolver.resolveExtendedTypeSyntax(extensionDecl: extensionDecl)
 
     // Admit to the type graph and get evicted extensions
-    let bindingResult: Result<BindingResult, TypeGraph.ExtensionAdmissionFailure>
+    let bindingResult: Result<TypeGraph.BindingResult, TypeGraph.ExtensionAdmissionFailure>
     bindingResult = typeGraph.admitExtension(
       extensionDecl,
       extensionDeclModule: fileInfo.module,
@@ -260,7 +260,7 @@ extension SymbolTable {
     )
 
     // Extract the evicted extensions or handle failures
-    let (resolvedType, evictedExtensions): BindingResult
+    let (resolvedType, evictedExtensions): TypeGraph.BindingResult
     switch bindingResult {
     case .success(let success):
       (resolvedType, evictedExtensions) = success

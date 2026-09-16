@@ -16,6 +16,9 @@ import SwiftSyntax
 import XCTest
 
 final class TypeResolutionTests: XCTestCase {
+  typealias ExtensionState = TypeGraph.ExtensionState
+  typealias ExtensionDependency = TypeGraph.ExtensionDependency
+
   func testSimpleCase() {
     assertTypeResolution(
       [
