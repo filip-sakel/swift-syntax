@@ -277,6 +277,26 @@ public struct ExtensionState: Sendable {
   }
 }
 
+extension Attached where Node: DeclGroupSyntax {
+  internal func _groupTypeMembers(
+    configuredRegions: ConfiguredRegions?
+  ) -> [Identifier: [Attached<TypeDeclSyntax>]] {
+    var result = [Identifier: [Attached<TypeDeclSyntax>]]()
+    node.visitDirectMembers(
+      configuredRegions: configuredRegions,
+      visit: { valueDecl in
+        guard let typeDecl = valueDecl.as(TypeDeclSyntax.self) else { return }
+        guard let typeIdentifier = Identifier(validating: typeDecl.name) else { return }
+        // Since these are our children, they will also be scope in the file,
+        // so we can force-unwrap.
+        let wrappedTypeDecl = Attached<TypeDeclSyntax>(typeDecl)!
+        result[typeIdentifier, default: []].append(wrappedTypeDecl)
+      }
+    )
+    return result
+  }
+}
+
 /// A directed acyclic graph where types are nodes and extensions are edges.
 ///
 ///
@@ -356,8 +376,9 @@ public struct TypeGraph {
     internal private(set) var version = 0
 
     /// Invariants: count >= 1; sorted by position in increasing order
-    /// TODO: Should replace MappedDeclGroup with `mainDecl` and `mainDeclMembers`
-    fileprivate let mainDecl: MappedDeclGroup<NominalTypeDeclSyntax>
+    fileprivate let mainDecl: Attached<NominalTypeDeclSyntax>
+    /// The type members of `mainDecl`
+    fileprivate let mainDeclMembers: TypeTable
 
     private(set) var boundExtensions: [ModuleName: [Attached<ExtensionDeclSyntax>: TypeTable]]
 
@@ -368,8 +389,9 @@ public struct TypeGraph {
     /// other extensions.
     fileprivate(set) var dependents: [TypeDependent]
 
-    init(mainDecl: MappedDeclGroup<NominalTypeDeclSyntax>) {
+    init(mainDecl: Attached<NominalTypeDeclSyntax>, mainDeclMembers: TypeTable) {
       self.mainDecl = mainDecl
+      self.mainDeclMembers = mainDeclMembers
       self.boundExtensions = [:]
       self.dependents = []
     }
@@ -377,13 +399,14 @@ public struct TypeGraph {
     /// Returns a new version of the extended type, adding the given extension.
     /// Returns `nil`  if extension is already bound.
     fileprivate consuming func _bindingExtension(
-      _ mappedExtensionDecl: MappedDeclGroup<ExtensionDeclSyntax>,
+      _ extensionDecl: Attached<ExtensionDeclSyntax>,
+      extensionMembers: TypeTable,
       module: ModuleName
     ) -> NominalType? {
       var copy = self
       let oldValue = copy.boundExtensions[module, default: [:]].updateValue(
-        mappedExtensionDecl.typeMap,
-        forKey: mappedExtensionDecl.declGroup
+        extensionMembers,
+        forKey: extensionDecl
       )
       guard oldValue == nil else { return nil }
       copy.version &+= 1
@@ -437,7 +460,7 @@ public struct TypeGraph {
       }
 
       // Ensure the declaration was actually bound and we removed it
-      guard mainDecl.declGroup == nominalTypeDecl else {
+      guard mainDecl == nominalTypeDecl else {
         return .failure(NominalUnbindingFailure.nominalTypeNotAMainDecl)
       }
 
@@ -556,7 +579,7 @@ extension TypeGraph.GlobalTypeRef {
     name: TypeGraph.GlobalTypeName,
     nominal: __shared TypeGraph.NominalType
   ) {
-    self.init(name: name, mainDecl: nominal.mainDecl.declGroup, _version: nominal.version)
+    self.init(name: name, mainDecl: nominal.mainDecl, _version: nominal.version)
   }
 }
 
@@ -612,29 +635,32 @@ extension TypeGraph {
       memberTypeName: Identifier
     ) -> QualifiedLookupDependency {
       // Organize declaration groups into buckets
-      var fileDecls = [MappedDeclGroup<DeclGroupSyntaxType>]()
-      var otherInternalDecls = [MappedDeclGroup<DeclGroupSyntaxType>]()
+      typealias DeclGroupAndMembers = (declGroup: Attached<DeclGroupSyntaxType>, typeMap: TypeTable)
+      var fileDecls = [DeclGroupAndMembers]()
+      var otherInternalDecls = [DeclGroupAndMembers]()
       // TODO: Check file's imported modules & check
       // TODO: Sort by module order (for shadowing) and handle case where we import
       // specific types, perhaps interleaved types between modules, e.g., import A from Module1,
       // import B from Module2, import C from Module1, import A from Module2 (how is `A` shadowed?)
-      var externalDecls = [MappedDeclGroup<DeclGroupSyntaxType>]()
+      var externalDecls = [DeclGroupAndMembers]()
 
-      func organizeDeclGroup(_ declGroup: MappedDeclGroup<DeclGroupSyntaxType>) {
-        if declGroup.fileRoot == origin.typeSyntax.fileRoot {
-          fileDecls.append(declGroup)
-        } else if symbolTable.getFileInfo(declGroup.fileRoot)?.module == origin.module {
-          otherInternalDecls.append(declGroup)
+      func organizeDeclGroup(_ entry: DeclGroupAndMembers) {
+        if entry.declGroup.fileRoot == origin.typeSyntax.fileRoot {
+          fileDecls.append(entry)
+        } else if symbolTable.getFileInfo(entry.declGroup.fileRoot)?.module == origin.module {
+          otherInternalDecls.append(entry)
         } else {
-          externalDecls.append(declGroup)
+          externalDecls.append(entry)
         }
       }
 
       // Add main decl and bound extensions
-      organizeDeclGroup(registeredType.mainDecl.erased())
+      organizeDeclGroup(
+        (declGroup: Attached<DeclGroupSyntaxType>(registeredType.mainDecl), typeMap: registeredType.mainDeclMembers)
+      )
       for (_, extensionDecls) in registeredType.boundExtensions {
         for (extensionDecl, typeTable) in extensionDecls {
-          organizeDeclGroup(MappedDeclGroup(declGroup: extensionDecl, typeMap: typeTable).erased())
+          organizeDeclGroup((declGroup: Attached<DeclGroupSyntaxType>(extensionDecl), typeMap: typeTable))
         }
       }
 
@@ -642,11 +668,11 @@ extension TypeGraph {
 
       // Add members from each decl group and register the dependencies
       var typeDecls = [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)]()
-      for declGroup in sortedDeclGroups {
+      for (declGroup, declGroupMembers) in sortedDeclGroups {
         // Add the matching decls
         let introducedDecls =
-          declGroup.typeMap.typeMembersToDecls[memberTypeName]?.decls.map({
-            (declGroup.declGroup, $0.typeDeclSyntax)
+          declGroupMembers.typeMembersToDecls[memberTypeName]?.decls.map({
+            (declGroup, $0.typeDeclSyntax)
           }) ?? []
         typeDecls.append(contentsOf: introducedDecls)
       }
@@ -783,7 +809,7 @@ extension TypeGraph {
         NestedNominalRegistrationFailure.baseDeclGroupUnbound(Attached<DeclGroupSyntaxType>(parentExtension))
       )
     } else if let parentNominal = baseDeclGroup.as(NominalTypeDeclSyntax.self),
-      baseType.mainDecl.declGroup != parentNominal
+      baseType.mainDecl != parentNominal
     {
       // Note that we still register even if there are redeclarations. E.g.,
       // in the following, we still register '_(File.swift)::A._(File.swift)::B',
@@ -816,15 +842,12 @@ extension TypeGraph {
     declFileConfiguredRegions: ConfiguredRegions?,
     globalTypeName: TypeGraph.GlobalTypeName
   ) -> Result<TypeRef, NominalRegistrationFailure> {
-    // Map out the main decl
-    let mappedMainDecl = MappedDeclGroup.from(declGroup: mainDecl, configuredRegions: declFileConfiguredRegions)
-
     // If already registered, ensure we have no redeclaration
     let type: NominalType
     if let existingType = namesToTypes[globalTypeName] {
       // We don't allow redeclarations (see `.cannotRegisterRedeclaration`
       // docstring for why)
-      guard existingType.mainDecl.declGroup == mainDecl else {
+      guard existingType.mainDecl == mainDecl else {
         return .failure(NominalRegistrationFailure.cannotRegisterRedeclaration)
       }
       // Return the existing type
@@ -833,7 +856,13 @@ extension TypeGraph {
     // Otherwise, register
     else {
       // Create a new type
-      let freshNominal = NominalType(mainDecl: mappedMainDecl)
+      let freshNominal = NominalType(
+        mainDecl: mainDecl,
+        mainDeclMembers: TypeTable(
+          from: mainDecl._groupTypeMembers(configuredRegions: declFileConfiguredRegions),
+          introducedIn: nil
+        )
+      )
       namesToTypes[globalTypeName] = freshNominal
       type = freshNominal
     }
@@ -1055,7 +1084,7 @@ extension TypeGraph {
       // and `m` the number of decls named `memberName` in the given extension. But we usually have a
       // single main declaration and single same-name declaration in an nominal-type/extension decl.
       let memberIsRegistered = member.decls.contains(where: {
-        $0.typeDeclSyntax.as(NominalTypeDeclSyntax.self) == memberType.mainDecl.declGroup
+        $0.typeDeclSyntax.as(NominalTypeDeclSyntax.self) == memberType.mainDecl
       })
 
       guard memberIsRegistered else { continue }
@@ -1250,7 +1279,7 @@ extension TypeGraph {
       return .failure(
         NominalRemovalFailure.nominalNotInRegisteredType(
           typeName: typeName,
-          actualMainDecl: type.mainDecl.declGroup
+          actualMainDecl: type.mainDecl
         )
       )
     case .failure(NominalType.NominalUnbindingFailure.remainingDependents):
@@ -1266,14 +1295,13 @@ extension TypeGraph {
     //
     // Note: If there were redeclarations, then we shouldn't have been able to
     // register any member types (checked by ``registerNominalTypeReference``).
-    if type.mainDecl.declGroup == nominalDecl {
+    if type.mainDecl == nominalDecl {
       // Since the new type is `nil`, the decl used to be `type.mainDecl`
-      let members = type.mainDecl.typeMap
       let memberTypeName: GlobalTypeName? = _firstRegisteredMemberName(
         declGroup: Attached<DeclGroupSyntaxType>(nominalDecl),
         declGroupFileInfo: nominalDeclFileInfo,
         declGroupTypeName: typeName,
-        members: members,
+        members: type.mainDeclMembers,
         symbolTable: symbolTable
       )
       if let memberTypeName {
@@ -1373,22 +1401,22 @@ extension TypeGraph {
     let memberNominalDecls: [Attached<NominalTypeDeclSyntax>] = member.decls.compactMap({
       $0.typeDeclSyntax.as(NominalTypeDeclSyntax.self)
     })
-    if memberNominalDecls.contains(memberNominal.mainDecl.declGroup) {
+    if memberNominalDecls.contains(memberNominal.mainDecl) {
       // Assert we don't have any nominal-type *re*declarations (checked in `registerNominalTypeReference`)
       precondition(
-        memberNominalDecls == [memberNominal.mainDecl.declGroup],
-        "[SwiftLexicalLookup] Internal error: Expected nominal type '\(memberNominalTypeName.debugDescription)' to have the main decl `\(memberNominal.mainDecl.declGroup._memberlessDescription)`, but instead got: \(memberNominalDecls.map(\._memberlessDescription).joined(separator: ", "))"
+        memberNominalDecls == [memberNominal.mainDecl],
+        "[SwiftLexicalLookup] Internal error: Expected nominal type '\(memberNominalTypeName.debugDescription)' to have the main decl `\(memberNominal.mainDecl._memberlessDescription)`, but instead got: \(memberNominalDecls.map(\._memberlessDescription).joined(separator: ", "))"
       )
 
       // Remove all nested member types
-      log("Found main decl `\(memberNominal.mainDecl.declGroup._memberlessDescription)`; removing member types.")
-      for (_, nestedMember) in memberNominal.mainDecl.typeMap.typeMembersToDecls {
+      log("Found main decl `\(memberNominal.mainDecl._memberlessDescription)`; removing member types.")
+      for (_, nestedMember) in memberNominal.mainDeclMembers.typeMembersToDecls {
         log(
-          "Visiting member type `\(memberNominal.mainDecl.declGroup._memberlessDescription)` > '\(nestedMember.name.name)'"
+          "Visiting member type `\(memberNominal.mainDecl._memberlessDescription)` > '\(nestedMember.name.name)'"
         )
         _unbindMemberType(
           baseTypeName: memberNominalTypeName,
-          baseTypeDecl: Attached<DeclGroupSyntaxType>(memberNominal.mainDecl.declGroup),
+          baseTypeDecl: Attached<DeclGroupSyntaxType>(memberNominal.mainDecl),
           baseTypeFileInfo: baseTypeFileInfo,
           baseType: memberNominal,
           member: nestedMember,
@@ -1696,9 +1724,9 @@ extension TypeGraph {
     }
 
     // Prepare to store extension state
-    let mappedExtensionDecl = MappedDeclGroup.from(
-      declGroup: extensionDecl,
-      configuredRegions: extensionFileConfiguredRegions
+    let extensionMembers = TypeTable(
+      from: extensionDecl._groupTypeMembers(configuredRegions: extensionFileConfiguredRegions),
+      introducedIn: extensionDecl
     )
 
     // === Diagnose Dependency Cycles ===
@@ -1721,7 +1749,7 @@ extension TypeGraph {
       let cycleResult =
         _findFirstCycleWhenBinding(
           extensionDecl: extensionDecl,
-          extensionMembers: mappedExtensionDecl.typeMap,
+          extensionMembers: extensionMembers,
           to: extendedTypeRef,
           extensionDependencies: dependencyTracker.dependencies
         ) as Result<TypeResolver.ExtensionCycle, CycleDetectionFailure>?
@@ -1783,7 +1811,7 @@ extension TypeGraph {
       _introspect(symbolTable: symbolTable, onlyLogIfCorrupted: true)
       _invalidateDependents(
         modifiedTypeName: extendedTypeName,
-        modifiedMembers: mappedExtensionDecl.typeMap,
+        modifiedMembers: extensionMembers,
         modifiedExtensionModule: extensionDeclModule,
         invalidatedExtensions: &invalidatedExtensionsTmp,
         symbolTable: symbolTable
@@ -1807,7 +1835,8 @@ extension TypeGraph {
       // Bind to type
       guard
         let newExtendedType = invalidatedDependentsType._bindingExtension(
-          mappedExtensionDecl,
+          extensionDecl,
+          extensionMembers: extensionMembers,
           module: extensionDeclModule
         )
       else {
@@ -1974,8 +2003,8 @@ extension TypeGraph {
     ///
     /// E.g. The type alias in 'struct A { typealias B = Int }' gets
     /// annotated `Type member '_(MyFile.swift)::A' > 'B'`.
-    func _markMemberTypes(baseTypeName: String, typeTable: TypeTable) {
-      for (memberName, member) in typeTable.typeMembersToDecls {
+    func _markMemberTypes(baseTypeName: String, baseTypeMembers: TypeTable) {
+      for (memberName, member) in baseTypeMembers.typeMembersToDecls {
         for memberDecl in member.decls {
           _attachNote(to: memberDecl.typeDeclSyntax, message: "Type member '\(baseTypeName)' > '\(memberName.name)'")
         }
@@ -2001,7 +2030,7 @@ extension TypeGraph {
       guard visitedTypes.updateValue(typeName, forKey: type.mainDecl.node) == nil else {
         // This nominal-type declaration was already registered under a different name
         _attachError(
-          to: type.mainDecl.declGroup,
+          to: type.mainDecl,
           message: "\(declLabel) also registered under '\(typeNameDescription)'"
         )
         continue
@@ -2009,12 +2038,12 @@ extension TypeGraph {
 
       // Show the registered name
       _attachNote(
-        to: type.mainDecl.declGroup,
+        to: type.mainDecl,
         message: "\(declLabel) registered '\(typeNameDescription)' (v\(type.version))"
       )
 
       // Mark each member in the type table
-      _markMemberTypes(baseTypeName: typeNameDescription, typeTable: type.mainDecl.typeMap)
+      _markMemberTypes(baseTypeName: typeNameDescription, baseTypeMembers: type.mainDeclMembers)
 
       // Add dependent extensions (to main declaration)
       for dependent in type.dependents {
@@ -2023,7 +2052,7 @@ extension TypeGraph {
         // First, get extension state
         guard let dependentExtensionState = extensionsToState[dependent.dependentExtension] else {
           _attachError(
-            to: type.mainDecl.declGroup,
+            to: type.mainDecl,
             message:
               "Member type '\(typeNameDescription)' > '\(dependent.memberType.name)' depended on by unregistered extension `\(dependent.dependentExtension.node._memberlessDescription)`."
           )
@@ -2037,7 +2066,7 @@ extension TypeGraph {
           })
         else {
           _attachError(
-            to: type.mainDecl.declGroup,
+            to: type.mainDecl,
             message:
               "Member type '\(typeNameDescription)' > '\(dependent.memberType.name)' supposedly depended on by `\(dependent.dependentExtension.node._memberlessDescription)`, but isn't in extension's dependencies: \(dependentExtensionState.dependencies.map(\.debugDescription))"
           )
@@ -2045,7 +2074,7 @@ extension TypeGraph {
         }
 
         _attachNote(
-          to: type.mainDecl.declGroup,
+          to: type.mainDecl,
           message:
             "Member type '\(typeNameDescription)' > '\(dependent.memberType.name)' depended on by `\(dependent.dependentExtension.node._memberlessDescription)`"
         )
@@ -2090,7 +2119,7 @@ extension TypeGraph {
         _attachNote(to: extensionDecl, message: "Extension resolved and bound to '\(boundTypeDescription)'")
 
         // Mark each member in the type table
-        _markMemberTypes(baseTypeName: boundTypeDescription, typeTable: typeTable)
+        _markMemberTypes(baseTypeName: boundTypeDescription, baseTypeMembers: typeTable)
 
       case (.failure(let failure), nil):
         _attachNote(
@@ -2219,7 +2248,7 @@ extension TypeGraph {
     return Result.success(
       (
         globalReference: TypeGraph.GlobalTypeRef(name: boundTypeName, nominal: boundType),
-        mainDecl: boundType.mainDecl.declGroup
+        mainDecl: boundType.mainDecl
       )
     )
   }
