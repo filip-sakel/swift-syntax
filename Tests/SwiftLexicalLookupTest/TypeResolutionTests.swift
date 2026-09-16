@@ -495,6 +495,27 @@ final class TypeResolutionTests: XCTestCase {
     )
   }
 
+  func testInvalidCompositionMember() {
+    assertTypeResolution([
+      "MyFile.swift": """
+      \(name: "_(MyFile.swift)::ProtoA")
+      protocol ProtoA {}
+      \(name: "_(MyFile.swift)::ProtoB")
+      protocol ProtoB {}
+
+      let _: \(failure: .noTypeMember(
+        member: TypeReference(name: "InvalidMember"),
+        in: .nominalTypes([
+          "_(MyFile.swift)::ProtoA",
+          "_(MyFile.swift)::ProtoB",
+        ])
+      ))(ProtoA & ProtoB).InvalidMember
+
+      let _: \(failure: .noTypeInScope)ProtoA.B & ProtoB
+      """ as LexicalLookupSource
+    ])
+  }
+
   func testDuplicateComposition() {
     assertTypeResolution([
       "MyFile.swift": """
