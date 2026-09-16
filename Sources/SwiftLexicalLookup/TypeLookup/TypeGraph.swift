@@ -356,16 +356,16 @@ extension Attached where Node: DeclGroupSyntax {
 ///    e. Finally, we bind `extension A.Inner` to '_(MyFile.swift)::A'
 @_spi(_QualifiedLookupTests)
 public struct TypeGraph {
-  @_spi(_QualifiedLookupTests) public struct TypeDependent: Sendable, Hashable, CustomDebugStringConvertible {
-    @_spi(_QualifiedLookupTests) public let memberType: Identifier
-    @_spi(_QualifiedLookupTests) public let dependentExtension: Attached<ExtensionDeclSyntax>
+  struct TypeDependent: Sendable, Hashable, CustomDebugStringConvertible {
+    let memberType: Identifier
+    let dependentExtension: Attached<ExtensionDeclSyntax>
 
     public var debugDescription: String {
       "Self > '\(memberType.name)' => `\(dependentExtension.node._memberlessDescription)`"
     }
   }
 
-  @_spi(_QualifiedLookupTests) public struct NominalType {
+  struct NominalType {
     /// Keeps track of mutations to assert data didn't change between calls
     internal private(set) var version = 0
 
@@ -481,7 +481,7 @@ public struct TypeGraph {
   }
 
   /// Updates when we register nominal types and bind extensions
-  @_spi(_QualifiedLookupTests) public var namesToTypes: [TypeGraph.GlobalTypeName: NominalType]
+  var namesToTypes: [TypeGraph.GlobalTypeName: NominalType]
   // /// Updates when we register nominal types and bind extensions
   // var parentsToTypeMembers: [QualifiedTypeName: TypeTable]
   @_spi(_QualifiedLookupTests) public var extensionsToState: [Attached<ExtensionDeclSyntax>: ExtensionState]
@@ -578,8 +578,7 @@ extension TypeGraph.GlobalTypeRef {
 }
 
 extension TypeGraph {
-  @_spi(_QualifiedLookupTests)
-  public enum QualifiedTypeLookupFailure: Error {
+  enum QualifiedTypeLookupFailure: Error {
     /// References non-registered base type
     case invalidBase
     case unregisteredFileRoot(SourceFileSyntax)
@@ -1692,7 +1691,7 @@ extension TypeGraph {
 }
 
 extension TypeGraph {
-  @_spi(_QualifiedLookupTests) public enum ExtensionAdmissionFailure: Error {
+  enum ExtensionAdmissionFailure: Error {
     case cannotReadmit(existingState: ExtensionState)
     case invalidDependencyExtension(extensionState: ExtensionState?)
   }
