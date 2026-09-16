@@ -167,7 +167,7 @@ public struct ExtensionDependency: Sendable {
 }
 
 @_spi(_QualifiedLookupTests)
-public typealias EvictedExtensions = [ExtensionState]
+public typealias EvictedExtensions = [Attached<ExtensionDeclSyntax>]
 
 @_spi(_QualifiedLookupTests) public typealias BindingResult = (
   resolvedTypeName: Result<
@@ -190,24 +190,19 @@ public struct ExtensionState: Sendable {
   //
   // See `ExtensionDependency` docstring for why these properties are *immutable*.
   @_spi(_QualifiedLookupTests) public let dependencies: [ExtensionDependency],
-    // TODO: Remove this property
-    extensionDecl: Attached<ExtensionDeclSyntax>,
     /// The resolved type must be valid in `namesToTypes`
     resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
 
   @_spi(_QualifiedLookupTests) public init(
     _uncheckedDependencies dependencies: [ExtensionDependency],
-    extensionDecl: Attached<ExtensionDeclSyntax>,
     resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
   ) {
     self.dependencies = dependencies
-    self.extensionDecl = extensionDecl
     self.resolvedType = resolvedType
   }
 
   @_spi(_QualifiedLookupTests) public init(
     dependencies: [QualifiedLookupDependency],
-    extensionDecl: Attached<ExtensionDeclSyntax>,
     resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
   ) {
     // Group dependencies by base type and member name, while maintaing order
@@ -246,7 +241,6 @@ public struct ExtensionState: Sendable {
 
     self.init(
       _uncheckedDependencies: orderedGroupedDependencies,
-      extensionDecl: extensionDecl,
       resolvedType: resolvedType
     )
   }
@@ -1005,7 +999,6 @@ extension TypeGraph {
         extensionDecl: extensionDecl,
         state: ExtensionState(
           dependencies: extensionDependencies,
-          extensionDecl: extensionDecl,
           resolvedType: .success(boundTypeRef.name)
         )
       )
@@ -1116,7 +1109,7 @@ extension TypeGraph {
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionFileInfo: FileInfo,
     symbolTable: SymbolTable
-  ) -> Result<ExtensionState, ExtensionRemovalFailure> {
+  ) -> Result<Void, ExtensionRemovalFailure> {
     return withLogging(
       request: "Removing `\(extensionDecl._memberlessDescription)`",
       describe: { _ in "" },
@@ -1138,7 +1131,7 @@ extension TypeGraph {
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionFileInfo: FileInfo,
     symbolTable: SymbolTable
-  ) -> Result<ExtensionState, ExtensionRemovalFailure> {
+  ) -> Result<Void, ExtensionRemovalFailure> {
     // Get state
     guard let extensionState = extensionsToState[extensionDecl] else {
       return .failure(ExtensionRemovalFailure.unregistered)
@@ -1241,7 +1234,7 @@ extension TypeGraph {
     // Remove extension state
     extensionsToState[extensionDecl] = nil
 
-    return .success(extensionState)
+    return .success(())
   }
 
   enum NominalRemovalFailure: Error {
@@ -1321,7 +1314,7 @@ extension TypeGraph {
     baseTypeFileInfo: FileInfo,
     baseType: NominalType,
     member: TypeMember,
-    evictedExtensions: inout [ExtensionState],
+    evictedExtensions: inout EvictedExtensions,
     symbolTable: SymbolTable
   ) {
     return withLogging(
@@ -1349,7 +1342,7 @@ extension TypeGraph {
     baseTypeFileInfo: FileInfo,
     baseType: NominalType,
     member: TypeMember,
-    evictedExtensions: inout [ExtensionState],
+    evictedExtensions: inout EvictedExtensions,
     symbolTable: SymbolTable
   ) {
     // Evict dependent extensions
@@ -1494,9 +1487,9 @@ extension TypeGraph {
 
   mutating func _unbindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    evictedExtensions: inout [ExtensionState],
+    evictedExtensions: inout EvictedExtensions,
     symbolTable: borrowing SymbolTable
-  ) -> ExtensionState? {
+  ) -> Attached<ExtensionDeclSyntax>? {
     return withLogging(
       request: "Unbinding `\(extensionDecl._memberlessDescription)`",
       describe: \.debugDescription,
@@ -1514,12 +1507,12 @@ extension TypeGraph {
 
   mutating func __unbindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    evictedExtensions: inout [ExtensionState],
+    evictedExtensions: inout EvictedExtensions,
     symbolTable: borrowing SymbolTable
-  ) -> ExtensionState? {
+  ) -> Attached<ExtensionDeclSyntax>? {
     guard let extensionState = extensionsToState[extensionDecl] else {
       assert(
-        evictedExtensions.contains(where: { $0.extensionDecl == extensionDecl }),
+        evictedExtensions.contains(extensionDecl),
         "Asked to unbind unregistered, non-evicted extension `\(extensionDecl._memberlessDescription)`."
       )
       log("Skipping already evicted extension `\(extensionDecl._memberlessDescription)`")
@@ -1565,10 +1558,8 @@ extension TypeGraph {
       extensionFileInfo: extensionFileInfo,
       symbolTable: symbolTable
     )
-    let removedExtensionState: ExtensionState
     switch removalResult {
-    case .success(let success):
-      removedExtensionState = success
+    case .success: break
     case .failure(let failure):
       switch failure {
       case .unregistered, .resolvedButUnbound, .remainingDependents, .remainingRegistredMemberType:
@@ -1581,14 +1572,14 @@ extension TypeGraph {
       }
     }
 
-    return removedExtensionState
+    return extensionDecl
   }
 
   fileprivate mutating func _evictDependents(
     modifiedTypeName: GlobalTypeName,
     modifiedMembers: TypeTable,
     modifiedExtensionModule: ModuleName,
-    evictedExtensions: inout [ExtensionState],
+    evictedExtensions: inout EvictedExtensions,
     symbolTable: borrowing SymbolTable
   ) {  //-> [TypeDependent] {
     return withLogging(
@@ -1614,7 +1605,7 @@ extension TypeGraph {
     modifiedMembers: TypeTable,
     modifiedExtensionModule: ModuleName,
     // directDependents: [TypeDependent],
-    evictedExtensions: inout [ExtensionState],
+    evictedExtensions: inout EvictedExtensions,
     symbolTable: borrowing SymbolTable
   ) {  //-> [TypeDependent] {
     // TODO: Clean up if we go for immutable `get`
@@ -1655,7 +1646,7 @@ extension TypeGraph {
       // }
 
       log("Found conflict \(dependent.debugDescription)")
-      let evictedExtensionState = _unbindExtension(
+      let evictedExtension = _unbindExtension(
         dependent.dependentExtension,
         evictedExtensions: &evictedExtensions,
         symbolTable: symbolTable
@@ -1666,7 +1657,7 @@ extension TypeGraph {
       // is dependent on both type memmebrs. When evicting
       // _(MyFile.swift)::A > 'B', we'll unbind that extension but there's
       // no use updating _(MyFile.swift)::A's dependents
-      guard let evictedExtensionState else { continue }
+      guard let evictedExtension else { continue }
 
       // Update dependents
       namesToTypes[modifiedTypeName]!.dependents.removeAll(where: { thisDependent in
@@ -1675,7 +1666,7 @@ extension TypeGraph {
       })
 
       // Record eviction
-      evictedExtensions.append(evictedExtensionState)
+      evictedExtensions.append(evictedExtension)
     }
 
     // return newDependents
@@ -1794,7 +1785,7 @@ extension TypeGraph {
     }
 
     // === Evict Dependents & Bind ===
-    let evictedExtensions: [ExtensionState]
+    let evictedExtensions: EvictedExtensions
     // If there's no cycle, we may type members so we need to evict
     switch result {
     case .success(let (extendedTypeRef, _)):
@@ -1806,7 +1797,7 @@ extension TypeGraph {
         )
       }
 
-      var evictedExtensionsTmp = [ExtensionState]()
+      var evictedExtensionsTmp: EvictedExtensions = []
       //let newTypeDependents =
       _introspect(symbolTable: symbolTable, onlyLogIfCorrupted: true)
       _evictDependents(
@@ -1883,7 +1874,6 @@ extension TypeGraph {
     // Save extension (newly bound extension doesn't add type dependents)
     extensionsToState[extensionDecl] = ExtensionState(
       dependencies: dependencyTracker.dependencies,
-      extensionDecl: extensionDecl,
       // Only keep the qualified name (we store the main decl in `namesToTypes`)
       resolvedType: result.map(\.globalReference.name)
     )

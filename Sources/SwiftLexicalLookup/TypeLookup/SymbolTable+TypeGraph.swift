@@ -279,10 +279,10 @@ extension SymbolTable {
       }
     }
     log(
-      "Resolved to \(resolvedType); Dependencies: \(resolver.dependencyTracker.dependencies.map(\.debugDescription)); Evicted: \(evictedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
+      "Resolved to \(resolvedType); Dependencies: \(resolver.dependencyTracker.dependencies.map(\.debugDescription)); Evicted: \(evictedExtensions.map(\._memberlessDescription))"
     )
 
-    self.requestedExtensions.request(evictedExtensions: evictedExtensions.map(\.extensionDecl))
+    self.requestedExtensions.request(evictedExtensions: evictedExtensions)
 
     return true
   }

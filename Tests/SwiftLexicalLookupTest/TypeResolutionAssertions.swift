@@ -12,7 +12,6 @@
 
 import SwiftIfConfig
 @_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) import SwiftLexicalLookup
-import SwiftParser
 import SwiftSyntax
 import XCTest
 
@@ -465,17 +464,8 @@ extension ExtensionState {
     file: StaticString = #file,
     line: UInt = #line
   ) {
-    // Create fake extension (won't be checked)
-    //
-    // Wrap the type syntax in a file
-    var parser = Parser("extension")
-    let sourceFile = SourceFileSyntax.parse(from: &parser)
-    let mockExtension = Attached(sourceFile.children(ofType: ExtensionDeclSyntax.self)[0])!
-
     self.init(
       _uncheckedDependencies: dependencies,
-      // Extension decl won't be checked
-      extensionDecl: mockExtension,
       resolvedType: resolvedType
     )
   }
