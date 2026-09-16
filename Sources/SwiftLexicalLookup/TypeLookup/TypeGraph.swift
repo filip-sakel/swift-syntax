@@ -146,11 +146,11 @@ extension Array {
 /// An extension dependency stores cached information such as what declaration
 /// group the given member was introduced. Normally, we don't store cached
 /// information for types stored in the `TypeGraph` since we must
-/// later update a lot of cached data when we bind/invalidate an extension.
+/// later update a lot of cached data when we bind/evict an extension.
 /// However, extension dependencies are different because if the dependency
-/// type changes, we necessarily have to invalidate and recompute the extensions.
+/// type changes, we necessarily have to evict and recompute the extensions.
 /// Hence, extension dependencies should be created at extension binding and not
-/// be modified (we simply invalidate the extension and destroy its state along
+/// be modified (we simply evict the extension and destroy its state along
 /// with any dependencies).
 @_spi(_QualifiedLookupTests)
 public struct ExtensionDependency: Sendable {
@@ -167,14 +167,14 @@ public struct ExtensionDependency: Sendable {
 }
 
 @_spi(_QualifiedLookupTests)
-public typealias InvalidatedExtensions = [ExtensionState]
+public typealias EvictedExtensions = [ExtensionState]
 
 @_spi(_QualifiedLookupTests) public typealias BindingResult = (
   resolvedTypeName: Result<
     (globalReference: TypeGraph.GlobalTypeRef, mainDecl: Attached<NominalTypeDeclSyntax>),
     TypeResolver.Failure
   >,
-  invalidatedExtensions: InvalidatedExtensions
+  evictedExtensions: EvictedExtensions
 )
 
 /// The state of an admitted extension: what type it resolved to and the
@@ -314,7 +314,7 @@ extension Attached where Node: DeclGroupSyntax {
 /// 0. Access extension->dependencies, O(# of dependencies)
 ///    a. For cycle detection when adding a dependency
 /// 0. Access nominal type->dependents (extensions+types), O(# of dependents)
-///    a. For invalidation when adding any extension that adds/removes a type member.
+///    a. For eviction when adding any extension that adds/removes a type member.
 /// 0. Access extension->resolved type, O(1)
 ///    a. Lookup within an extension almost always triggers a request
 ///       to resolve the extended type so we can look for its members
@@ -385,7 +385,7 @@ public struct TypeGraph {
     /// Extensions dependending on qualified lookup of `member` on this type.
     ///
     /// This property is part of `NominalType` and not `ExtensionState` because
-    /// any extension binding to this nominal type should see that it's invalidating
+    /// any extension binding to this nominal type should see that it's evicting
     /// other extensions.
     fileprivate(set) var dependents: [TypeDependent]
 
@@ -710,7 +710,7 @@ extension TypeGraph {
     /// ```
     /// It's possible that we discover ambiguities after binding extensions.
     /// So, to keep the graph consistent, extensions track their extensions:
-    /// if member that an extension depends on becomes ambiguous, we invalidate
+    /// if member that an extension depends on becomes ambiguous, we evict
     /// the extension. Further, in both unqualified and qualified lookup, all
     /// possible declarations should be returned; if we can't disambiguate,
     /// we diagnose an ambiguity error before attempting to register a type
@@ -1321,7 +1321,7 @@ extension TypeGraph {
     baseTypeFileInfo: FileInfo,
     baseType: NominalType,
     member: TypeMember,
-    invalidatedExtensions: inout [ExtensionState],
+    evictedExtensions: inout [ExtensionState],
     symbolTable: SymbolTable
   ) {
     return withLogging(
@@ -1336,7 +1336,7 @@ extension TypeGraph {
           baseTypeFileInfo: baseTypeFileInfo,
           baseType: baseType,
           member: member,
-          invalidatedExtensions: &invalidatedExtensions,
+          evictedExtensions: &evictedExtensions,
           symbolTable: symbolTable
         )
       }
@@ -1349,18 +1349,18 @@ extension TypeGraph {
     baseTypeFileInfo: FileInfo,
     baseType: NominalType,
     member: TypeMember,
-    invalidatedExtensions: inout [ExtensionState],
+    evictedExtensions: inout [ExtensionState],
     symbolTable: SymbolTable
   ) {
-    // Invalidate dependent extensions
-    _invalidateDependents(
+    // Evict dependent extensions
+    _evictDependents(
       modifiedTypeName: baseTypeName,
       modifiedMembers: TypeTable(
         from: [member.name: member.decls.map(\.typeDeclSyntax)],
         introducedIn: baseTypeDecl.as(ExtensionDeclSyntax.self)
       ),
       modifiedExtensionModule: baseTypeFileInfo.module,
-      invalidatedExtensions: &invalidatedExtensions,
+      evictedExtensions: &evictedExtensions,
       symbolTable: symbolTable
     )
 
@@ -1420,26 +1420,26 @@ extension TypeGraph {
           baseTypeFileInfo: baseTypeFileInfo,
           baseType: memberNominal,
           member: nestedMember,
-          invalidatedExtensions: &invalidatedExtensions,
+          evictedExtensions: &evictedExtensions,
           symbolTable: symbolTable
         )
       }
 
       // Remove bound extensions
       // TODO: Why didn't this fail a test before?? Write a proper test
-      // Note: `memberNominal` is stale here but since extension invalidation doesn't
+      // Note: `memberNominal` is stale here but since extension eviction doesn't
       // bind dependencies, this will always be a superset of the currently bound
-      // extensions. Further, if an extension was already invalidated, `_unbindExtension`
+      // extensions. Further, if an extension was already evicted, `_unbindExtension`
       // will just skip it.
       for moduleExtensions in memberNominal.boundExtensions.values {
         for (extensionDecl, _) in moduleExtensions {
-          let invalidatedExtension = _unbindExtension(
+          let evictedExtension = _unbindExtension(
             extensionDecl,
-            invalidatedExtensions: &invalidatedExtensions,
+            evictedExtensions: &evictedExtensions,
             symbolTable: symbolTable
           )
-          guard let invalidatedExtension else { continue }
-          invalidatedExtensions.append(invalidatedExtension)
+          guard let evictedExtension else { continue }
+          evictedExtensions.append(evictedExtension)
         }
       }
     }
@@ -1463,7 +1463,7 @@ extension TypeGraph {
           // This function messed up: We checked the name/type are registered above.
           fatalError("[SwiftLexicalLookup] Internal error: Unexpected failure: \(failure)")
         case .remainingDependents, .remainingBoundExtensions, .remainingRegistredMemberType:
-          // Some other function messed up: not all dependents were invalidated,
+          // Some other function messed up: not all dependents were evicted,
           // not all extensions unbound, or not all nested members removed.
           fatalError("[SwiftLexicalLookup] Internal error: Unexpected failure: \(failure)")
         }
@@ -1494,7 +1494,7 @@ extension TypeGraph {
 
   mutating func _unbindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    invalidatedExtensions: inout [ExtensionState],
+    evictedExtensions: inout [ExtensionState],
     symbolTable: borrowing SymbolTable
   ) -> ExtensionState? {
     return withLogging(
@@ -1505,7 +1505,7 @@ extension TypeGraph {
         defer { self._introspect(symbolTable: symbolTable) }
         return self.__unbindExtension(
           extensionDecl,
-          invalidatedExtensions: &invalidatedExtensions,
+          evictedExtensions: &evictedExtensions,
           symbolTable: symbolTable
         )
       }
@@ -1514,15 +1514,15 @@ extension TypeGraph {
 
   mutating func __unbindExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    invalidatedExtensions: inout [ExtensionState],
+    evictedExtensions: inout [ExtensionState],
     symbolTable: borrowing SymbolTable
   ) -> ExtensionState? {
     guard let extensionState = extensionsToState[extensionDecl] else {
       assert(
-        invalidatedExtensions.contains(where: { $0.extensionDecl == extensionDecl }),
-        "Asked to unbind unregistered, non-invalidated extension `\(extensionDecl._memberlessDescription)`."
+        evictedExtensions.contains(where: { $0.extensionDecl == extensionDecl }),
+        "Asked to unbind unregistered, non-evicted extension `\(extensionDecl._memberlessDescription)`."
       )
-      log("Skipping already invalidated extension `\(extensionDecl._memberlessDescription)`")
+      log("Skipping already evicted extension `\(extensionDecl._memberlessDescription)`")
       return nil
     }
     guard let extensionFileInfo = symbolTable.getFileInfo(extensionDecl.fileRoot) else {
@@ -1553,7 +1553,7 @@ extension TypeGraph {
           baseTypeFileInfo: extensionFileInfo,
           baseType: extendedType,
           member: typeMember,
-          invalidatedExtensions: &invalidatedExtensions,
+          evictedExtensions: &evictedExtensions,
           symbolTable: symbolTable
         )
       }
@@ -1584,37 +1584,37 @@ extension TypeGraph {
     return removedExtensionState
   }
 
-  fileprivate mutating func _invalidateDependents(
+  fileprivate mutating func _evictDependents(
     modifiedTypeName: GlobalTypeName,
     modifiedMembers: TypeTable,
     modifiedExtensionModule: ModuleName,
-    invalidatedExtensions: inout [ExtensionState],
+    evictedExtensions: inout [ExtensionState],
     symbolTable: borrowing SymbolTable
   ) {  //-> [TypeDependent] {
     return withLogging(
       request:
-        "Invalidating dependents of '\(modifiedTypeName.debugDescription)' > \(modifiedMembers.typeMembersToDecls.map(\.key.name))",
+        "Evicting dependents of '\(modifiedTypeName.debugDescription)' > \(modifiedMembers.typeMembersToDecls.map(\.key.name))",
       describe: { "\($0)" },
       perform: { `self` in
         self._introspect(symbolTable: symbolTable, onlyLogIfCorrupted: true)
         defer { self._introspect(symbolTable: symbolTable) }
-        return self.__invalidateDependents(
+        return self.__evictDependents(
           modifiedTypeName: modifiedTypeName,
           modifiedMembers: modifiedMembers,
           modifiedExtensionModule: modifiedExtensionModule,
-          invalidatedExtensions: &invalidatedExtensions,
+          evictedExtensions: &evictedExtensions,
           symbolTable: symbolTable
         )
       }
     )
   }
 
-  fileprivate mutating func __invalidateDependents(
+  fileprivate mutating func __evictDependents(
     modifiedTypeName: GlobalTypeName,
     modifiedMembers: TypeTable,
     modifiedExtensionModule: ModuleName,
     // directDependents: [TypeDependent],
-    invalidatedExtensions: inout [ExtensionState],
+    evictedExtensions: inout [ExtensionState],
     symbolTable: borrowing SymbolTable
   ) {  //-> [TypeDependent] {
     // TODO: Clean up if we go for immutable `get`
@@ -1622,7 +1622,7 @@ extension TypeGraph {
       // The base type must exist
       guard let baseType = namesToTypes[modifiedTypeName] else {
         fatalError(
-          "[SwiftLexicalLookup] Internal error: Unexpectedly asked to invalidate unregistered type '\(modifiedTypeName.debugDescription)'."
+          "[SwiftLexicalLookup] Internal error: Unexpectedly asked to evict unregistered type '\(modifiedTypeName.debugDescription)'."
         )
       }
 
@@ -1645,7 +1645,7 @@ extension TypeGraph {
 
     // var newDependents = [TypeDependent]()
 
-    // TODO: We should track unbound extensions so different members don't invalidate different extensions
+    // TODO: We should track unbound extensions so different members don't evict different extensions
     // TODO: Get rid of force unwrap
     while let dependent = popLastConflictingDependent() {
       // // Only unbind conflicting (otherwise add to new dependents)
@@ -1655,18 +1655,18 @@ extension TypeGraph {
       // }
 
       log("Found conflict \(dependent.debugDescription)")
-      let invalidatedExtensionState = _unbindExtension(
+      let evictedExtensionState = _unbindExtension(
         dependent.dependentExtension,
-        invalidatedExtensions: &invalidatedExtensions,
+        evictedExtensions: &evictedExtensions,
         symbolTable: symbolTable
       )
       // Skip if we've already unbound
       // This can happen if an extension has multiple dependencies.
       // E.g. We introduce _(MyFile.swift)::A > ['B', 'C'] and an extension
-      // is dependent on both type memmebrs. When invalidating
+      // is dependent on both type memmebrs. When evicting
       // _(MyFile.swift)::A > 'B', we'll unbind that extension but there's
       // no use updating _(MyFile.swift)::A's dependents
-      guard let invalidatedExtensionState else { continue }
+      guard let evictedExtensionState else { continue }
 
       // Update dependents
       namesToTypes[modifiedTypeName]!.dependents.removeAll(where: { thisDependent in
@@ -1674,8 +1674,8 @@ extension TypeGraph {
           && thisDependent.dependentExtension == dependent.dependentExtension
       })
 
-      // Record invalidation
-      invalidatedExtensions.append(invalidatedExtensionState)
+      // Record eviction
+      evictedExtensions.append(evictedExtensionState)
     }
 
     // return newDependents
@@ -1793,9 +1793,9 @@ extension TypeGraph {
       result = .failure(failure)
     }
 
-    // === Invalidate Dependents & Bind ===
-    let invalidatedExtensions: [ExtensionState]
-    // If there's no cycle, we may type members so we need to invalidate
+    // === Evict Dependents & Bind ===
+    let evictedExtensions: [ExtensionState]
+    // If there's no cycle, we may type members so we need to evict
     switch result {
     case .success(let (extendedTypeRef, _)):
       let extendedTypeName: GlobalTypeName = extendedTypeRef.name
@@ -1806,23 +1806,23 @@ extension TypeGraph {
         )
       }
 
-      var invalidatedExtensionsTmp = [ExtensionState]()
+      var evictedExtensionsTmp = [ExtensionState]()
       //let newTypeDependents =
       _introspect(symbolTable: symbolTable, onlyLogIfCorrupted: true)
-      _invalidateDependents(
+      _evictDependents(
         modifiedTypeName: extendedTypeName,
         modifiedMembers: extensionMembers,
         modifiedExtensionModule: extensionDeclModule,
-        invalidatedExtensions: &invalidatedExtensionsTmp,
+        evictedExtensions: &evictedExtensionsTmp,
         symbolTable: symbolTable
       )
-      guard let invalidatedDependentsType = namesToTypes[extendedTypeName] else {
+      guard let evictedDependentsType = namesToTypes[extendedTypeName] else {
         fatalError(
           "[SwiftLexicalLookup] Internal error: Extended type '\(extendedTypeName.debugDescription)' unexpectedly removed while binding `\(extensionDecl._memberlessDescription)`."
         )
       }
       // Assert dependent extensions are valid
-      for dependent in invalidatedDependentsType.dependents {
+      for dependent in evictedDependentsType.dependents {
         // An extension must be `extensionDecl` (about to be regsitered) or
         // currently registered.
         assert(
@@ -1830,11 +1830,11 @@ extension TypeGraph {
           "[SwiftLexicalLookup] Internal error: Tried updating dependents of '\(extendedTypeName)' but found unregistered extension `\(dependent.dependentExtension._memberlessDescription)`."
         )
       }
-      invalidatedExtensions = invalidatedExtensionsTmp
+      evictedExtensions = evictedExtensionsTmp
 
       // Bind to type
       guard
-        let newExtendedType = invalidatedDependentsType._bindingExtension(
+        let newExtendedType = evictedDependentsType._bindingExtension(
           extensionDecl,
           extensionMembers: extensionMembers,
           module: extensionDeclModule
@@ -1848,7 +1848,7 @@ extension TypeGraph {
     case .failure:
       // Extensions that aren't bound to a type, don't introduce new type
       // members so they can't have any dependent.
-      invalidatedExtensions = []
+      evictedExtensions = []
     }
 
     // === Register as Dependent ===
@@ -1888,7 +1888,7 @@ extension TypeGraph {
       resolvedType: result.map(\.globalReference.name)
     )
 
-    return .success((result, invalidatedExtensions))
+    return .success((result, evictedExtensions))
   }
 }
 

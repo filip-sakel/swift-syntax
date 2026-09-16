@@ -259,7 +259,7 @@ extension SymbolTable {
       symbolTable: self
     )
 
-    // Extract the invalidated extensions or handle failures
+    // Extract the evicted extensions or handle failures
     let (resolvedType, evictedExtensions): BindingResult
     switch bindingResult {
     case .success(let success):
@@ -279,7 +279,7 @@ extension SymbolTable {
       }
     }
     log(
-      "Resolved to \(resolvedType); Dependencies: \(resolver.dependencyTracker.dependencies.map(\.debugDescription)); Invalidated: \(evictedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
+      "Resolved to \(resolvedType); Dependencies: \(resolver.dependencyTracker.dependencies.map(\.debugDescription)); Evicted: \(evictedExtensions.map(\ExtensionState.extensionDecl._memberlessDescription))"
     )
 
     self.requestedExtensions.request(evictedExtensions: evictedExtensions.map(\.extensionDecl))
