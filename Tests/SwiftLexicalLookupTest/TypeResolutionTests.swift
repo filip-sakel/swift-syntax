@@ -511,7 +511,12 @@ final class TypeResolutionTests: XCTestCase {
         ])
       ))(ProtoA & ProtoB).InvalidMember
 
-      let _: \(failure: .noTypeInScope)ProtoA.B & ProtoB
+      let _: \(failure: .nested(.invalidComposition([
+        ("ProtoA.B", .noTypeMember(
+          member: TypeReference(name: "B"),
+          in: .nominalTypes(["_(MyFile.swift)::ProtoA"])
+        ))
+      ])))ProtoA.B & ProtoB
       """ as LexicalLookupSource
     ])
   }

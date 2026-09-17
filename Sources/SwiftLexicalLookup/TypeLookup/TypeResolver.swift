@@ -220,13 +220,6 @@ extension TypeResolver {
       // But: `Codable & Int.Type` ❌
       case .anyType:
         anyTypeCounter += 1
-      // Ignore if this particular type didn't contain the type member.
-      // E.g.
-      //   protocol A { typealias T = Int }
-      //   protocol B {}
-      //   let ab: (A & B).T // ✅
-      case .failure(Failure.noTypeMember):
-        continue
       case .failure(let resolutionFailure):
         failures.append(
           (
