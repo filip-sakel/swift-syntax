@@ -182,7 +182,7 @@ private func _visitDirectMembersOfDecl(
 extension CodeBlockItemListSyntax {
   func _visitDirectMembers(
     configuredRegions: ConfiguredRegions?,
-    visit: (ValueDeclSyntax) -> Void,
+    visit: (ValueDeclSyntax) -> Void
   ) {
     for listItem in self {
       guard case .decl(let decl) = listItem.item else { continue }

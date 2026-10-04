@@ -174,6 +174,8 @@ extension TypeGraph {
     /// declaration is the main declaration, replace by the first redeclaration
     /// (if available). If this is the main declaration and there are no
     /// redeclarations, returns `nil`.
+    ///
+    /// TODO(clean): Inline into `__removeNominalTypeDeclaration`; document how invariants are upheld
     fileprivate consuming func _removingNominalDecl(
       _ nominalTypeDecl: Attached<NominalTypeDeclSyntax>
     ) -> Result<Void, NominalUnbindingFailure> {
@@ -279,54 +281,6 @@ extension TypeGraph {
       self.dependencies = dependencies
       self.resolvedType = resolvedType
     }
-
-    init(
-      dependencies: [QualifiedLookupDependency],
-      resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
-    ) {
-      // Group dependencies by base type and member name, while maintaing order
-      var groupedDependencies =
-        [
-          (
-            key: TypeGraph.GlobalTypeName,
-            value: [(key: Identifier, value: [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)])]
-          )
-        ]()
-
-      for dependency in dependencies {
-        // TODO: Clarify comment
-        // Note: We can assign directly because ``DependencyTracker/dependencies`` guarantees
-        // that type/member-name pairs have just a single entry.
-        groupedDependencies[_key: dependency.extendedTypeName, default: []][_key: dependency.member, default: []]
-          .append(
-            contentsOf: dependency.typeDecls
-          )
-      }
-
-      // Map to `ExtensionDependency`
-      // Satisfies invariant of one dependency per type
-      let orderedGroupedDependencies: [ExtensionDependency] = groupedDependencies.map({ (typeName, members) in
-        ExtensionDependency(
-          dependencyTypeName: typeName,
-          members: members.map({ (name, typeDecls) in
-            (
-              name: name,
-              decls: typeDecls.map({ typeDecl in
-                ExtensionDependency.Member(
-                  introducingExtensionOrMainDecl: typeDecl.0.as(ExtensionDeclSyntax.self),
-                  typeDecl: typeDecl.1
-                )
-              })
-            )
-          })
-        )
-      })
-
-      self.init(
-        _uncheckedDependencies: orderedGroupedDependencies,
-        resolvedType: resolvedType
-      )
-    }
   }
 }
 
@@ -384,157 +338,12 @@ extension TypeGraph.ExtensionDependency {
   }
 }
 
-// MARK: Lookup
-
-@_spi(_QualifiedLookupTests)
-public struct DependencyTracker {
-  /// Invariant: There's at most one dependency for the same type/member-name pair.
-  private(set) var dependencies: [QualifiedLookupDependency]
-
-  @_spi(_QualifiedLookupTests)
-  public init(
-    _uncheckedDependencies dependencies: [QualifiedLookupDependency] = []
-  ) {
-    self.dependencies = dependencies
-  }
-
-  /// Add the given dependency, maintainign unique dependencies
-  fileprivate mutating func _addLookupDependency(
-    baseTypeName: TypeGraph.GlobalTypeName,
-    memberTypeName: Identifier,
-    performLookup: (TypeGraph.GlobalTypeName, Identifier) -> QualifiedLookupDependency
-  ) -> QualifiedLookupDependency {
-    // Try to find existing request
-    //
-    // Note: Although this takes O(n) time where `n` is the number of dependencies,
-    // we shouldn't have that many dependencies and small arrays are fast
-    // at linear search.
-    if let existingResult = dependencies.first(where: {
-      $0.extendedTypeName == baseTypeName && $0.member == memberTypeName
-    }) {
-      return existingResult
-    }
-
-    // Otherwise, compute and add
-    let result = performLookup(baseTypeName, memberTypeName)
-    dependencies.append(result)
-    return result
-  }
-}
-
 extension TypeGraph.GlobalTypeRef {
   init(
     name: TypeGraph.GlobalTypeName,
     nominal: __shared TypeGraph.NominalType
   ) {
     self.init(name: name, mainDecl: nominal.mainDecl, _version: nominal.version)
-  }
-}
-
-extension TypeGraph {
-  enum QualifiedTypeLookupFailure: Error {
-    /// References non-registered base type
-    case invalidBase
-    case unregisteredFileRoot(SourceFileSyntax)
-  }
-  func findMemberType(
-    baseType: TypeRef,
-    memberTypeName: Identifier,
-    origin: (typeSyntax: Attached<TypeLikeSyntax>, module: ModuleName),
-    dependencyTracker: inout DependencyTracker,
-    symbolTable: borrowing SymbolTable
-  ) -> Result<
-    [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)],
-    QualifiedTypeLookupFailure
-  > {
-    // Get global nominal reference
-    let baseTypeReference: TypeGraph.GlobalTypeRef
-    switch baseType {
-    case .global(let globalReference):
-      baseTypeReference = globalReference
-    case .local(let nominalTypeDecl):
-      guard let declFileInfo = symbolTable.getFileInfo(nominalTypeDecl.fileRoot) else {
-        return .failure(QualifiedTypeLookupFailure.unregisteredFileRoot(nominalTypeDecl.fileRoot))
-      }
-      // TODO: Directly collect members, rather than building hash map & then getting specific member
-      //
-      // Local decls don't have extensions (=> no dependencies generated); just
-      // look into the main declaration.
-      let groupedTypeMembers = nominalTypeDecl._groupTypeMembers(configuredRegions: declFileInfo.configuredRegions)
-      let typeMembers = groupedTypeMembers[memberTypeName, default: []]
-      return .success(
-        typeMembers.map({ (declGroupParent: Attached<DeclGroupSyntaxType>(nominalTypeDecl), typeDecl: $0) })
-      )
-    }
-
-    // Diagnose invalid base
-    guard
-      let registeredType = namesToTypes[baseTypeReference.name],
-      registeredType.version == baseTypeReference._version
-    else {
-      return .failure(QualifiedTypeLookupFailure.invalidBase)
-    }
-    // FIXME: Ensure reference's symbol-table version also matches
-
-    // TODO: Consider pre-sorting extensions to make lookup faster
-    func directLookup(
-      baseTypeName: TypeGraph.GlobalTypeName,
-      memberTypeName: Identifier
-    ) -> QualifiedLookupDependency {
-      // Organize declaration groups into buckets
-      typealias DeclGroupAndMembers = (declGroup: Attached<DeclGroupSyntaxType>, typeMap: TypeTable)
-      var fileDecls = [DeclGroupAndMembers]()
-      var otherInternalDecls = [DeclGroupAndMembers]()
-      // TODO: Check file's imported modules & check
-      // TODO: Sort by module order (for shadowing) and handle case where we import
-      // specific types, perhaps interleaved types between modules, e.g., import A from Module1,
-      // import B from Module2, import C from Module1, import A from Module2 (how is `A` shadowed?)
-      var externalDecls = [DeclGroupAndMembers]()
-
-      func organizeDeclGroup(_ entry: DeclGroupAndMembers) {
-        if entry.declGroup.fileRoot == origin.typeSyntax.fileRoot {
-          fileDecls.append(entry)
-        } else if symbolTable.getFileInfo(entry.declGroup.fileRoot)?.module == origin.module {
-          otherInternalDecls.append(entry)
-        } else {
-          externalDecls.append(entry)
-        }
-      }
-
-      // Add main decl and bound extensions
-      organizeDeclGroup(
-        (declGroup: Attached<DeclGroupSyntaxType>(registeredType.mainDecl), typeMap: registeredType.mainDeclMembers)
-      )
-      for (_, extensionDecls) in registeredType.boundExtensions {
-        for (extensionDecl, typeTable) in extensionDecls {
-          organizeDeclGroup((declGroup: Attached<DeclGroupSyntaxType>(extensionDecl), typeMap: typeTable))
-        }
-      }
-
-      let sortedDeclGroups = fileDecls + otherInternalDecls + externalDecls
-
-      // Add members from each decl group and register the dependencies
-      var typeDecls = [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)]()
-      for (declGroup, declGroupMembers) in sortedDeclGroups {
-        // Add the matching decls
-        let introducedDecls =
-          declGroupMembers.typeMembersToDecls[memberTypeName]?.map({
-            (declGroup, $0)
-          }) ?? []
-        typeDecls.append(contentsOf: introducedDecls)
-      }
-      return QualifiedLookupDependency(extendedTypeName: baseTypeName, member: memberTypeName, typeDecls: typeDecls)
-    }
-
-    // Add to the dependency tracker or get existing value
-    let result = dependencyTracker._addLookupDependency(
-      baseTypeName: baseTypeReference.name,
-      memberTypeName: memberTypeName,
-      performLookup: directLookup(baseTypeName:memberTypeName:)
-    )
-
-    // Distill to type declarations (throw away declaration groups)
-    return .success(result.typeDecls)
   }
 }
 
@@ -717,53 +526,9 @@ extension TypeGraph {
       TypeRef.global(TypeGraph.GlobalTypeRef(name: globalTypeName, nominal: type))
     )
   }
-
-  enum NominalTypeRefUpdateFailure: Error {
-    /// This type is no longer in the symbol table
-    case removed
-  }
-  func updateNominalTypeReference(oldReference: TypeRef) -> Result<TypeRef, NominalTypeRefUpdateFailure> {
-    // Extract global reference; return local reference as is
-    let globalReference: TypeGraph.GlobalTypeRef
-    switch oldReference {
-    case .global(let reference):
-      globalReference = reference
-    case .local:
-      return .success(oldReference)
-    }
-
-    // Get the type state
-    guard let typeState = namesToTypes[globalReference.name] else {
-      return .failure(NominalTypeRefUpdateFailure.removed)
-    }
-
-    return .success(
-      TypeRef.global(
-        TypeGraph.GlobalTypeRef(name: globalReference.name, nominal: typeState)
-      )
-    )
-  }
 }
 
 // MARK: - Extension Dependencies
-
-@_spi(_QualifiedLookupTests)
-public struct QualifiedLookupDependency: Sendable {
-  let extendedTypeName: TypeGraph.GlobalTypeName
-  let member: Identifier
-  let typeDecls: [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)]
-
-  @_spi(_QualifiedLookupTests)
-  public init(
-    extendedTypeName: TypeGraph.GlobalTypeName,
-    member: Identifier,
-    typeDecls: [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)]
-  ) {
-    self.extendedTypeName = extendedTypeName
-    self.member = member
-    self.typeDecls = typeDecls
-  }
-}
 
 extension TypeGraph {
   enum CycleDetectionFailure: Error {
@@ -842,7 +607,7 @@ extension TypeGraph {
     extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionMembers: TypeTable,
     to boundTypeRef: TypeGraph.GlobalTypeRef,
-    extensionDependencies: [QualifiedLookupDependency],
+    extensionDependencies: [QualifiedLookupDependency]
   ) -> Result<TypeResolver.ExtensionCycle, CycleDetectionFailure>? {
     let boundExtensionInfo = [
       DependencyPathElement(
@@ -883,7 +648,7 @@ extension TypeGraph {
             // Only the first element has `nil` by `_findFirstDependency` invariant.
             introducingTypeDecl: chainElement.introducingMemberType!.typeDecl.node,
             extensionDecl: chainElement.extensionDecl.node,
-            boundType: chainElement.boundType,
+            boundType: chainElement.boundType
           )
         })
 
@@ -1740,6 +1505,247 @@ extension TypeGraph {
     )
 
     return .success((result, evictedExtensions))
+  }
+}
+
+// MARK: Lookup
+
+@_spi(_QualifiedLookupTests)
+public struct QualifiedLookupDependency: Sendable {
+  let extendedTypeName: TypeGraph.GlobalTypeName
+  let member: Identifier
+  let typeDecls: [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)]
+
+  @_spi(_QualifiedLookupTests)
+  public init(
+    extendedTypeName: TypeGraph.GlobalTypeName,
+    member: Identifier,
+    typeDecls: [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)]
+  ) {
+    self.extendedTypeName = extendedTypeName
+    self.member = member
+    self.typeDecls = typeDecls
+  }
+}
+
+extension TypeGraph.ExtensionState {
+  init(
+    dependencies: [QualifiedLookupDependency],
+    resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
+  ) {
+    // Group dependencies by base type and member name, while maintaing order
+    var groupedDependencies =
+      [
+        (
+          key: TypeGraph.GlobalTypeName,
+          value: [(key: Identifier, value: [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)])]
+        )
+      ]()
+
+    for dependency in dependencies {
+      // TODO: Clarify comment
+      // Note: We can assign directly because ``DependencyTracker/dependencies`` guarantees
+      // that type/member-name pairs have just a single entry.
+      groupedDependencies[_key: dependency.extendedTypeName, default: []][_key: dependency.member, default: []]
+        .append(
+          contentsOf: dependency.typeDecls
+        )
+    }
+
+    // Map to `ExtensionDependency`
+    // Satisfies invariant of one dependency per type
+    let orderedGroupedDependencies: [TypeGraph.ExtensionDependency] = groupedDependencies.map({ (typeName, members) in
+      TypeGraph.ExtensionDependency(
+        dependencyTypeName: typeName,
+        members: members.map({ (name, typeDecls) in
+          (
+            name: name,
+            decls: typeDecls.map({ typeDecl in
+              TypeGraph.ExtensionDependency.Member(
+                introducingExtensionOrMainDecl: typeDecl.0.as(ExtensionDeclSyntax.self),
+                typeDecl: typeDecl.1
+              )
+            })
+          )
+        })
+      )
+    })
+
+    self.init(
+      _uncheckedDependencies: orderedGroupedDependencies,
+      resolvedType: resolvedType
+    )
+  }
+}
+
+@_spi(_QualifiedLookupTests)
+public struct DependencyTracker {
+  /// Invariant: There's at most one dependency for the same type/member-name pair.
+  private(set) var dependencies: [QualifiedLookupDependency]
+
+  @_spi(_QualifiedLookupTests)
+  public init(
+    _uncheckedDependencies dependencies: [QualifiedLookupDependency] = []
+  ) {
+    self.dependencies = dependencies
+  }
+
+  /// Add the given dependency, maintainign unique dependencies
+  fileprivate mutating func _addLookupDependency(
+    baseTypeName: TypeGraph.GlobalTypeName,
+    memberTypeName: Identifier,
+    performLookup: (TypeGraph.GlobalTypeName, Identifier) -> QualifiedLookupDependency
+  ) -> QualifiedLookupDependency {
+    // Try to find existing request
+    //
+    // Note: Although this takes O(n) time where `n` is the number of dependencies,
+    // we shouldn't have that many dependencies and small arrays are fast
+    // at linear search.
+    if let existingResult = dependencies.first(where: {
+      $0.extendedTypeName == baseTypeName && $0.member == memberTypeName
+    }) {
+      return existingResult
+    }
+
+    // Otherwise, compute and add
+    let result = performLookup(baseTypeName, memberTypeName)
+    dependencies.append(result)
+    return result
+  }
+}
+
+extension TypeGraph {
+  enum QualifiedTypeLookupFailure: Error {
+    /// References non-registered base type
+    case invalidBase
+    case unregisteredFileRoot(SourceFileSyntax)
+  }
+  func findMemberType(
+    baseType: TypeRef,
+    memberTypeName: Identifier,
+    origin: (typeSyntax: Attached<TypeLikeSyntax>, module: ModuleName),
+    dependencyTracker: inout DependencyTracker,
+    symbolTable: borrowing SymbolTable
+  ) -> Result<
+    [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)],
+    QualifiedTypeLookupFailure
+  > {
+    // Get global nominal reference
+    let baseTypeReference: TypeGraph.GlobalTypeRef
+    switch baseType {
+    case .global(let globalReference):
+      baseTypeReference = globalReference
+    case .local(let nominalTypeDecl):
+      guard let declFileInfo = symbolTable.getFileInfo(nominalTypeDecl.fileRoot) else {
+        return .failure(QualifiedTypeLookupFailure.unregisteredFileRoot(nominalTypeDecl.fileRoot))
+      }
+      // TODO: Directly collect members, rather than building hash map & then getting specific member
+      //
+      // Local decls don't have extensions (=> no dependencies generated); just
+      // look into the main declaration.
+      let groupedTypeMembers = nominalTypeDecl._groupTypeMembers(configuredRegions: declFileInfo.configuredRegions)
+      let typeMembers = groupedTypeMembers[memberTypeName, default: []]
+      return .success(
+        typeMembers.map({ (declGroupParent: Attached<DeclGroupSyntaxType>(nominalTypeDecl), typeDecl: $0) })
+      )
+    }
+
+    // Diagnose invalid base
+    guard
+      let registeredType = namesToTypes[baseTypeReference.name],
+      registeredType.version == baseTypeReference._version
+    else {
+      return .failure(QualifiedTypeLookupFailure.invalidBase)
+    }
+    // FIXME: Ensure reference's symbol-table version also matches
+
+    // TODO: Consider pre-sorting extensions to make lookup faster
+    func directLookup(
+      baseTypeName: TypeGraph.GlobalTypeName,
+      memberTypeName: Identifier
+    ) -> QualifiedLookupDependency {
+      // Organize declaration groups into buckets
+      typealias DeclGroupAndMembers = (declGroup: Attached<DeclGroupSyntaxType>, typeMap: TypeTable)
+      var fileDecls = [DeclGroupAndMembers]()
+      var otherInternalDecls = [DeclGroupAndMembers]()
+      // TODO: Check file's imported modules & check
+      // TODO: Sort by module order (for shadowing) and handle case where we import
+      // specific types, perhaps interleaved types between modules, e.g., import A from Module1,
+      // import B from Module2, import C from Module1, import A from Module2 (how is `A` shadowed?)
+      var externalDecls = [DeclGroupAndMembers]()
+
+      func organizeDeclGroup(_ entry: DeclGroupAndMembers) {
+        if entry.declGroup.fileRoot == origin.typeSyntax.fileRoot {
+          fileDecls.append(entry)
+        } else if symbolTable.getFileInfo(entry.declGroup.fileRoot)?.module == origin.module {
+          otherInternalDecls.append(entry)
+        } else {
+          externalDecls.append(entry)
+        }
+      }
+
+      // Add main decl and bound extensions
+      organizeDeclGroup(
+        (declGroup: Attached<DeclGroupSyntaxType>(registeredType.mainDecl), typeMap: registeredType.mainDeclMembers)
+      )
+      for (_, extensionDecls) in registeredType.boundExtensions {
+        for (extensionDecl, typeTable) in extensionDecls {
+          organizeDeclGroup((declGroup: Attached<DeclGroupSyntaxType>(extensionDecl), typeMap: typeTable))
+        }
+      }
+
+      let sortedDeclGroups = fileDecls + otherInternalDecls + externalDecls
+
+      // Add members from each decl group and register the dependencies
+      var typeDecls = [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)]()
+      for (declGroup, declGroupMembers) in sortedDeclGroups {
+        // Add the matching decls
+        let introducedDecls =
+          declGroupMembers.typeMembersToDecls[memberTypeName]?.map({
+            (declGroup, $0)
+          }) ?? []
+        typeDecls.append(contentsOf: introducedDecls)
+      }
+      return QualifiedLookupDependency(extendedTypeName: baseTypeName, member: memberTypeName, typeDecls: typeDecls)
+    }
+
+    // Add to the dependency tracker or get existing value
+    let result = dependencyTracker._addLookupDependency(
+      baseTypeName: baseTypeReference.name,
+      memberTypeName: memberTypeName,
+      performLookup: directLookup(baseTypeName:memberTypeName:)
+    )
+
+    // Distill to type declarations (throw away declaration groups)
+    return .success(result.typeDecls)
+  }
+}
+
+extension TypeGraph {
+  enum NominalTypeRefUpdateFailure: Error {
+    /// This type is no longer in the symbol table
+    case removed
+  }
+  func updateNominalTypeReference(oldReference: TypeRef) -> Result<TypeRef, NominalTypeRefUpdateFailure> {
+    // Extract global reference; return local reference as is
+    let globalReference: TypeGraph.GlobalTypeRef
+    switch oldReference {
+    case .global(let reference):
+      globalReference = reference
+    case .local:
+      return .success(oldReference)
+    }
+
+    // Get the type state
+    guard let typeState = namesToTypes[globalReference.name] else {
+      return .failure(NominalTypeRefUpdateFailure.removed)
+    }
+
+    return .success(
+      TypeRef.global(
+        TypeGraph.GlobalTypeRef(name: globalReference.name, nominal: typeState)
+      )
+    )
   }
 }
 

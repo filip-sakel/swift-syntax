@@ -173,7 +173,7 @@ extension TypeResolutionMatcher: LexicalMatcher {
       failures.append(
         ExpectationFailure.other(
           failure:
-            "No extension state: Couldn't find extension state even after nominal-type resolution; available extensions are: \(availableExtensions)",
+            "No extension state: Couldn't find extension state even after nominal-type resolution; available extensions are: \(availableExtensions)"
         )
       )
       return nil

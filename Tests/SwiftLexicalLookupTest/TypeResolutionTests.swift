@@ -751,7 +751,7 @@ final class TypeResolutionTests: XCTestCase {
 
       \(extensionState: .bound(
         dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_0", members: ["Last", "T_3"])],
-        typeName: "_(File.swift)::T_3",
+        typeName: "_(File.swift)::T_3"
       ))
       extension T_0.Last { typealias Prev = T_2 }
 
@@ -759,7 +759,7 @@ final class TypeResolutionTests: XCTestCase {
       // j=3
       \(extensionState: .bound(
         dependencies: [ExtensionDependency(baseType: "_(File.swift)::T_3", members: ["Prev", "T_2"])],
-        typeName: "_(File.swift)::T_2",
+        typeName: "_(File.swift)::T_2"
       ))
       extension T_3.Prev { typealias Prev = T_1 }
 
