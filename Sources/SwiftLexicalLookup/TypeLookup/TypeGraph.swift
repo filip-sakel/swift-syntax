@@ -286,16 +286,16 @@ extension TypeGraph {
 
 // MARK: ExtensionDependency
 
-/// An extension dependency stores cached information such as what declaration
-/// group the given member was introduced. Normally, we don't store cached
-/// information for types stored in the `TypeGraph` since we must
-/// later update a lot of cached data when we bind/evict an extension.
-/// However, extension dependencies are different because if the dependency
-/// type changes, we necessarily have to evict and recompute the extensions.
-/// Hence, extension dependencies should be created at extension binding and not
-/// be modified (we simply evict the extension and destroy its state along
-/// with any dependencies).
 extension TypeGraph {
+  /// An extension dependency stores cached information such as what declaration
+  /// group the given member was introduced. Normally, we don't store cached
+  /// information for types stored in the `TypeGraph` since we must
+  /// later update a lot of cached data when we bind/evict an extension.
+  /// However, extension dependencies are different because if the dependency
+  /// type changes, we necessarily have to evict and recompute the extensions.
+  /// Hence, extension dependencies should be created at extension binding and not
+  /// be modified (we simply evict the extension and destroy its state along
+  /// with any dependencies).
   @_spi(_QualifiedLookupTests)
   public struct ExtensionDependency: Sendable {
     /// The base type on whose members we depend.
@@ -327,7 +327,8 @@ extension TypeGraph.ExtensionDependency {
   /// A member can have more than one contributing declaration when it's
   /// ambiguous. For instance, a type alias declared both in a type's own
   /// body and again in one of its extensions.
-  @_spi(_QualifiedLookupTests) public struct Member: Hashable, Sendable {
+  @_spi(_QualifiedLookupTests)
+  public struct Member: Hashable, Sendable {
     /// The extension that introduced `typeDecl`, or `nil` if `typeDecl`
     /// was declared in the nominal-type declaration.
     ///
@@ -742,7 +743,7 @@ extension TypeGraph {
   }
   /// Removes extension maintaining all invariants.
   /// The extension must be bound, its type members must have no
-  /// dependents.
+  /// dependents and must be unregistered.
   fileprivate mutating func __removeExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionFileInfo: FileInfo,
