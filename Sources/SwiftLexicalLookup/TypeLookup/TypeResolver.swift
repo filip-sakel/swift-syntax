@@ -25,7 +25,7 @@ public struct TypeResolver {
   /// The set of type syntax we visited; only access through
   /// `insertVisitedTypeSyntax` and `removeVisitedTypeSyntax`.
   private var _visitedTypeSyntaxToIndex: [Attached<TypeSyntax>: Int] = [:]
-  private(set) var dependencyTracker: DependencyTracker = DependencyTracker()
+  private(set) var dependencyTracker: TypeGraph.DependencyTracker = TypeGraph.DependencyTracker()
 
   public init(symbolTable: SymbolTable) {
     self.symbolTable = symbolTable

@@ -296,7 +296,7 @@ extension SymbolTable {
     memberTypeName: Identifier,
     introducingTypeSyntax: Attached<TypeLikeSyntax>,
     introducingModule: ModuleName,
-    dependencyTracker: inout DependencyTracker
+    dependencyTracker: inout TypeGraph.DependencyTracker
   ) -> Result<
     [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)],
     TypeGraph.QualifiedTypeLookupFailure
