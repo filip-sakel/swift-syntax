@@ -1513,8 +1513,7 @@ extension TypeGraph {
   // invalid graph state)
   mutating func admitExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    extensionDeclModule: ModuleName,
-    extensionFileConfiguredRegions: ConfiguredRegions?,
+    extensionFileInfo: FileInfo,
     to rawResult: Result<
       (qualifiedName: GlobalTypeName, mainDecl: Attached<NominalTypeDeclSyntax>),
       TypeResolver.Failure
@@ -1529,7 +1528,7 @@ extension TypeGraph {
 
     // Prepare to store extension state
     let extensionMembers = TypeTable(
-      typeMembersToDecls: extensionDecl._groupTypeMembers(configuredRegions: extensionFileConfiguredRegions)
+      typeMembersToDecls: extensionDecl._groupTypeMembers(configuredRegions: extensionFileInfo.configuredRegions)
     )
 
     // === Diagnose Dependency Cycles ===
@@ -1602,20 +1601,13 @@ extension TypeGraph {
     switch result {
     case .success(let (extendedTypeRef, _)):
       let extendedTypeName: GlobalTypeName = extendedTypeRef.name
-      // Get the bound type
-      guard let extendedType = namesToTypes[extendedTypeName] else {
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl.node._memberlessDescription) bound to type '\(extendedTypeName)', which isn't in the graph."
-        )
-      }
 
       var evictedExtensionsTmp: [Attached<ExtensionDeclSyntax>] = []
-      //let newTypeDependents =
       _assertInvariants(symbolTable: symbolTable, onlyLogIfCorrupted: true)
       _evictDependents(
         modifiedTypeName: extendedTypeName,
         modifiedMembers: extensionMembers,
-        modifiedExtensionModule: extensionDeclModule,
+        modifiedExtensionModule: extensionFileInfo.module,
         evictedExtensions: &evictedExtensionsTmp,
         symbolTable: symbolTable
       )
@@ -1626,7 +1618,7 @@ extension TypeGraph {
       }
       // Assert dependent extensions are valid
       for dependent in evictedDependentsType.dependents {
-        // An extension must be `extensionDecl` (about to be regsitered) or
+        // An extension must be `extensionDecl` (about to be registered) or
         // currently registered.
         assert(
           dependent.dependentExtension == extensionDecl || extensionsToState[dependent.dependentExtension] != nil,
@@ -1635,59 +1627,20 @@ extension TypeGraph {
       }
       evictedExtensions = evictedExtensionsTmp
 
-      // Bind to type
-      guard
-        let newExtendedType = evictedDependentsType._bindingExtension(
-          extensionDecl,
-          extensionMembers: extensionMembers,
-          extensionModule: extensionDeclModule
-        )
-      else {
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Extension \(extensionDecl.node._memberlessDescription) has no existing state but is already bound to '\(extendedType)'."
-        )
-      }
-      namesToTypes[extendedTypeName] = newExtendedType
+      namesToTypes[extendedTypeName] = evictedDependentsType
     case .failure:
       // Extensions that aren't bound to a type, don't introduce new type
       // members so they can't have any dependent.
       evictedExtensions = []
     }
 
-    // === Register as Dependent ===
-
-    // Now that we're admissable, tell predecessors we're dependent
-    log("Registering as dependent for \(dependencyTracker.dependencies.map(\._succinctDescription))")
-    for dependency in dependencyTracker.dependencies {
-      // Find the referenced type
-      guard let nominalType = namesToTypes[dependency.extendedTypeName] else {
-        // TODO: Throw error for client instead of trapping
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: While admitting `\(extensionDecl.node._memberlessDescription)`, found dependency with non-registered type '\(dependency.extendedTypeName)'."
-        )
-      }
-
-      // Mark the dependence
-      guard
-        let nominalWithDependents = nominalType.addingDependentExtension(
-          TypeDependent(memberType: dependency.member, dependentExtension: extensionDecl)
-        )
-      else {
-        // Ensure we don't register a dependent twice (debug-only)
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Unexpectedly found not-yet-admitted extension `\(extensionDecl._memberlessDescription)` in dependents list of '\(dependency.extendedTypeName)': \(nominalType.dependents)."
-        )
-      }
-      namesToTypes[dependency.extendedTypeName] = nominalWithDependents
-    }
-
-    // === Save Extension ===
-
-    // Save extension (newly bound extension doesn't add type dependents)
-    extensionsToState[extensionDecl] = ExtensionState(
+    _addExtension(
+      extensionDecl,
+      extensionMembers: extensionMembers,
+      extensionModule: extensionFileInfo.module,
       dependencies: dependencyTracker.dependencies,
-      // Only keep the qualified name (we store the main decl in `namesToTypes`)
-      resolvedType: result.map(\.globalReference.name)
+      resolvedType: result.map(\.globalReference.name),
+      symbolTable: symbolTable
     )
 
     return .success((result, evictedExtensions))
@@ -1877,6 +1830,8 @@ extension TypeGraph.ExtensionDependency: CustomDebugStringConvertible {
 }
 
 extension TypeGraph {
+  // FIXME: Fix into an assertion function that maintains invariants &
+  // into debug print function (that doesn't diagnose broken invariants)
   fileprivate mutating func _assertInvariants(
     symbolTable: SymbolTable,
     onlyLogIfCorrupted: Bool = false,

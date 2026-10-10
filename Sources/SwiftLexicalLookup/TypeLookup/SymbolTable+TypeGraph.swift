@@ -249,8 +249,7 @@ extension SymbolTable {
     let bindingResult: Result<TypeGraph.BindingResult, TypeGraph.ExtensionAdmissionFailure>
     bindingResult = typeGraph.admitExtension(
       extensionDecl,
-      extensionDeclModule: fileInfo.module,
-      extensionFileConfiguredRegions: fileInfo.configuredRegions,
+      extensionFileInfo: fileInfo,
       // Extract the name and main decl
       to: extendedTypeResult.map({ extendedTypeReference in
         return (extendedTypeReference.type.name, extendedTypeReference.type.mainDecl)
