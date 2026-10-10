@@ -478,6 +478,11 @@ extension TypeGraph {
     case remainingTypeExtensions
     /// In `_removeType`, the given type still has dependents.
     case remainingTypeDependents
+    /// In `_removeType`, the given type still has admitted nominal member types.
+    case remainingTypeMembers
+    /// In `_removeType`, the extracted file info for `nominalDecl` doesn't match
+    /// the type's main decl.
+    case invalidFileInfo
 
     /// In `_addExtension`, the given extension is already admitted.
     case extensionReadmission
@@ -492,7 +497,7 @@ extension TypeGraph {
     case extensionReeviction
     /// In `_removeExtension`, the given extension's type members still have dependents.
     case remainingExtensionDependents
-    /// In `_removeExtension`, the given extension still has admitted nominal type members.
+    /// In `_removeExtension`, the given extension still has admitted nominal member types.
     case remainingExtensionMembers
   }
 
@@ -665,9 +670,12 @@ extension TypeGraph {
   /// as a main declaration. If this is the main declaration, must have all
   /// extensions unbound and no registered subtypes.
   ///
+  /// Parameters:
+  /// - nominalDecl: Helps assert that `nominalDeclFileInfo` is correct in DEBUG.
+  ///
   /// TODO: Make it clear that we may not mutate
   private mutating func _removeType(
-    _: Attached<NominalTypeDeclSyntax>,
+    nominalDecl: Attached<NominalTypeDeclSyntax>,
     nominalDeclFileInfo: FileInfo,
     typeName: GlobalTypeName,
     symbolTable: SymbolTable
@@ -692,16 +700,8 @@ extension TypeGraph {
       type.dependents.isEmpty,
       .remainingTypeDependents
     )
-    // Ensure the declaration was actually bound and we removed it
-    // TODO: Remove
-    // guard type.mainDecl == nominalDecl else {
-    //   return .failure(
-    //     NominalRemovalFailure.nominalNotInRegisteredType(
-    //       typeName: typeName,
-    //       actualMainDecl: type.mainDecl
-    //     )
-    //   )
-    // }
+    // Ensure the declaration that we have the file info for is the main decl.
+    internalAssert(type.mainDecl == nominalDecl, .invalidFileInfo)
 
     // Ensure we have no member types (if originally bound)
     //
@@ -719,13 +719,9 @@ extension TypeGraph {
       members: type.mainDeclMembers,
       symbolTable: symbolTable
     )
-    if let memberTypeName {
-      return .failure(NominalRemovalFailure.remainingRegistredMemberType(memberTypeName: memberTypeName))
-    }
-    // }
+    internalAssert(memberTypeName == nil, .remainingTypeMembers)
 
     namesToTypes[typeName] = nil
-    log("Removed nominal '\(typeName.debugDescription)'.")
 
     return .success(())
   }
@@ -1262,7 +1258,7 @@ extension TypeGraph {
     // === Unregister Nominals ===
     for memberNominalDecl in memberNominalDecls {
       let removalResult = _removeType(
-        memberNominalDecl,
+        nominalDecl: memberNominalDecl,
         // Same file info since this is a nested type
         nominalDeclFileInfo: baseTypeFileInfo,
         typeName: memberNominalTypeName,
