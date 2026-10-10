@@ -679,7 +679,7 @@ extension TypeGraph {
     nominalDeclFileInfo: FileInfo,
     typeName: GlobalTypeName,
     symbolTable: SymbolTable
-  ) -> Result<Void, NominalRemovalFailure> {
+  ) {
     // Get the state
     let type = namesToTypes[typeName, default: Self.internalError(.invalidType)]
 
@@ -722,8 +722,6 @@ extension TypeGraph {
     internalAssert(memberTypeName == nil, .remainingTypeMembers)
 
     namesToTypes[typeName] = nil
-
-    return .success(())
   }
 
 }
@@ -1257,28 +1255,17 @@ extension TypeGraph {
 
     // === Unregister Nominals ===
     for memberNominalDecl in memberNominalDecls {
-      let removalResult = _removeType(
+      // We handle preconditions by ensuring
+      // 1. all dependents were evicted
+      // 2. all extensions unbound
+      // 3. all member types unbound
+      _removeType(
         nominalDecl: memberNominalDecl,
         // Same file info since this is a nested type
         nominalDeclFileInfo: baseTypeFileInfo,
         typeName: memberNominalTypeName,
         symbolTable: symbolTable
       )
-      switch removalResult {
-      case .success: break
-      case .failure(let failure):
-        switch failure {
-        // FIXME: Decide if this is actually an error or allowed?
-        case .nominalNotInRegisteredType: break
-        case .unregisteredName:
-          // This function messed up: We checked the name/type are registered above.
-          fatalError("[SwiftLexicalLookup] Internal error: Unexpected failure: \(failure)")
-        case .remainingDependents, .remainingBoundExtensions, .remainingRegistredMemberType:
-          // Some other function messed up: not all dependents were evicted,
-          // not all extensions unbound, or not all nested members removed.
-          fatalError("[SwiftLexicalLookup] Internal error: Unexpected failure: \(failure)")
-        }
-      }
     }
   }
 
