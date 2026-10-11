@@ -704,7 +704,9 @@ extension TypeGraph {
     // TODO: Potentially remove (however, general asserts don't have `baseDeclGroup`; or merge with `admitType` methods)
     internalAssert(
       baseDeclGroup.map({ baseDeclGroup in
-        guard baseDeclGroup.fileRoot == mainDecl.fileRoot, baseDeclGroup.node.range.contains(mainDecl.node.range) else { return false }
+        guard baseDeclGroup.fileRoot == mainDecl.fileRoot, baseDeclGroup.node.range.contains(mainDecl.node.range) else {
+          return false
+        }
         // If baseDeclGroup exists, so should baseTypeName.
         guard let baseTypeName = typeName.base else { return false }
         if let baseNominal = baseDeclGroup.as(NominalTypeDeclSyntax.self) {
@@ -850,21 +852,35 @@ extension TypeGraph {
       )
     )
 
-    return _admitNominalType(
-      globalDecl: mainDecl,
-      declFileConfiguredRegions: declFileInfo.configuredRegions,
-      globalTypeName: globalName
+    // If already registered, ensure we have no redeclaration (see
+    // `.cannotRegisterRedeclaration` docstring for why)
+    if let existingType = namesToTypes[globalName] {
+      guard existingType.mainDecl == mainDecl else {
+        return .failure(NominalRegistrationFailure.cannotRegisterRedeclaration)
+      }
+      return .success(.global(GlobalTypeRef(name: globalName, nominal: existingType)))
+    }
+
+    let type = _addType(
+      mainDecl: mainDecl,
+      typeMembers: TypeTable(
+        typeMembersToDecls: mainDecl._groupTypeMembers(configuredRegions: declFileInfo.configuredRegions)
+      ),
+      typeName: globalName,
+      baseDeclGroup: nil,
+      symbolTable: symbolTable
     )
+    return .success(.global(GlobalTypeRef(name: globalName, nominal: type)))
   }
 
   enum NestedNominalRegistrationFailure: Error {
     case other(NominalRegistrationFailure)
 
-    /// In order to register a nested type, its parent must be registered.
-    case baseNotRegistered(parentTypeName: TypeGraph.GlobalTypeName)
-    /// Decl group unexpectedly isn't registered to the given base type.
-    /// TODO: How is this different from the first case?
-    case baseDeclGroupUnbound(Attached<DeclGroupSyntaxType>)
+    /// The given decl group syntax unexpectedly isn't registered to the given
+    /// base type reference.
+    case invalidBaseDeclGroup
+    /// The given `baseDeclGroup` must be admitted and match the given `baseType`.
+    case invalidBaseType
   }
   // Nested (local or global)
   mutating func registerNominalType(
@@ -875,12 +891,14 @@ extension TypeGraph {
     baseType: TypeRef,
     symbolTable: borrowing SymbolTable
   ) -> Result<TypeRef, NestedNominalRegistrationFailure> {
-    // Check this is the right decl group
-    // TODO: Convert to `NestedNominalRegistrationFailure` failure.
-    assert(
-      baseDeclGroup.fileRoot == mainDecl.fileRoot && baseDeclGroup.node.range.contains(mainDecl.node.range),
-      "[SwiftLexicalLookup] Internal error: Unexpectedly tried to register nested type `\(mainDecl._memberlessDescription)` under non-base decl group `\(baseDeclGroup._memberlessDescription)`."
-    )
+    // Check this is the right decl group: it must contain the main decl and
+    // be able to declare a nominal type that we can admit.
+    guard
+      baseDeclGroup.fileRoot == mainDecl.fileRoot,
+      baseDeclGroup.node.range.contains(mainDecl.node.range)
+    else {
+      return .failure(NestedNominalRegistrationFailure.invalidBaseDeclGroup)
+    }
 
     // Get the global reference, or return the local
     let globalParent: TypeGraph.GlobalTypeRef
@@ -888,11 +906,9 @@ extension TypeGraph {
     case .global(let globalReference):
       globalParent = globalReference
     case .local(let parentDecl):
-      // TODO: Convert to `NestedNominalRegistrationFailure` failure.
-      assert(
-        DeclGroupSyntaxType(parentDecl.node) == baseDeclGroup.node,
-        "[SwiftLexicalLookup] Internal error: Local type's declaration group parent doesn't match NominalTypeRef parent."
-      )
+      guard DeclGroupSyntaxType(parentDecl.node) == baseDeclGroup.node else {
+        return .failure(NestedNominalRegistrationFailure.invalidBaseType)
+      }
 
       // We can't extend local types; just return a reference.
       return .success(TypeRef.local(mainDecl))
@@ -909,21 +925,15 @@ extension TypeGraph {
 
     // The parent must be bound
     guard let baseType = namesToTypes[globalParent.name] else {
-      return .failure(NestedNominalRegistrationFailure.baseNotRegistered(parentTypeName: globalParent.name))
+      return .failure(NestedNominalRegistrationFailure.invalidBaseType)
     }
 
     // Check base decl group is actually bound to baseType
-    if let parentExtension = baseDeclGroup.as(ExtensionDeclSyntax.self),
-      let parentExtensionState = extensionsToState[parentExtension],
-      case .success(let extendedTypeName) = parentExtensionState.resolvedType,
-      extendedTypeName != globalParent.name
-    {
-      return .failure(
-        NestedNominalRegistrationFailure.baseDeclGroupUnbound(Attached<DeclGroupSyntaxType>(parentExtension))
-      )
-    } else if let parentNominal = baseDeclGroup.as(NominalTypeDeclSyntax.self),
-      baseType.mainDecl != parentNominal
-    {
+    if let parentExtension = baseDeclGroup.as(ExtensionDeclSyntax.self) {
+      guard case .success(globalParent.name) = extensionsToState[parentExtension]?.resolvedType else {
+        return .failure(NestedNominalRegistrationFailure.invalidBaseType)
+      }
+    } else if let baseTypeDecl = baseDeclGroup.as(NominalTypeDeclSyntax.self) {
       // Note that we still register even if there are redeclarations. E.g.,
       // in the following, we still register '_(File.swift)::A._(File.swift)::B',
       // despite the parent '_(File.swift)::A' having redeclarations.
@@ -934,56 +944,32 @@ extension TypeGraph {
       //     }
       // }
       // struct A {} // ❌ error: Invalid redeclaration of 'A'
-      return .failure(
-        NestedNominalRegistrationFailure.baseDeclGroupUnbound(Attached<DeclGroupSyntaxType>(parentNominal))
-      )
-    }
-
-    return _admitNominalType(
-      globalDecl: mainDecl,
-      declFileConfiguredRegions: declFileInfo.configuredRegions,
-      globalTypeName: globalName
-    ).mapError(NestedNominalRegistrationFailure.other)
-  }
-
-  /// Admits the given (global) nominal-type into the graph or returns the
-  /// existing reference.
-  ///
-  /// Important: Callers must validate the inputs
-  fileprivate mutating func _admitNominalType(
-    globalDecl mainDecl: Attached<NominalTypeDeclSyntax>,
-    declFileConfiguredRegions: ConfiguredRegions?,
-    globalTypeName: TypeGraph.GlobalTypeName
-  ) -> Result<TypeRef, NominalRegistrationFailure> {
-    // If already registered, ensure we have no redeclaration
-    let type: NominalType
-    let typeMembers = mainDecl._groupTypeMembers(configuredRegions: declFileConfiguredRegions)
-    // _addType(mainDecl: mainDecl, typeMembers: typeMembers, typeName: globalTypeName, baseDeclGroup: , symbolTable: SymbolTable)
-    if let existingType = namesToTypes[globalTypeName] {
-      // We don't allow redeclarations (see `.cannotRegisterRedeclaration`
-      // docstring for why)
-      guard existingType.mainDecl == mainDecl else {
-        return .failure(NominalRegistrationFailure.cannotRegisterRedeclaration)
+      //
+      // The decl group is a nominal type (checked above).
+      guard baseTypeDecl == baseType.mainDecl else {
+        return .failure(NestedNominalRegistrationFailure.invalidBaseType)
       }
-      // Return the existing type
-      type = existingType
-    }
-    // Otherwise, register
-    else {
-      // Create a new type
-      let freshNominal = NominalType(
-        mainDecl: mainDecl,
-        mainDeclMembers: TypeTable(
-          typeMembersToDecls: typeMembers
-        )
-      )
-      namesToTypes[globalTypeName] = freshNominal
-      type = freshNominal
     }
 
-    return .success(
-      TypeRef.global(TypeGraph.GlobalTypeRef(name: globalTypeName, nominal: type))
+    // If already registered, ensure we have no redeclaration (see
+    // `.cannotRegisterRedeclaration` docstring for why)
+    if let existingType = namesToTypes[globalName] {
+      guard existingType.mainDecl == mainDecl else {
+        return .failure(NestedNominalRegistrationFailure.other(.cannotRegisterRedeclaration))
+      }
+      return .success(.global(GlobalTypeRef(name: globalName, nominal: existingType)))
+    }
+
+    let type = _addType(
+      mainDecl: mainDecl,
+      typeMembers: TypeTable(
+        typeMembersToDecls: mainDecl._groupTypeMembers(configuredRegions: declFileInfo.configuredRegions)
+      ),
+      typeName: globalName,
+      baseDeclGroup: baseDeclGroup,
+      symbolTable: symbolTable
     )
+    return .success(.global(GlobalTypeRef(name: globalName, nominal: type)))
   }
 }
 

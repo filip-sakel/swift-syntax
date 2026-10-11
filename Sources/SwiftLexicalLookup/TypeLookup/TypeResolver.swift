@@ -735,8 +735,9 @@ extension TypeResolver {
         switch registrationFailure {
         // Reasoning:
         // .cannotRegisterRedeclaration -> We just checked for redeclarations
-        // .baseNotRegistered, .baseDeclGroupUnbound -> We should have a valid base from the recursive step
-        case .other(.cannotRegisterRedeclaration), .baseNotRegistered, .baseDeclGroupUnbound:
+        // .invalidBaseDeclGroup -> Qualified lookup found the decl under `declGroupParent`
+        // .invalidBaseType -> We should have a valid base from the recursive step
+        case .other(.cannotRegisterRedeclaration), .invalidBaseDeclGroup, .invalidBaseType:
           fatalError(
             "[SwiftLexicalLookup] Internal error: While registering '\(resolvedBase.debugDescription)' > '\(nominalDecl._memberlessDescription)': \(registrationFailure)"
           )
