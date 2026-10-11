@@ -56,6 +56,10 @@ extension TypeGraph {
       guard !_components.isEmpty else { return nil }
       self.components = _components
     }
+
+    var base: GlobalTypeName? {
+      GlobalTypeName(_components: components.dropLast())
+    }
   }
 }
 

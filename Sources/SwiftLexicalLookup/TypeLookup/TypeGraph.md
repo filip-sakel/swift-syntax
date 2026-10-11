@@ -82,7 +82,8 @@ Our graph is complex, so we need to maintain some core invariants:
 1. Nested types have parents
    If a type is nested under a nominal type declaration, that nominal type must be admitted. If a type is nested under an extension, that extension must be admitted. (Top-level types don't have that restriction.)
 1. Extensions are top-level
-   We cannot admit an extension nested under another extension or nominal-type declaration; it's illegal in Swift.
+   We cannot admit an extension nested under another extension or nominal-type declaration; it's illegal in Swift. (**TODO**: I don't think we care; this is a `TypeResolver` concern. However, verify we don't implicitly use this. Add a unit test for TypeGraph to test this.)
+1. **TODO**: There's an implicit FileInfo / declGroup assumption when registering a nominal type; check where exactly we use it
 
 To maintain these invariants, we carefully gate all mutations through a set of core operations: adding and removing types and extensions.
 
