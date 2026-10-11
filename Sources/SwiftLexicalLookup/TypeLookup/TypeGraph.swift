@@ -62,7 +62,7 @@ import SwiftDiagnostics
 ///    ```
 ///
 /// Operations:
-/// 1. `registerNominalType`: O(s + h)
+/// 1. `admitType`: O(s + h)
 ///    Groups the main declaration's members once; one map insert.
 /// 2. `findMemberType`: O(E_T + d); O(d) if repeated with the same tracker
 ///    Scans the main declaration and every bound extension of the base type
@@ -775,7 +775,7 @@ extension TypeGraph {
     // place where we could get a member type is the main decl.
     //
     // Note: If there were redeclarations, then we shouldn't have been able to
-    // register any member types (checked by ``registerNominalTypeReference``).
+    // register any member types (checked by ``admitType``).
     // if type.mainDecl == nominalDecl {
     // Since the new type is `nil`, the decl used to be `type.mainDecl`
     let memberTypeName: GlobalTypeName? = _firstRegisteredMemberName(
@@ -804,8 +804,8 @@ extension TypeGraph.GlobalTypeRef {
 }
 
 extension TypeGraph {
-  enum NominalRegistrationFailure: Error {
-    /// We don't allow registering redeclarations. Redeclarations should be
+  enum TypeAdmissionFailure: Error {
+    /// We don't allow admitting redeclarations. Redeclarations should be
     /// diagnosed as ambiguities.
     ///
     /// For instance:
@@ -825,19 +825,19 @@ extension TypeGraph {
     /// if member that an extension depends on becomes ambiguous, we evict
     /// the extension. Further, in both unqualified and qualified lookup, all
     /// possible declarations should be returned; if we can't disambiguate,
-    /// we diagnose an ambiguity error before attempting to register a type
+    /// we diagnose an ambiguity error before attempting to admit a type
     /// in the graph.
-    case cannotRegisterRedeclaration
+    case cannotAdmitRedeclaration
   }
 
   // Top-scope (local or global)
-  mutating func registerNominalType(
+  mutating func admitType(
     topScopeMainDecl mainDecl: Attached<NominalTypeDeclSyntax>,
     declName: Identifier,
     declFileInfo: FileInfo,
     isGlobal: Bool,
     symbolTable: borrowing SymbolTable
-  ) -> Result<TypeRef, NominalRegistrationFailure> {
+  ) -> Result<TypeRef, TypeAdmissionFailure> {
     // Local types don't have extensions, so we can just return a reference.
     guard isGlobal else {
       return .success(TypeRef.local(mainDecl))
@@ -853,10 +853,10 @@ extension TypeGraph {
     )
 
     // If already registered, ensure we have no redeclaration (see
-    // `.cannotRegisterRedeclaration` docstring for why)
+    // `.cannotAdmitRedeclaration` docstring for why)
     if let existingType = namesToTypes[globalName] {
       guard existingType.mainDecl == mainDecl else {
-        return .failure(NominalRegistrationFailure.cannotRegisterRedeclaration)
+        return .failure(TypeAdmissionFailure.cannotAdmitRedeclaration)
       }
       return .success(.global(GlobalTypeRef(name: globalName, nominal: existingType)))
     }
@@ -873,8 +873,8 @@ extension TypeGraph {
     return .success(.global(GlobalTypeRef(name: globalName, nominal: type)))
   }
 
-  enum NestedNominalRegistrationFailure: Error {
-    case other(NominalRegistrationFailure)
+  enum NestedTypeAdmissionFailure: Error {
+    case other(TypeAdmissionFailure)
 
     /// The given decl group syntax unexpectedly isn't registered to the given
     /// base type reference.
@@ -883,21 +883,21 @@ extension TypeGraph {
     case invalidBaseType
   }
   // Nested (local or global)
-  mutating func registerNominalType(
+  mutating func admitType(
     nestedMainDecl mainDecl: Attached<NominalTypeDeclSyntax>,
     declName: Identifier,
     declFileInfo: FileInfo,
     baseDeclGroup: Attached<DeclGroupSyntaxType>,
     baseType: TypeRef,
     symbolTable: borrowing SymbolTable
-  ) -> Result<TypeRef, NestedNominalRegistrationFailure> {
+  ) -> Result<TypeRef, NestedTypeAdmissionFailure> {
     // Check this is the right decl group: it must contain the main decl and
     // be able to declare a nominal type that we can admit.
     guard
       baseDeclGroup.fileRoot == mainDecl.fileRoot,
       baseDeclGroup.node.range.contains(mainDecl.node.range)
     else {
-      return .failure(NestedNominalRegistrationFailure.invalidBaseDeclGroup)
+      return .failure(NestedTypeAdmissionFailure.invalidBaseDeclGroup)
     }
 
     // Get the global reference, or return the local
@@ -907,7 +907,7 @@ extension TypeGraph {
       globalParent = globalReference
     case .local(let parentDecl):
       guard DeclGroupSyntaxType(parentDecl.node) == baseDeclGroup.node else {
-        return .failure(NestedNominalRegistrationFailure.invalidBaseType)
+        return .failure(NestedTypeAdmissionFailure.invalidBaseType)
       }
 
       // We can't extend local types; just return a reference.
@@ -925,13 +925,13 @@ extension TypeGraph {
 
     // The parent must be bound
     guard let baseType = namesToTypes[globalParent.name] else {
-      return .failure(NestedNominalRegistrationFailure.invalidBaseType)
+      return .failure(NestedTypeAdmissionFailure.invalidBaseType)
     }
 
     // Check base decl group is actually bound to baseType
     if let parentExtension = baseDeclGroup.as(ExtensionDeclSyntax.self) {
       guard case .success(globalParent.name) = extensionsToState[parentExtension]?.resolvedType else {
-        return .failure(NestedNominalRegistrationFailure.invalidBaseType)
+        return .failure(NestedTypeAdmissionFailure.invalidBaseType)
       }
     } else if let baseTypeDecl = baseDeclGroup.as(NominalTypeDeclSyntax.self) {
       // Note that we still register even if there are redeclarations. E.g.,
@@ -947,15 +947,15 @@ extension TypeGraph {
       //
       // The decl group is a nominal type (checked above).
       guard baseTypeDecl == baseType.mainDecl else {
-        return .failure(NestedNominalRegistrationFailure.invalidBaseType)
+        return .failure(NestedTypeAdmissionFailure.invalidBaseType)
       }
     }
 
     // If already registered, ensure we have no redeclaration (see
-    // `.cannotRegisterRedeclaration` docstring for why)
+    // `.cannotAdmitRedeclaration` docstring for why)
     if let existingType = namesToTypes[globalName] {
       guard existingType.mainDecl == mainDecl else {
-        return .failure(NestedNominalRegistrationFailure.other(.cannotRegisterRedeclaration))
+        return .failure(NestedTypeAdmissionFailure.other(.cannotAdmitRedeclaration))
       }
       return .success(.global(GlobalTypeRef(name: globalName, nominal: existingType)))
     }
@@ -1265,7 +1265,7 @@ extension TypeGraph {
       $0.as(NominalTypeDeclSyntax.self)
     })
     if memberNominalDecls.contains(memberNominal.mainDecl) {
-      // Assert we don't have any nominal-type *re*declarations (checked in `registerNominalTypeReference`)
+      // Assert we don't have any nominal-type *re*declarations (checked in `admitType`)
       precondition(
         memberNominalDecls == [memberNominal.mainDecl],
         "[SwiftLexicalLookup] Internal error: Expected nominal type '\(memberNominalTypeName.debugDescription)' to have the main decl `\(memberNominal.mainDecl._memberlessDescription)`, but instead got: \(memberNominalDecls.map(\._memberlessDescription).joined(separator: ", "))"

@@ -322,18 +322,18 @@ extension SymbolTable {
   }
 }
 
-// MARK: Registration Requests
+// MARK: Admission Requests
 
 extension SymbolTable {
-  /// Registers nominal type by forwarding to `TypeGraph/registerNominalType`
-  func registerNominalType(
+  /// Admits a nominal type by forwarding to `TypeGraph/admitType`
+  func admitType(
     topScopeMainDecl: Attached<NominalTypeDeclSyntax>,
     declName: Identifier,
     declFileInfo: FileInfo,
     isGlobal: Bool,
     originatingSyntax: Attached<TypeLikeSyntax>
-  ) -> Result<TypeResolver.ResolvedTypeSyntax, TypeGraph.NominalRegistrationFailure> {
-    return typeGraph.registerNominalType(
+  ) -> Result<TypeResolver.ResolvedTypeSyntax, TypeGraph.TypeAdmissionFailure> {
+    return typeGraph.admitType(
       topScopeMainDecl: topScopeMainDecl,
       declName: declName,
       declFileInfo: declFileInfo,
@@ -346,16 +346,16 @@ extension SymbolTable {
       )
     })
   }
-  /// Registers nominal type by forwarding to `TypeGraph/registerNominalType`
-  func registerNominalType(
+  /// Admits a nominal type by forwarding to `TypeGraph/admitType`
+  func admitType(
     nestedMainDecl: Attached<NominalTypeDeclSyntax>,
     declName: Identifier,
     declFileInfo: FileInfo,
     baseDeclGroup: Attached<DeclGroupSyntaxType>,
     baseType: TypeResolver.ResolvedTypeSyntax,
     originatingSyntax: Attached<TypeLikeSyntax>
-  ) -> Result<TypeResolver.ResolvedTypeSyntax, TypeGraph.NestedNominalRegistrationFailure> {
-    return typeGraph.registerNominalType(
+  ) -> Result<TypeResolver.ResolvedTypeSyntax, TypeGraph.NestedTypeAdmissionFailure> {
+    return typeGraph.admitType(
       nestedMainDecl: nestedMainDecl,
       declName: declName,
       declFileInfo: declFileInfo,
