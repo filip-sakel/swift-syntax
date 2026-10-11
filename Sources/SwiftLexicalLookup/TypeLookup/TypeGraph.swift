@@ -618,6 +618,7 @@ extension TypeGraph {
   /// dependents and must be unregistered.
   private mutating func _removeExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
+    // TODO: Think about removing since we have an invariant now.
     extensionFileInfo: FileInfo,
     symbolTable: SymbolTable
   ) {
@@ -689,18 +690,21 @@ extension TypeGraph {
 extension TypeGraph {
   fileprivate mutating func _addType(
     mainDecl: Attached<NominalTypeDeclSyntax>,
-    baseDeclGroup: Attached<DeclGroupSyntaxType>?,
+    typeMembers: TypeTable,
     typeName: TypeGraph.GlobalTypeName,
+    baseDeclGroup: Attached<DeclGroupSyntaxType>?,
     symbolTable: SymbolTable
-  ) {
+  ) -> NominalType {
     // Asserts
     _assertInvariants(symbolTable: symbolTable)
     defer { _assertInvariants(symbolTable: symbolTable) }
     // Assert we're not readmitting
     internalAssert(namesToTypes[typeName] == nil, .typeReadmission)
     // Assert the base type is admitted, if not top-level
+    // TODO: Potentially remove (however, general asserts don't have `baseDeclGroup`; or merge with `admitType` methods)
     internalAssert(
       baseDeclGroup.map({ baseDeclGroup in
+        guard baseDeclGroup.fileRoot == mainDecl.fileRoot, baseDeclGroup.node.range.contains(mainDecl.node.range) else { return false }
         // If baseDeclGroup exists, so should baseTypeName.
         guard let baseTypeName = typeName.base else { return false }
         if let baseNominal = baseDeclGroup.as(NominalTypeDeclSyntax.self) {
@@ -718,28 +722,23 @@ extension TypeGraph {
       }) != false,
       .invalidBaseDeclGroup
     )
-
-    // Get file info
-    let fileInfo = symbolTable.getFileInfo(mainDecl.fileRoot) ?? Self.internalError(.unknownExtensionFile)
+    // Assert file info exists
+    internalAssert(symbolTable.getFileInfo(mainDecl.fileRoot) != nil, .unknownTypeFile)
 
     // Create a new type
     let type = NominalType(
       mainDecl: mainDecl,
-      mainDeclMembers: TypeTable(
-        typeMembersToDecls: mainDecl._groupTypeMembers(configuredRegions: fileInfo.configuredRegions)
-      )
+      mainDeclMembers: typeMembers
     )
 
     namesToTypes[typeName] = type
+
+    return type
   }
 
   /// Removes the given type. Requires that the type have no bound extensions,
   /// no dependents, and that `nominalDecl` matches the expected
-  ///
-  /// Parameters:
-  /// - nominalDecl: Helps assert that `nominalDeclFileInfo` is correct in DEBUG.
   private mutating func _removeType(
-    nominalDecl: Attached<NominalTypeDeclSyntax>,
     nominalDeclFileInfo: FileInfo,
     typeName: GlobalTypeName,
     symbolTable: SymbolTable
@@ -765,11 +764,8 @@ extension TypeGraph {
       type.dependents.isEmpty,
       .remainingTypeDependents
     )
-    // Ensure the declaration that we have the file info for is the main decl.
-    internalAssert(type.mainDecl == nominalDecl, .invalidFileInfo)
-
-    // Get file info
-    let mainDeclFileInfo = symbolTable.getFileInfo(type.mainDecl.fileRoot) ?? Self.internalError(.noFileInfo)
+    // Assert correct file info (just check name)
+    internalAssert(symbolTable.getFileInfo(type.mainDecl.fileRoot)?.name == nominalDeclFileInfo.name, .invalidFileInfo)
 
     // Ensure we have no member types (if originally bound)
     //
@@ -782,7 +778,7 @@ extension TypeGraph {
     // Since the new type is `nil`, the decl used to be `type.mainDecl`
     let memberTypeName: GlobalTypeName? = _firstRegisteredMemberName(
       declGroup: Attached<DeclGroupSyntaxType>(type.mainDecl),
-      declGroupFileInfo: mainDeclFileInfo,
+      declGroupFileInfo: nominalDeclFileInfo,
       declGroupTypeName: typeName,
       members: type.mainDeclMembers,
       symbolTable: symbolTable
@@ -961,6 +957,8 @@ extension TypeGraph {
   ) -> Result<TypeRef, NominalRegistrationFailure> {
     // If already registered, ensure we have no redeclaration
     let type: NominalType
+    let typeMembers = mainDecl._groupTypeMembers(configuredRegions: declFileConfiguredRegions)
+    // _addType(mainDecl: mainDecl, typeMembers: typeMembers, typeName: globalTypeName, baseDeclGroup: , symbolTable: SymbolTable)
     if let existingType = namesToTypes[globalTypeName] {
       // We don't allow redeclarations (see `.cannotRegisterRedeclaration`
       // docstring for why)
@@ -976,7 +974,7 @@ extension TypeGraph {
       let freshNominal = NominalType(
         mainDecl: mainDecl,
         mainDeclMembers: TypeTable(
-          typeMembersToDecls: mainDecl._groupTypeMembers(configuredRegions: declFileConfiguredRegions)
+          typeMembersToDecls: typeMembers
         )
       )
       namesToTypes[globalTypeName] = freshNominal
@@ -1329,7 +1327,6 @@ extension TypeGraph {
       // We handle preconditions by ensuring all dependents, extensions
       // and member types were evicted.
       _removeType(
-        nominalDecl: memberNominalDecl,
         // Same file info since this is a nested type
         nominalDeclFileInfo: baseTypeFileInfo,
         typeName: memberNominalTypeName,
