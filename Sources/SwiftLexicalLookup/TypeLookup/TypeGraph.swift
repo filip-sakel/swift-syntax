@@ -134,27 +134,26 @@ public struct TypeGraph {
   /// - *Registered file roots*: `symbolTable.getFileInfo(type.mainDecl.fileRoot) != nil`.
   /// - *Nested types have parents*: if `name.base != nil`, then `type.mainDecl` is in
   ///   the type table of either:
-  ///   a. `namesToTypes[name]?.mainDeclMembers` for the parent main declaration, xor
-  ///   b. `namesToTypes[name]?.boundExtensions[module]?[extensionDecl]` for
+  ///   a. `namesToTypes[name.base!]?.mainDeclMembers` for the parent main declaration, xor
+  ///   b. `namesToTypes[name.base!]?.boundExtensions[module]?[extensionDecl]` for
   ///      the parent extension `extensionDecl`.
-  @_spi(_QualifiedLookupTests)
-  public var namesToTypes: [TypeGraph.GlobalTypeName: NominalType]
+  private(set) var namesToTypes: [TypeGraph.GlobalTypeName: NominalType]
   /// Invariant (see `TypeGraph.md` > Implementation):
   /// - *Registered file roots*: `symbolTable.getFileInfo(extensionDecl.fileRoot) != nil`.
   @_spi(_QualifiedLookupTests)
-  public var extensionsToState: [Attached<ExtensionDeclSyntax>: ExtensionState]
+  public private(set) var extensionsToState: [Attached<ExtensionDeclSyntax>: ExtensionState]
 
   // TODO: Remove
   var logPrefix: [String] = [String]()
 
-  @_spi(_QualifiedLookupTests)
-  public init() {
+  init() {
     namesToTypes = [:]
     extensionsToState = [:]
   }
+
 }
 
-// MARK: NominalType
+// MARK: TypeGraph.NominalType
 
 extension TypeGraph {
   @_spi(_QualifiedLookupTests)
@@ -195,21 +194,6 @@ extension TypeGraph {
       self.mainDeclMembers = mainDeclMembers
       self.boundExtensions = [:]
       self.dependents = []
-    }
-
-    /// Creates a mock nominal type without checking for invariants; only use
-    /// for tests.
-    @_spi(_QualifiedLookupTests)
-    public init(
-      _uncheckedMainDecl mainDecl: Attached<NominalTypeDeclSyntax>,
-      mainDeclMembers: TypeTable,
-      boundExtensions: [ModuleName: [Attached<ExtensionDeclSyntax>: TypeTable]],
-      dependents: [TypeDependent]
-    ) {
-      self.mainDecl = mainDecl
-      self.mainDeclMembers = mainDeclMembers
-      self.boundExtensions = boundExtensions
-      self.dependents = dependents
     }
 
     /// Returns a new version of the extended type, adding the given extension.
@@ -273,47 +257,33 @@ extension TypeGraph {
   }
 }
 
-// MARK: IntroducingExtensionOrMainDecl
+// MARK: TypeGraph.IntroducingExtensionOrMainDecl
 
 @_spi(_QualifiedLookupTests)
 public typealias IntroducingExtensionOrMainDecl = Attached<ExtensionDeclSyntax>?
 
-// MARK: TypeTable
+// MARK: TypeGraph.TypeTable
 
 extension TypeGraph {
   /// The direct type members declared by a *single* declaration group (nominal
   /// type or extension).
-  @_spi(_QualifiedLookupTests)
-  public struct TypeTable {
+  struct TypeTable {
     /// Maps each member's name to every declaration introducing it in this
     /// declaration group. More than one declaration for the same name means
     /// the member is ambiguous (redeclared) within this one declaration group.
     ///
     /// Note: This is a `Dictionary`, so it must generally not be iterated to
     /// uphold `SymbolTable`'s determinism requirement.
-    @_spi(_QualifiedLookupTests)
-    public fileprivate(set) var typeMembersToDecls: [Identifier: [Attached<TypeDeclSyntax>]]
-
-    @_spi(_QualifiedLookupTests)
-    public init(typeMembersToDecls: [Identifier: [Attached<TypeDeclSyntax>]]) {
-      self.typeMembersToDecls = typeMembersToDecls
-    }
+    fileprivate(set) var typeMembersToDecls: [Identifier: [Attached<TypeDeclSyntax>]]
   }
 }
 
-// MARK: TypeDependent
+// MARK: TypeGraph.TypeDependent
 
 extension TypeGraph {
-  @_spi(_QualifiedLookupTests)
-  public struct TypeDependent: Sendable, Hashable, CustomDebugStringConvertible {
+  struct TypeDependent: Sendable, Hashable, CustomDebugStringConvertible {
     let memberType: Identifier
     let dependentExtension: Attached<ExtensionDeclSyntax>
-
-    @_spi(_QualifiedLookupTests)
-    public init(memberType: Identifier, dependentExtension: Attached<ExtensionDeclSyntax>) {
-      self.memberType = memberType
-      self.dependentExtension = dependentExtension
-    }
 
     public var debugDescription: String {
       "Self > '\(memberType.name)' => `\(dependentExtension.node._memberlessDescription)`"
@@ -321,7 +291,7 @@ extension TypeGraph {
   }
 }
 
-// MARK: ExtensionState
+// MARK: TypeGraph.ExtensionState
 
 extension TypeGraph {
   /// The state of an admitted extension: what type it resolved to and the
@@ -342,7 +312,8 @@ extension TypeGraph {
     /// - *No cycles*: following the introducing extensions of `decls`
     ///   recursively never reaches a member with an identifier that
     ///   `extensionDecl` introduces into the resolved type.
-    /// - There's only one dependency per base type.
+    /// - *Extensions depend on type members*: there's at most one dependency
+    ///   per base type.
     @_spi(_QualifiedLookupTests) public let dependencies: [ExtensionDependency]
     /// Invariant (see `TypeGraph.md` > Implementation):
     /// - *Bound extensions*: `resolvedType == .success(typeName)` if and only if
@@ -360,7 +331,7 @@ extension TypeGraph {
   }
 }
 
-// MARK: ExtensionDependency
+// MARK: TypeGraph.ExtensionDependency
 
 extension TypeGraph {
   /// An extension dependency stores cached information such as what declaration
@@ -394,7 +365,7 @@ extension TypeGraph {
   }
 }
 
-// MARK: ExtensionDependency.Member
+// MARK: TypeGraph.ExtensionDependency.Member
 
 extension TypeGraph.ExtensionDependency {
   /// One declaration contributing to a dependency's member, together with
@@ -423,7 +394,7 @@ extension TypeGraph.ExtensionDependency {
   }
 }
 
-// MARK: QualifiedLookupDependency
+// MARK: TypeGraph.QualifiedLookupDependency
 
 extension TypeGraph {
   // TODO: Can we merge with other dependency types?
@@ -461,7 +432,6 @@ extension TypeGraph.ExtensionState {
       ]()
 
     for dependency in dependencies {
-      // TODO: Clarify comment
       // Note: We can assign directly because ``DependencyTracker/dependencies`` guarantees
       // that type/member-name pairs have just a single entry.
       groupedDependencies[_key: dependency.extendedTypeName, default: []][_key: dependency.member, default: []]
@@ -496,7 +466,7 @@ extension TypeGraph.ExtensionState {
   }
 }
 
-// MARK: DependencyTracker
+// MARK: TypeGraph.DependencyTracker
 
 extension TypeGraph {
   @_spi(_QualifiedLookupTests)
@@ -537,7 +507,7 @@ extension TypeGraph {
   }
 }
 
-// MARK: Graph Failure
+// MARK: Invariants
 
 extension TypeGraph {
   @_spi(_QualifiedLookupTests)
@@ -555,6 +525,8 @@ extension TypeGraph {
     case unboundExtension
     /// A type binds an extension whose state doesn't resolve to that type.
     case misboundExtension
+    /// An extension has more than one dependency on the same base type.
+    case duplicateDependency
     /// A dependency points to a non-admitted type
     case danglingDependency
     /// An extension depends on a type's member, but the type doesn't record
@@ -641,6 +613,180 @@ extension TypeGraph {
   }
 }
 
+extension TypeGraph {
+  /// Crashes in DEBUG if the graph breaks an invariant (see
+  /// `_firstInvariantViolation`).
+  fileprivate func _assertInvariants(
+    symbolTable: SymbolTable,
+    file: StaticString = #file,
+    line: UInt = #line,
+    function: StaticString = #function
+  ) {
+    #if DEBUG
+    if let violation = _firstInvariantViolation(symbolTable: symbolTable) {
+      Self.internalError(violation, resultType: Never.self, file: file, line: line)
+    }
+    #endif
+  }
+
+  /// Returns the first broken invariant (see TypeGraph.md), or `nil` if the
+  /// graph is valid.
+  ///
+  /// Invariants are checked one at a time across the whole graph, so the
+  /// returned failure doesn't depend on dictionary order. Later checks assume
+  /// earlier ones passed.
+  @_spi(_QualifiedLookupTests)
+  public func _firstInvariantViolation(symbolTable: SymbolTable) -> GraphFailure? {
+    // Each main decl is admitted under one name
+    var mainDecls = Set<Attached<NominalTypeDeclSyntax>>()
+    for type in namesToTypes.values {
+      guard mainDecls.insert(type.mainDecl).inserted else { return .duplicateMainDecl }
+    }
+
+    // Admitted types and extensions have registered file roots
+    for type in namesToTypes.values {
+      guard symbolTable.getFileInfo(type.mainDecl.fileRoot) != nil else { return .noFileInfo }
+    }
+    for extensionDecl in extensionsToState.keys {
+      guard symbolTable.getFileInfo(extensionDecl.fileRoot) != nil else { return .noFileInfo }
+    }
+
+    // Extensions resolve to a type iff that type binds them
+    for (extensionDecl, state) in extensionsToState {
+      guard case .success(let typeName) = state.resolvedType else { continue }
+      guard let type = namesToTypes[typeName] else { return .danglingExtension }
+      // Force-unwrap by file-root test above.
+      let module = symbolTable.getFileInfo(extensionDecl.fileRoot)!.module
+      guard type.boundExtensions[module]?[extensionDecl] != nil else { return .unboundExtension }
+    }
+    for (typeName, type) in namesToTypes {
+      for extensionDecl in type.boundExtensions.values.flatMap(\.keys) {
+        guard case .success(typeName) = extensionsToState[extensionDecl]?.resolvedType else {
+          return .misboundExtension
+        }
+      }
+    }
+
+    // Each extension has at most one dependency per base type
+    for state in extensionsToState.values {
+      var baseTypeNames = Set<GlobalTypeName>()
+      for dependency in state.dependencies {
+        guard baseTypeNames.insert(dependency.baseTypeName).inserted else { return .duplicateDependency }
+      }
+    }
+
+    // Dependencies and dependents match
+    for (extensionDecl, state) in extensionsToState {
+      for dependency in state.dependencies {
+        guard let type = namesToTypes[dependency.baseTypeName] else { return .danglingDependency }
+        for member in dependency.members {
+          let dependent = TypeDependent(memberType: member.name, dependentExtension: extensionDecl)
+          guard type.dependents.contains(dependent) else { return .missingDependent }
+        }
+      }
+    }
+    for (typeName, type) in namesToTypes {
+      for dependent in type.dependents {
+        let dependsOnMember = extensionsToState[dependent.dependentExtension]?.dependencies.contains(where: {
+          $0.baseTypeName == typeName && $0.members.contains(where: { $0.name == dependent.memberType })
+        })
+        guard dependsOnMember == true else { return .missingDependency }
+      }
+    }
+
+    // Dependencies match the type members in the graph
+    for state in extensionsToState.values {
+      for dependency in state.dependencies {
+        let type = namesToTypes[dependency.baseTypeName]!
+        for member in dependency.members {
+          var currentDecls = (type.mainDeclMembers.typeMembersToDecls[member.name] ?? []).map({
+            ExtensionDependency.Member(introducingExtensionOrMainDecl: nil, typeDecl: $0)
+          })
+          for (extensionDecl, typeTable) in type.boundExtensions.values.joined() {
+            currentDecls += (typeTable.typeMembersToDecls[member.name] ?? []).map({
+              ExtensionDependency.Member(introducingExtensionOrMainDecl: extensionDecl, typeDecl: $0)
+            })
+          }
+          // Lookup order depends on where the lookup happened, so compare
+          // the declarations regardless of order.
+          guard member.decls.count == currentDecls.count, Set(member.decls) == Set(currentDecls) else {
+            return .staleDependency
+          }
+        }
+      }
+    }
+
+    // Nested types are members of their parent's main decl or bound extensions
+    //
+    // Also, collect parented/nested types for next check.
+    var parentedTypes = Set<GlobalTypeName>()
+    for (typeName, type) in namesToTypes {
+      // Collect the type's main-type & extension declaration groups and type tables.
+      let declGroups =
+        [(declGroup: Attached<DeclGroupSyntaxType>(type.mainDecl), typeTable: type.mainDeclMembers)]
+        + type.boundExtensions.values.joined().map({
+          (declGroup: Attached<DeclGroupSyntaxType>($0.key), typeTable: $0.value)
+        })
+      for (declGroup, typeTable) in declGroups {
+        // Force-unwrap by file-root test above.
+        let declGroupFileInfo = symbolTable.getFileInfo(declGroup.fileRoot)!
+        for (memberName, memberDecls) in typeTable.typeMembersToDecls {
+          let memberTypeName = typeName.addingComponent(
+            GlobalTypeName.Component(
+              name: memberName,
+              file: declGroup.fileRoot,
+              fileInfo: declGroupFileInfo,
+              symbolTable: symbolTable
+            )
+          )
+          guard
+            let memberType = namesToTypes[memberTypeName],
+            memberDecls.contains(where: { $0.as(NominalTypeDeclSyntax.self) == memberType.mainDecl })
+          else { continue }
+          parentedTypes.insert(memberTypeName)
+        }
+      }
+    }
+    // Diagnose parentless nested types.
+    for typeName in namesToTypes.keys where typeName.base != nil {
+      guard parentedTypes.contains(typeName) else { return .parentlessType }
+    }
+
+    // No bound extension recursively depends on a member it introduces
+    for (extensionDecl, state) in extensionsToState {
+      // Get the extended type name, extension module and the extension members.
+      guard case .success(let typeName) = state.resolvedType else { continue }
+      let extensionModule = symbolTable.getFileInfo(extensionDecl.fileRoot)!.module
+      let extensionMembers = namesToTypes[typeName]!.boundExtensions[extensionModule]![extensionDecl]!
+
+      // Recursively visit dependencies
+      var visitedExtensions: Set = [extensionDecl]
+      var unvisitedStates = [state]
+      while let currentState = unvisitedStates.popLast() {
+        for dependency in currentState.dependencies {
+          for member in dependency.members {
+            // There's a cycle if the recursive dependency member is in the extended type
+            // and shares an identifier with an extension member.
+            if dependency.baseTypeName == typeName, extensionMembers.typeMembersToDecls[member.name] != nil {
+              return .dependencyCycle
+            }
+            // Add recursive extensions (extensions introducing `member`)
+            for decl in member.decls {
+              guard
+                let dependencyExtension = decl.introducingExtensionOrMainDecl,
+                visitedExtensions.insert(dependencyExtension).inserted
+              else { continue }
+              unvisitedStates.append(extensionsToState[dependencyExtension]!)
+            }
+          }
+        }
+      }
+    }
+
+    return nil
+  }
+}
+
 // MARK: Mutation Primitives
 
 extension TypeGraph {
@@ -653,7 +799,6 @@ extension TypeGraph {
   /// 3. The given dependencies reference valid types
   private mutating func _addExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    // TODO: Remove and manually find members with `fileInfo`
     extensionMembers: TypeTable,
     extensionModule: ModuleName,
     dependencies: [QualifiedLookupDependency],
@@ -662,6 +807,7 @@ extension TypeGraph {
   ) {
     // Asserts
     _assertInvariants(symbolTable: symbolTable)
+    // Important: _assertInvariants will trap if the given extension introduces a cycle.
     defer { _assertInvariants(symbolTable: symbolTable) }
     // Assert extension isn't already admitted
     internalAssert(extensionsToState[extensionDecl] == nil, .extensionReadmission)
@@ -716,7 +862,6 @@ extension TypeGraph {
   /// dependents and must be unregistered.
   private mutating func _removeExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    // TODO: Think about removing since we have an invariant now.
     extensionFileInfo: FileInfo,
     symbolTable: SymbolTable
   ) {
@@ -790,38 +935,15 @@ extension TypeGraph {
     mainDecl: Attached<NominalTypeDeclSyntax>,
     typeMembers: TypeTable,
     typeName: TypeGraph.GlobalTypeName,
-    baseDeclGroup: Attached<DeclGroupSyntaxType>?,
     symbolTable: SymbolTable
   ) -> NominalType {
     // Asserts
     _assertInvariants(symbolTable: symbolTable)
+    // _assertInvariants will trap if:
+    // 1. The type is nested but parentless.
     defer { _assertInvariants(symbolTable: symbolTable) }
     // Assert we're not readmitting
     internalAssert(namesToTypes[typeName] == nil, .typeReadmission)
-    // Assert the base type is admitted, if not top-level
-    // TODO: Potentially remove (however, general asserts don't have `baseDeclGroup`; or merge with `admitType` methods)
-    internalAssert(
-      baseDeclGroup.map({ baseDeclGroup in
-        guard baseDeclGroup.fileRoot == mainDecl.fileRoot, baseDeclGroup.node.range.contains(mainDecl.node.range) else {
-          return false
-        }
-        // If baseDeclGroup exists, so should baseTypeName.
-        guard let baseTypeName = typeName.base else { return false }
-        if let baseNominal = baseDeclGroup.as(NominalTypeDeclSyntax.self) {
-          // Type should be admitted with the same main decl.
-          return namesToTypes[baseTypeName]?.mainDecl == baseNominal
-        } else if let baseExtension = baseDeclGroup.as(ExtensionDeclSyntax.self) {
-          // Extension should be admitted and bound to `baseTypeName`
-          guard case .success(baseTypeName) = extensionsToState[baseExtension]?.resolvedType else {
-            return false
-          }
-          return true
-        } else {
-          return false
-        }
-      }) != false,
-      .invalidBaseDeclGroup
-    )
     // Assert file info exists
     internalAssert(symbolTable.getFileInfo(mainDecl.fileRoot) != nil, .unknownTypeFile)
 
@@ -903,6 +1025,8 @@ extension TypeGraph.GlobalTypeRef {
 
 extension TypeGraph {
   enum TypeAdmissionFailure: Error {
+    /// TODO: Shorten
+    ///
     /// We don't allow admitting redeclarations. Redeclarations should be
     /// diagnosed as ambiguities.
     ///
@@ -965,12 +1089,13 @@ extension TypeGraph {
         typeMembersToDecls: mainDecl._groupTypeMembers(configuredRegions: declFileInfo.configuredRegions)
       ),
       typeName: globalName,
-      baseDeclGroup: nil,
       symbolTable: symbolTable
     )
     return .success(.global(GlobalTypeRef(name: globalName, nominal: type)))
   }
+}
 
+extension TypeGraph {
   enum NestedTypeAdmissionFailure: Error {
     case other(TypeAdmissionFailure)
 
@@ -980,6 +1105,7 @@ extension TypeGraph {
     /// The given `baseDeclGroup` must be admitted and match the given `baseType`.
     case invalidBaseType
   }
+
   // Nested (local or global)
   mutating func admitType(
     nestedMainDecl mainDecl: Attached<NominalTypeDeclSyntax>,
@@ -1070,7 +1196,6 @@ extension TypeGraph {
         typeMembersToDecls: mainDecl._groupTypeMembers(configuredRegions: declFileInfo.configuredRegions)
       ),
       typeName: globalName,
-      baseDeclGroup: baseDeclGroup,
       symbolTable: symbolTable
     )
     return .success(.global(GlobalTypeRef(name: globalName, nominal: type)))
@@ -1609,6 +1734,8 @@ extension TypeGraph {
 // MARK: Extension Admission
 
 extension TypeGraph {
+  // TODO: Clarify who uses these
+
   func getGlobalNominalTypeReference(name: GlobalTypeName) -> TypeGraph.GlobalTypeRef? {
     namesToTypes[name].map({
       TypeGraph.GlobalTypeRef(name: name, nominal: $0)
@@ -1913,6 +2040,46 @@ extension TypeGraph {
   }
 }
 
+// MARK: Test Hooks
+
+extension TypeGraph {
+  /// Creates a mock graph without checking for invariants; only use for tests.
+  @_spi(_QualifiedLookupTests)
+  public init(
+    _uncheckedNamesToTypes namesToTypes: [TypeGraph.GlobalTypeName: NominalType],
+    extensionsToState: [Attached<ExtensionDeclSyntax>: ExtensionState]
+  ) {
+    self.namesToTypes = namesToTypes
+    self.extensionsToState = extensionsToState
+  }
+}
+
+extension TypeGraph.NominalType {
+  /// Creates a mock nominal type without checking for invariants; only use
+  /// for tests.
+  ///
+  /// Note: Type tables ignore `#if` configurations.
+  @_spi(_QualifiedLookupTests)
+  public init(
+    _uncheckedMainDecl mainDecl: Attached<NominalTypeDeclSyntax>,
+    boundExtensions: [ModuleName: [Attached<ExtensionDeclSyntax>]],
+    dependents: [(memberType: Identifier, dependentExtension: Attached<ExtensionDeclSyntax>)]
+  ) {
+    self.mainDecl = mainDecl
+    self.mainDeclMembers = TypeGraph.TypeTable(typeMembersToDecls: mainDecl._groupTypeMembers(configuredRegions: nil))
+    self.boundExtensions = boundExtensions.mapValues({ extensions in
+      Dictionary(
+        uniqueKeysWithValues: extensions.map({
+          ($0, TypeGraph.TypeTable(typeMembersToDecls: $0._groupTypeMembers(configuredRegions: nil)))
+        })
+      )
+    })
+    self.dependents = dependents.map({
+      TypeGraph.TypeDependent(memberType: $0.memberType, dependentExtension: $0.dependentExtension)
+    })
+  }
+}
+
 // MARK: Debug
 
 @_spi(_QualifiedLookupTests)
@@ -1955,172 +2122,6 @@ extension TypeGraph.ExtensionDependency: CustomDebugStringConvertible {
 
   public var debugDescription: String {
     _describe(includeMemberDecls: true)
-  }
-}
-
-extension TypeGraph {
-  /// Crashes in DEBUG if the graph breaks an invariant (see
-  /// `_firstInvariantViolation`).
-  fileprivate func _assertInvariants(
-    symbolTable: SymbolTable,
-    file: StaticString = #file,
-    line: UInt = #line,
-    function: StaticString = #function
-  ) {
-    #if DEBUG
-    if let violation = _firstInvariantViolation(symbolTable: symbolTable) {
-      Self.internalError(violation, resultType: Never.self, file: file, line: line)
-    }
-    #endif
-  }
-
-  /// Returns the first broken invariant (see TypeGraph.md), or `nil` if the
-  /// graph is valid.
-  ///
-  /// Invariants are checked one at a time across the whole graph, so the
-  /// returned failure doesn't depend on dictionary order. Later checks assume
-  /// earlier ones passed.
-  @_spi(_QualifiedLookupTests)
-  public func _firstInvariantViolation(symbolTable: SymbolTable) -> GraphFailure? {
-    // Each main decl is admitted under one name
-    var mainDecls = Set<Attached<NominalTypeDeclSyntax>>()
-    for type in namesToTypes.values {
-      guard mainDecls.insert(type.mainDecl).inserted else { return .duplicateMainDecl }
-    }
-
-    // Admitted types and extensions have registered file roots
-    for type in namesToTypes.values {
-      guard symbolTable.getFileInfo(type.mainDecl.fileRoot) != nil else { return .noFileInfo }
-    }
-    for extensionDecl in extensionsToState.keys {
-      guard symbolTable.getFileInfo(extensionDecl.fileRoot) != nil else { return .noFileInfo }
-    }
-
-    // Extensions resolve to a type iff that type binds them
-    for (extensionDecl, state) in extensionsToState {
-      guard case .success(let typeName) = state.resolvedType else { continue }
-      guard let type = namesToTypes[typeName] else { return .danglingExtension }
-      // Force-unwrap by file-root test above.
-      let module = symbolTable.getFileInfo(extensionDecl.fileRoot)!.module
-      guard type.boundExtensions[module]?[extensionDecl] != nil else { return .unboundExtension }
-    }
-    for (typeName, type) in namesToTypes {
-      for extensionDecl in type.boundExtensions.values.flatMap(\.keys) {
-        guard case .success(typeName) = extensionsToState[extensionDecl]?.resolvedType else {
-          return .misboundExtension
-        }
-      }
-    }
-
-    // Dependencies and dependents match
-    for (extensionDecl, state) in extensionsToState {
-      for dependency in state.dependencies {
-        guard let type = namesToTypes[dependency.baseTypeName] else { return .danglingDependency }
-        for member in dependency.members {
-          let dependent = TypeDependent(memberType: member.name, dependentExtension: extensionDecl)
-          guard type.dependents.contains(dependent) else { return .missingDependent }
-        }
-      }
-    }
-    for (typeName, type) in namesToTypes {
-      for dependent in type.dependents {
-        let dependsOnMember = extensionsToState[dependent.dependentExtension]?.dependencies.contains(where: {
-          $0.baseTypeName == typeName && $0.members.contains(where: { $0.name == dependent.memberType })
-        })
-        guard dependsOnMember == true else { return .missingDependency }
-      }
-    }
-
-    // Dependencies match the type members in the graph
-    for state in extensionsToState.values {
-      for dependency in state.dependencies {
-        let type = namesToTypes[dependency.baseTypeName]!
-        for member in dependency.members {
-          var currentDecls = (type.mainDeclMembers.typeMembersToDecls[member.name] ?? []).map({
-            ExtensionDependency.Member(introducingExtensionOrMainDecl: nil, typeDecl: $0)
-          })
-          for (extensionDecl, typeTable) in type.boundExtensions.values.joined() {
-            currentDecls += (typeTable.typeMembersToDecls[member.name] ?? []).map({
-              ExtensionDependency.Member(introducingExtensionOrMainDecl: extensionDecl, typeDecl: $0)
-            })
-          }
-          // Lookup order depends on where the lookup happened, so compare
-          // the declarations regardless of order.
-          guard member.decls.count == currentDecls.count, Set(member.decls) == Set(currentDecls) else {
-            return .staleDependency
-          }
-        }
-      }
-    }
-
-    // Nested types are members of their parent's main decl or bound extensions
-    //
-    // Also, collect parented/nested types for next check.
-    var parentedTypes = Set<GlobalTypeName>()
-    for (typeName, type) in namesToTypes {
-      // Collect the type's main-type & extension declaration groups and type tables.
-      let declGroups =
-        [(declGroup: Attached<DeclGroupSyntaxType>(type.mainDecl), typeTable: type.mainDeclMembers)]
-        + type.boundExtensions.values.joined().map({
-          (declGroup: Attached<DeclGroupSyntaxType>($0.key), typeTable: $0.value)
-        })
-      for (declGroup, typeTable) in declGroups {
-        // Force-unwrap by file-root test above.
-        let declGroupFileInfo = symbolTable.getFileInfo(declGroup.fileRoot)!
-        for (memberName, memberDecls) in typeTable.typeMembersToDecls {
-          let memberTypeName = typeName.addingComponent(
-            GlobalTypeName.Component(
-              name: memberName,
-              file: declGroup.fileRoot,
-              fileInfo: declGroupFileInfo,
-              symbolTable: symbolTable
-            )
-          )
-          guard
-            let memberType = namesToTypes[memberTypeName],
-            memberDecls.contains(where: { $0.as(NominalTypeDeclSyntax.self) == memberType.mainDecl })
-          else { continue }
-          parentedTypes.insert(memberTypeName)
-        }
-      }
-    }
-    // Diagnose parentless nested types.
-    for typeName in namesToTypes.keys where typeName.base != nil {
-      guard parentedTypes.contains(typeName) else { return .parentlessType }
-    }
-
-    // No bound extension recursively depends on a member it introduces
-    for (extensionDecl, state) in extensionsToState {
-      // Get the extended type name, extension module and the extension members.
-      guard case .success(let typeName) = state.resolvedType else { continue }
-      let extensionModule = symbolTable.getFileInfo(extensionDecl.fileRoot)!.module
-      let extensionMembers = namesToTypes[typeName]!.boundExtensions[extensionModule]![extensionDecl]!
-
-      // Recursively visit dependencies
-      var visitedExtensions: Set = [extensionDecl]
-      var unvisitedStates = [state]
-      while let currentState = unvisitedStates.popLast() {
-        for dependency in currentState.dependencies {
-          for member in dependency.members {
-            // There's a cycle if the recursive dependency member is in the extended type
-            // and shares an identifier with an extension member.
-            if dependency.baseTypeName == typeName, extensionMembers.typeMembersToDecls[member.name] != nil {
-              return .dependencyCycle
-            }
-            // Add recursive extensions (extensions introducing `member`)
-            for decl in member.decls {
-              guard
-                let dependencyExtension = decl.introducingExtensionOrMainDecl,
-                visitedExtensions.insert(dependencyExtension).inserted
-              else { continue }
-              unvisitedStates.append(extensionsToState[dependencyExtension]!)
-            }
-          }
-        }
-      }
-    }
-
-    return nil
   }
 }
 

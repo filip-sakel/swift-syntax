@@ -77,7 +77,7 @@ Our graph is complex, so we need to maintain some core invariants:
 1. Bound extensions
    Every admitted extension resolves to a type name iff that type is registered and references the extension as a bound extension.
 1. Extensions depend on type members
-   Extension dependencies (the set of type members used to resolve its type syntax) must match the type-member state in the graph. In practice, we admit an extension with valid dependencies, and evict it if the dependency type members change.
+   Extension dependencies (the set of type members used to resolve its type syntax) must match the type-member state in the graph. In practice, we admit an extension with valid dependencies, and evict it if the dependency type members change. An extension has at most one dependency per base type, which groups every member it looks up on that type.
 1. Dependencies and dependents match
    An extension can have a dependency on a type's member iff the type also records the extension as a dependent. Both the extension and type must be admitted.
 1. No cycles
@@ -86,8 +86,6 @@ Our graph is complex, so we need to maintain some core invariants:
   Every admitted top-level nominal type and extension declaration must have its file root registered through `SymbolTable`. Ensures we can find the members' `TypeTable`.
 1. Nested types have parents
    If a type is nested under a declaration group, it must be in the declaration group's type table (ensures we can find nested types). If the declaration group is a nominal type declaration, that nominal type must be admitted. If the declaration group is an extension, that extension must be admitted and bound to the parent type.
-1. Extensions are top-level
-   We cannot admit an extension nested under another extension or nominal-type declaration; it's illegal in Swift. (**TODO**: I don't think we care; this is a `TypeResolver` concern. However, verify we don't implicitly use this. Add a unit test for TypeGraph to test this.)
 
 
 To maintain these invariants, we carefully gate all mutations through a set of core operations: adding and removing types and extensions.
