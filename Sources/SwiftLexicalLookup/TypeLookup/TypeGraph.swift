@@ -893,6 +893,12 @@ extension TypeGraph {
   ) -> Result<TypeRef, NestedTypeAdmissionFailure> {
     // Check this is the right decl group: it must contain the main decl and
     // be able to declare a nominal type that we can admit.
+    //
+    // TODO: This check is too broad: it accepts types nested deeper than a
+    // direct member (e.g., in a function body or an inactive `#if` region),
+    // which removing `baseDeclGroup` wouldn't visit. Return
+    // `.invalidBaseDeclGroup` unless `baseDeclGroup`'s `TypeTable` contains
+    // `mainDecl` under `declName`.
     guard
       baseDeclGroup.fileRoot == mainDecl.fileRoot,
       baseDeclGroup.node.range.contains(mainDecl.node.range)

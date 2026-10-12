@@ -68,22 +68,27 @@ extension A { typealias B = A }
 //        `- Resolved type: 'MyModule::A'
 ```
 
+
 ## Implementation
 
 Our graph is complex, so we need to maintain some core invariants:
-1. Extensions point to valid types
-   Each admitted extension that's bound to a type refers to a valid type.
+1. No readmission
+   Every nominal-type declaration is admitted under exactly one name.
+1. Bound extensions
+   Every admitted extension resolves to a type name iff that type is registered and references the extension as a bound extension.
 1. Extensions depend on type members
    Extension dependencies (the set of type members used to resolve its type syntax) must match the type-member state in the graph. In practice, we admit an extension with valid dependencies, and evict it if the dependency type members change.
 1. Dependencies and dependents match
    An extension can have a dependency on a type's member iff the type also records the extension as a dependent. Both the extension and type must be admitted.
-1. Up-to-date dependencies
-   Each extension dependency's type members must match
+1. No cycles
+   No extension's recursive dependencies should rely on a type member identifier that the extension introduces
+1. Registered file roots
+  Every admitted top-level nominal type and extension declaration must have its file root registered through `SymbolTable`. Ensures we can find the members' `TypeTable`.
 1. Nested types have parents
-   If a type is nested under a nominal type declaration, that nominal type must be admitted. If a type is nested under an extension, that extension must be admitted. (Top-level types don't have that restriction.)
+   If a type is nested under a declaration group, it must be in the declaration group's type table (ensures we can find nested types). If the declaration group is a nominal type declaration, that nominal type must be admitted. If the declaration group is an extension, that extension must be admitted and bound to the parent type.
 1. Extensions are top-level
    We cannot admit an extension nested under another extension or nominal-type declaration; it's illegal in Swift. (**TODO**: I don't think we care; this is a `TypeResolver` concern. However, verify we don't implicitly use this. Add a unit test for TypeGraph to test this.)
-1. **TODO**: There's an implicit FileInfo / declGroup assumption when registering a nominal type; check where exactly we use it
+
 
 To maintain these invariants, we carefully gate all mutations through a set of core operations: adding and removing types and extensions.
 
@@ -117,6 +122,10 @@ Extension/Type Eviction + Example
 ## Complexity
 
 ## Design Rationale
+
+#### Why not derive dependencies from the extended type?
+
+The first [example](#example) demonstrates that we can't derive dependencies from the extended type's name because of type aliases. Namely, `extension A.B` resolves to `MyModule::A` and depends on both `A > B` (the alias) and `A > A`: `typealias B = A` only resolves to the top-level `A` because `A` has no member `A`. Hence, `TypeResolver` records every qualified lookup it performs in a `DependencyTracker`, and the graph stores those exact dependencies.
 
 #### Why not store type-member relations as edges?
 
