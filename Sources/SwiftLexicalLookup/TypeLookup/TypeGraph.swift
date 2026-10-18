@@ -1193,7 +1193,7 @@ extension TypeGraph {
 
     let firstExtensionState: ExtensionState
     var stack: [(ext: Attached<ExtensionDeclSyntax>, idx: Index)]
-    var descended: Bool = false
+    private var descended: Bool = false
   }
 }
 
@@ -1212,12 +1212,17 @@ extension TypeGraph._CycleDetectorFrame {
     stack.append((extensionDecl, index))
   }
 
+  /// Finds next dependency member given the `descended` and `stack` state.
+  ///
+  /// Returns: `nil` if no items are left, `Optional(nil)` if we need to skip,
+  /// otherwise returns the next dependency member.
   fileprivate mutating func nextDependencyMember(
     graph: borrowing TypeGraph
   ) -> (
-    Index?,
-    TypeGraph.ExtensionDependency, Identifier, Bool, TypeGraph.ExtensionDependency.Member?
-  )? {
+    index: Index?,
+    dependency: TypeGraph.ExtensionDependency, memberID: Identifier,
+    isFirstDecl: Bool, decl: TypeGraph.ExtensionDependency.Member?
+  )?? {
     guard let (extensionDecl, index) = stack.last else { return nil }
 
     // Use `newExtensionState` for first stack entry, if provided
@@ -1244,6 +1249,12 @@ extension TypeGraph._CycleDetectorFrame {
     } else {
       // Otherwise, we're done with the extension
       newIndex = nil
+    }
+
+    // Advance we descended and just came back (we've already visited `memberDecl`)
+    guard !descended else {
+      advance(newIndex: newIndex)
+      return Optional(nil)
     }
 
     return (newIndex, dependency, member.name, index.decl == 0, decl)
@@ -1316,14 +1327,11 @@ extension TypeGraph {
     var visitedExtensions: Set<Attached<ExtensionDeclSyntax>> = [extensionDecl]
 
     // Visit next transitive dependency
-    while let (newIndex, dependency, memberID, isFirstDecl, memberDecl) = frame.nextDependencyMember(
+    while let next = frame.nextDependencyMember(
       graph: self
     ) {
-      // Advance we descended and just came back (we've already visited `memberDecl`)
-      guard !frame.descended else {
-        frame.advance(newIndex: newIndex)
-        continue
-      }
+      // Skip if requested
+      guard let (newIndex, dependency, memberID, isFirstDecl, memberDecl) = next else { continue }
 
       // Check if this dependency introduces a cycle
       if isFirstDecl,  // Check only once per member (not every decl)
