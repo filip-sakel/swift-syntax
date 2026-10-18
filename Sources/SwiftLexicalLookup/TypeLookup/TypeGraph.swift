@@ -1175,21 +1175,36 @@ extension TypeGraph {
 // MARK: - Extension Eviction
 
 extension TypeGraph {
+  /// Minimal data structure for DFS on extension dependencies
   fileprivate struct _CycleDetectorFrame {
     typealias Index = (dep: Int, mem: Int, decl: Int)
     let firstExtensionState: ExtensionState
-    var stack: [(ext: Attached<ExtensionDeclSyntax>, idx: Index)]
+    var stack: [(ext: Attached<ExtensionDeclSyntax>, idx: Index, visited: Bool)]
   }
 }
 
 extension TypeGraph._CycleDetectorFrame {
-  mutating func nextDependencyMember(
+  fileprivate mutating func advance(newIndex: Index?) {
+    if let newIndex {
+      stack[stack.count - 1].idx = newIndex
+      stack[stack.count - 1].visited = false
+    } else {
+      stack.removeLast()
+    }
+  }
+  fileprivate mutating func push(ext: Attached<ExtensionDeclSyntax>) {
+    stack[stack.count - 1].visited = true
+    stack.append((ext, (0, 0, 0), false))
+  }
+
+  fileprivate mutating func nextDependencyMember(
     graph: borrowing TypeGraph
   ) -> (
     Index?,
+    Bool,
     TypeGraph.ExtensionState, TypeGraph.ExtensionDependency, Identifier, Bool, TypeGraph.ExtensionDependency.Member?
   )? {
-    guard let (ext, idx) = stack.last else { return nil }
+    guard let (ext, idx, visited) = stack.last else { return nil }
 
     // Use `newExtensionState` for first stack entry, if provided
     // TODO: Find explicit error
@@ -1208,7 +1223,7 @@ extension TypeGraph._CycleDetectorFrame {
     } else if idx.mem + 1 < dependency.members.count {
       // Else, move to next member in the dependency
       newIndex = (idx.dep, idx.mem + 1, 0)
-    } else if idx.dep < state.dependencies.count {
+    } else if idx.dep + 1 < state.dependencies.count {
       // Else, move to next dependency in the extension
       newIndex = (idx.dep + 1, 0, 0)
     } else {
@@ -1216,17 +1231,17 @@ extension TypeGraph._CycleDetectorFrame {
       newIndex = nil
     }
 
-    return (newIndex, state, dependency, member.name, idx.decl == 0, decl)
+    return (newIndex, visited, state, dependency, member.name, idx.decl == 0, decl)
   }
 
-  consuming func toCycle(
+  fileprivate consuming func toCycle(
     graph: borrowing TypeGraph
   ) -> TypeResolver.ExtensionCycle {
     var dependencyPath: [TypeResolver.ExtensionCycleElement] = []
     // First extension is entrypoint; it only introduces the next element
     var previousState = firstExtensionState
     var previousIndex = stack[0].idx
-    for (ext, idx) in stack.dropFirst() {
+    for (ext, idx, _) in stack.dropFirst() {
       let state = graph.extensionsToState[ext, default: TypeGraph.internalError(.danglingDependency)]
       guard case .success(let extendedType) = state.resolvedType else {
         // TODO: Find right error (i.e., dependency is pointing to unbound type)
@@ -1272,31 +1287,38 @@ extension TypeGraph {
     extensionState: ExtensionState,
     extensionMembers: TypeTable,
   ) -> TypeResolver.ExtensionCycle? {
-    guard !extensionState.dependencies.isEmpty else { return nil }
-    var frame = _CycleDetectorFrame(firstExtensionState: extensionState, stack: [(extensionDecl, (0, 0, 0))])
+    // Extensions without dependencies or that aren't bound, don't introduce cycles
+    guard !extensionState.dependencies.isEmpty,
+      case .success(let extendedTypeName) = extensionState.resolvedType
+    else {
+      return nil
+    }
+
+    // Track path to each dependency
+    // We checked `!dependencies.isEmpty` above, so the index `(0,0,0)` is valid.
+    var frame = _CycleDetectorFrame(firstExtensionState: extensionState, stack: [(extensionDecl, (0, 0, 0), false)])
     var visitedExtensions: Set<Attached<ExtensionDeclSyntax>> = [extensionDecl]
 
-    // Visit next
-    while let (newIndex, state, dependency, memberID, isFirstDecl, memberDecl) = frame.nextDependencyMember(graph: self)
-    {
-      // Check if this dependency introduces a cycle (only check once, not for every decl)
-      if isFirstDecl {
-        guard case .success(let extendedTypeName) = state.resolvedType else {
-          // TODO: Find right error (i.e., dependency is pointing to unbound type)
-          Self.internalError(.danglingDependency, resultType: Never.self)
-        }
-        if extendedTypeName == dependency.baseTypeName,
-          extensionMembers.typeMembersToDecls[memberID] != nil
-        {
-          return frame.toCycle(graph: self)
-        }
+    // Visit next transitive dependency
+    while let (newIndex, visited, _, dependency, memberID, isFirstDecl, memberDecl) = frame.nextDependencyMember(
+      graph: self
+    ) {
+      // Just advance if already visited (we just finished visiting a transitive dependency)
+      guard !visited else {
+        frame.advance(newIndex: newIndex)
+        continue
       }
 
-      // Advance the index
-      if let newIndex { frame.stack[frame.stack.count - 1].idx = newIndex } else { frame.stack.removeLast() }
+      // Check if this dependency introduces a cycle
+      if isFirstDecl,  // Check only once per member (not every decl)
+        extendedTypeName == dependency.baseTypeName,
+        extensionMembers.typeMembersToDecls[memberID] != nil
+      {
+        // Map to the debug-friendly `ExtensionCycle` type
+        return frame.toCycle(graph: self)
+      }
 
-      // Then, find transitive dependencies (by visiting the extensions
-      // referenced by this dependency)
+      // Then, find transitive dependencies
       guard
         // Nominal-type declarations don't introduce dependencies (though,
         // their enclosing extensions might)
@@ -1306,9 +1328,15 @@ extension TypeGraph {
         // Don't admit if it doesn't have extensions
         !extensionsToState[dependencyExtension, default: Self.internalError(.danglingDependency)].dependencies.isEmpty
       else {
+        // No transitive deps; just advance
+        frame.advance(newIndex: newIndex)
         continue
       }
-      frame.stack.append((dependencyExtension, (0, 0, 0)))
+
+      // Push transitively depended-on extension
+      // We assign index `(0,0,0)` inside, which is valid since we check `!dependencies.isEmpty`
+      // above.
+      frame.push(ext: dependencyExtension)
     }
 
     return nil
