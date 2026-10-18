@@ -590,6 +590,12 @@ extension TypeGraph {
     case remainingExtensionDependents
     /// In `_removeExtension`, the given extension still has admitted nominal member types.
     case remainingExtensionMembers
+
+    /// In `_CycleDetectorFrame/push`, the frame pushes an extension
+    /// right after a descent without advancing the index.
+    ///
+    /// Explanation: Without advancing, we'll infinitely descend into the same decl.
+    case cycleDetectorRedescent
   }
 
   private static func internalAssert(
@@ -1202,8 +1208,7 @@ extension TypeGraph._CycleDetectorFrame {
     }
   }
   fileprivate mutating func push(_ extensionDecl: Attached<ExtensionDeclSyntax>, index: Index) {
-    // TODO: Right error
-    TypeGraph.internalAssert(!descended, .danglingDependency)
+    TypeGraph.internalAssert(!descended, .cycleDetectorRedescent)
     stack.append((extensionDecl, index))
   }
 
@@ -1216,11 +1221,11 @@ extension TypeGraph._CycleDetectorFrame {
     guard let (extensionDecl, index) = stack.last else { return nil }
 
     // Use `newExtensionState` for first stack entry, if provided
-    // TODO: Find explicit error
+    // Pushed extensions introduce a dependency's declaration, so they must be admitted
     let state =
       stack.count == 1
       ? firstExtensionState
-      : graph.extensionsToState[extensionDecl, default: TypeGraph.internalError(.danglingExtension)]
+      : graph.extensionsToState[extensionDecl, default: TypeGraph.internalError(.staleDependency)]
     let dependency = state.dependencies[index.dependency]
     let member = dependency.members[index.member]
     // We may depend on the type declarations being empty.
@@ -1252,10 +1257,10 @@ extension TypeGraph._CycleDetectorFrame {
     var previousState = firstExtensionState
     var previousIndex = stack[0].idx
     for (ext, idx) in stack.dropFirst() {
-      let state = graph.extensionsToState[ext, default: TypeGraph.internalError(.danglingDependency)]
+      // Extensions introducing a dependency's declarations must be admitted and bound
+      let state = graph.extensionsToState[ext, default: TypeGraph.internalError(.staleDependency)]
       guard case .success(let extendedType) = state.resolvedType else {
-        // TODO: Find right error (i.e., dependency is pointing to unbound type)
-        TypeGraph.internalError(.danglingDependency, resultType: Never.self)
+        TypeGraph.internalError(.staleDependency, resultType: Never.self)
       }
       // The previous extension's current decl introduced this extension (so it exists)
       let introducingDecl = previousState.dependencies[previousIndex.dependency].members[previousIndex.member]
@@ -1265,7 +1270,7 @@ extension TypeGraph._CycleDetectorFrame {
           introducingTypeDecl: introducingDecl.typeDecl.node,
           extensionDecl: ext.node,
           boundType: graph.getGlobalNominalTypeReference(name: extendedType)
-            ?? TypeGraph.internalError(.parentlessType)
+            ?? TypeGraph.internalError(.danglingExtension)
         )
       )
       (previousState, previousIndex) = (state, idx)
@@ -1280,18 +1285,19 @@ extension TypeGraph._CycleDetectorFrame {
 }
 
 extension TypeGraph {
-  /// Returns the dependency path through which `extensionDecl`, bound to
-  /// `boundTypeRef`, recursively depends on one of `extensionMembers`, or
-  /// `nil` if there's no such path (*No cycles*, see `TypeGraph.md` > Implementation).
+  /// Returns the dependency path through which `extensionDecl` with
+  /// state `extensionState`, recursively depends on one of `extensionMembers`.
+  /// Otherwise, returns `nil` (*No cycles*, see `TypeGraph.md` > Implementation).
   ///
   /// Used both before binding an extension (`admitExtension`) and to check
   /// bound extensions (`_firstInvariantViolation`).
   ///
-  /// Requires that every extension introducing a member of `dependencies`,
-  /// recursively, is admitted and bound (*Extensions depend on type members*).
-  ///
   /// Parameters:
-  /// - extensionState: The state to use for the given extension (admitted or not).
+  /// - extensionState: The state to use for the given extension (admitted or
+  ///   about to be admitted).
+  /// Preconditions:
+  /// - Every extension introducing a member of `dependencies` recursively,
+  ///   is admitted and bound (*Extensions depend on type members*)
   fileprivate func _firstCycle(
     extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionState: ExtensionState,
@@ -1336,7 +1342,7 @@ extension TypeGraph {
         // Stop if we already have a cycle
         visitedExtensions.insert(dependencyExtension).inserted,
         // Don't admit if it doesn't have extensions
-        !extensionsToState[dependencyExtension, default: Self.internalError(.danglingDependency)].dependencies.isEmpty
+        !extensionsToState[dependencyExtension, default: Self.internalError(.staleDependency)].dependencies.isEmpty
       else {
         // No transitive deps; just advance
         frame.advance(newIndex: newIndex)
