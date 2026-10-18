@@ -592,7 +592,7 @@ extension TypeGraph {
     case remainingExtensionMembers
   }
 
-  private func internalAssert(
+  private static func internalAssert(
     _ condition: @autoclosure () -> Bool,
     _ error: GraphFailure,
     file: StaticString = #file,
@@ -801,12 +801,12 @@ extension TypeGraph {
     //    the extension introduces (`.staleDependency`).
     defer { _assertInvariants(symbolTable: symbolTable) }
     // Assert extension isn't already admitted
-    internalAssert(extensionsToState[extensionDecl] == nil, .extensionReadmission)
+    Self.internalAssert(extensionsToState[extensionDecl] == nil, .extensionReadmission)
     // Assert extension is in symbol table.
-    internalAssert(symbolTable.getFileInfo(extensionDecl.fileRoot) != nil, .unknownExtensionFile)
+    Self.internalAssert(symbolTable.getFileInfo(extensionDecl.fileRoot) != nil, .unknownExtensionFile)
     // Assert type has no conflicting dependents
     if case .success(let typeName) = resolvedType {
-      internalAssert(
+      Self.internalAssert(
         namesToTypes[typeName, default: Self.internalError(.invalidExtendedType)].dependents.allSatisfy({
           dependent in
           dependent.dependentExtension != extensionDecl
@@ -883,14 +883,14 @@ extension TypeGraph {
         default: Self.internalError(.extensionReeviction) as TypeTable
       ]
       // Ensure no one depends on our members
-      internalAssert(
+      Self.internalAssert(
         extendedType.dependents.allSatisfy({
           extensionMembers.typeMembersToDecls[$0.memberType] == nil
         }),
         .remainingExtensionDependents
       )
       // Ensure all members are unregistered (only happens with nominal-type declarations)
-      internalAssert(
+      Self.internalAssert(
         _firstRegisteredMemberName(
           declGroup: Attached<DeclGroupSyntaxType>(extensionDecl),
           declGroupFileInfo: extensionFileInfo,
@@ -936,9 +936,9 @@ extension TypeGraph {
     // 2. `mainDecl` is already admitted under a different name (`.duplicateMainDecl`).
     defer { _assertInvariants(symbolTable: symbolTable) }
     // Assert we're not readmitting
-    internalAssert(namesToTypes[typeName] == nil, .typeReadmission)
+    Self.internalAssert(namesToTypes[typeName] == nil, .typeReadmission)
     // Assert file info exists
-    internalAssert(symbolTable.getFileInfo(mainDecl.fileRoot) != nil, .unknownTypeFile)
+    Self.internalAssert(symbolTable.getFileInfo(mainDecl.fileRoot) != nil, .unknownTypeFile)
 
     // Create a new type
     let type = NominalType(
@@ -971,12 +971,12 @@ extension TypeGraph {
     // lingering extensions be bound to an unregistered type)
     //
     // Here, we check that each module has an empty list.
-    internalAssert(
+    Self.internalAssert(
       type.boundExtensions.allSatisfy(\.value.isEmpty),
       .remainingTypeExtensions
     )
     // Ensure we have no dependents (similar reasoning with above)
-    internalAssert(
+    Self.internalAssert(
       type.dependents.isEmpty,
       .remainingTypeDependents
     )
@@ -997,7 +997,7 @@ extension TypeGraph {
       members: type.mainDeclMembers,
       symbolTable: symbolTable
     )
-    internalAssert(memberTypeName == nil, .remainingTypeMembers)
+    Self.internalAssert(memberTypeName == nil, .remainingTypeMembers)
 
     namesToTypes[typeName] = nil
   }
@@ -1172,14 +1172,22 @@ extension TypeGraph {
   }
 }
 
-// MARK: - Extension Eviction
+// MARK: - Cycle Detection
 
 extension TypeGraph {
   /// Minimal data structure for DFS on extension dependencies
   fileprivate struct _CycleDetectorFrame {
-    typealias Index = (dep: Int, mem: Int, decl: Int)
+    /// Identifies a specific dependency type declaration as:
+    /// ```
+    /// state.dependencies[index.dependency]
+    ///       .members[index.member]
+    ///       .decls[index.decl]
+    /// ```
+    typealias Index = (dependency: Int, member: Int, decl: Int)
+
     let firstExtensionState: ExtensionState
-    var stack: [(ext: Attached<ExtensionDeclSyntax>, idx: Index, visited: Bool)]
+    var stack: [(ext: Attached<ExtensionDeclSyntax>, idx: Index)]
+    var descended: Bool = false
   }
 }
 
@@ -1187,51 +1195,53 @@ extension TypeGraph._CycleDetectorFrame {
   fileprivate mutating func advance(newIndex: Index?) {
     if let newIndex {
       stack[stack.count - 1].idx = newIndex
-      stack[stack.count - 1].visited = false
+      descended = false
     } else {
       stack.removeLast()
+      descended = true
     }
   }
-  fileprivate mutating func push(ext: Attached<ExtensionDeclSyntax>) {
-    stack[stack.count - 1].visited = true
-    stack.append((ext, (0, 0, 0), false))
+  fileprivate mutating func push(_ extensionDecl: Attached<ExtensionDeclSyntax>, index: Index) {
+    // TODO: Right error
+    TypeGraph.internalAssert(!descended, .danglingDependency)
+    stack.append((extensionDecl, index))
   }
 
   fileprivate mutating func nextDependencyMember(
     graph: borrowing TypeGraph
   ) -> (
     Index?,
-    Bool,
-    TypeGraph.ExtensionState, TypeGraph.ExtensionDependency, Identifier, Bool, TypeGraph.ExtensionDependency.Member?
+    TypeGraph.ExtensionDependency, Identifier, Bool, TypeGraph.ExtensionDependency.Member?
   )? {
-    guard let (ext, idx, visited) = stack.last else { return nil }
+    guard let (extensionDecl, index) = stack.last else { return nil }
 
     // Use `newExtensionState` for first stack entry, if provided
     // TODO: Find explicit error
     let state =
       stack.count == 1
-      ? firstExtensionState : graph.extensionsToState[ext, default: TypeGraph.internalError(.danglingExtension)]
-    let dependency = state.dependencies[idx.dep]
-    let member = dependency.members[idx.mem]
+      ? firstExtensionState
+      : graph.extensionsToState[extensionDecl, default: TypeGraph.internalError(.danglingExtension)]
+    let dependency = state.dependencies[index.dependency]
+    let member = dependency.members[index.member]
     // We may depend on the type declarations being empty.
-    let decl = member.decls.isEmpty ? nil : member.decls[idx.decl]
+    let decl = member.decls.isEmpty ? nil : member.decls[index.decl]
 
-    let newIndex: (dep: Int, mem: Int, decl: Int)?
-    if idx.decl + 1 < member.decls.count {
+    let newIndex: Index?
+    if index.decl + 1 < member.decls.count {
       // If available, move to next decl in the member
-      newIndex = (idx.dep, idx.mem, idx.decl + 1)
-    } else if idx.mem + 1 < dependency.members.count {
+      newIndex = (index.dependency, index.member, index.decl + 1)
+    } else if index.member + 1 < dependency.members.count {
       // Else, move to next member in the dependency
-      newIndex = (idx.dep, idx.mem + 1, 0)
-    } else if idx.dep + 1 < state.dependencies.count {
+      newIndex = (index.dependency, index.member + 1, 0)
+    } else if index.dependency + 1 < state.dependencies.count {
       // Else, move to next dependency in the extension
-      newIndex = (idx.dep + 1, 0, 0)
+      newIndex = (index.dependency + 1, 0, 0)
     } else {
       // Otherwise, we're done with the extension
       newIndex = nil
     }
 
-    return (newIndex, visited, state, dependency, member.name, idx.decl == 0, decl)
+    return (newIndex, dependency, member.name, index.decl == 0, decl)
   }
 
   fileprivate consuming func toCycle(
@@ -1241,14 +1251,14 @@ extension TypeGraph._CycleDetectorFrame {
     // First extension is entrypoint; it only introduces the next element
     var previousState = firstExtensionState
     var previousIndex = stack[0].idx
-    for (ext, idx, _) in stack.dropFirst() {
+    for (ext, idx) in stack.dropFirst() {
       let state = graph.extensionsToState[ext, default: TypeGraph.internalError(.danglingDependency)]
       guard case .success(let extendedType) = state.resolvedType else {
         // TODO: Find right error (i.e., dependency is pointing to unbound type)
         TypeGraph.internalError(.danglingDependency, resultType: Never.self)
       }
       // The previous extension's current decl introduced this extension (so it exists)
-      let introducingDecl = previousState.dependencies[previousIndex.dep].members[previousIndex.mem]
+      let introducingDecl = previousState.dependencies[previousIndex.dependency].members[previousIndex.member]
         .decls[previousIndex.decl]
       dependencyPath.append(
         TypeResolver.ExtensionCycleElement(
@@ -1264,7 +1274,7 @@ extension TypeGraph._CycleDetectorFrame {
     return TypeResolver.ExtensionCycle(
       dependencyPath: dependencyPath,
       // The last extension's current member conflicts with the entrypoint's members
-      dependencyMember: previousState.dependencies[previousIndex.dep].members[previousIndex.mem].name
+      dependencyMember: previousState.dependencies[previousIndex.dependency].members[previousIndex.member].name
     )
   }
 }
@@ -1296,15 +1306,15 @@ extension TypeGraph {
 
     // Track path to each dependency
     // We checked `!dependencies.isEmpty` above, so the index `(0,0,0)` is valid.
-    var frame = _CycleDetectorFrame(firstExtensionState: extensionState, stack: [(extensionDecl, (0, 0, 0), false)])
+    var frame = _CycleDetectorFrame(firstExtensionState: extensionState, stack: [(extensionDecl, (0, 0, 0))])
     var visitedExtensions: Set<Attached<ExtensionDeclSyntax>> = [extensionDecl]
 
     // Visit next transitive dependency
-    while let (newIndex, visited, _, dependency, memberID, isFirstDecl, memberDecl) = frame.nextDependencyMember(
+    while let (newIndex, dependency, memberID, isFirstDecl, memberDecl) = frame.nextDependencyMember(
       graph: self
     ) {
-      // Just advance if already visited (we just finished visiting a transitive dependency)
-      guard !visited else {
+      // Advance we descended and just came back (we've already visited `memberDecl`)
+      guard !frame.descended else {
         frame.advance(newIndex: newIndex)
         continue
       }
@@ -1334,14 +1344,15 @@ extension TypeGraph {
       }
 
       // Push transitively depended-on extension
-      // We assign index `(0,0,0)` inside, which is valid since we check `!dependencies.isEmpty`
-      // above.
-      frame.push(ext: dependencyExtension)
+      // We can assign `(0,0,0)` because we just checked `!dependencies.isEmpty`
+      frame.push(dependencyExtension, index: (0, 0, 0))
     }
 
     return nil
   }
 }
+
+// MARK: - Extension Eviction
 
 extension TypeGraph {
   fileprivate func _firstRegisteredMemberName(
