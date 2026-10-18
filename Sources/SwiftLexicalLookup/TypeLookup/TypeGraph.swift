@@ -1222,37 +1222,34 @@ extension TypeGraph._CycleDetectorFrame {
   consuming func toCycle(
     graph: borrowing TypeGraph
   ) -> TypeResolver.ExtensionCycle {
-    func stateToCycleElement(
-      extensionDecl: Attached<ExtensionDeclSyntax>,
-      state: TypeGraph.ExtensionState,
-      index: Index
-    ) -> TypeResolver.ExtensionCycleElement {
+    var dependencyPath: [TypeResolver.ExtensionCycleElement] = []
+    // First extension is entrypoint; it only introduces the next element
+    var previousState = firstExtensionState
+    var previousIndex = stack[0].idx
+    for (ext, idx) in stack.dropFirst() {
+      let state = graph.extensionsToState[ext, default: TypeGraph.internalError(.danglingDependency)]
       guard case .success(let extendedType) = state.resolvedType else {
         // TODO: Find right error (i.e., dependency is pointing to unbound type)
         TypeGraph.internalError(.danglingDependency, resultType: Never.self)
       }
-      let introducingIndex = state[]
-      let introducingTypeDecl = state.dependencies[index.dep].members[index.mem]
-      let decl = member.decls.isEmpty ? nil : member.decls[index.decl]
-      return TypeResolver.ExtensionCycleElement(
-        introducingTypeDecl: decl.typeDecl.node,
-        extensionDecl: extensionDecl.node,
-        boundType: graph.getGlobalNominalTypeReference(name: extendedType) ?? TypeGraph.internalError(.parentlessType)
+      // The previous extension's current decl introduced this extension (so it exists)
+      let introducingDecl = previousState.dependencies[previousIndex.dep].members[previousIndex.mem]
+        .decls[previousIndex.decl]
+      dependencyPath.append(
+        TypeResolver.ExtensionCycleElement(
+          introducingTypeDecl: introducingDecl.typeDecl.node,
+          extensionDecl: ext.node,
+          boundType: graph.getGlobalNominalTypeReference(name: extendedType)
+            ?? TypeGraph.internalError(.parentlessType)
+        )
       )
+      (previousState, previousIndex) = (state, idx)
     }
 
-    let dependencyPath: [TypeResolver.ExtensionCycleElement] = stack.dropFirst().map({ (ext, idx) in
-      let state = graph.extensionsToState[ext, default: TypeGraph.internalError(.danglingDependency)]
-      return stateToCycleElement(extensionDecl: ext, state: state, index: idx)
-    })
     return TypeResolver.ExtensionCycle(
-      // First extension is entrypoint; drop it
       dependencyPath: dependencyPath,
-      dependencyMember: stateToCycleElement(
-        extensionDecl: stack[0].ext,
-        state: firstExtensionState,
-        index: stack[0].idx
-      ).introducingTypeDecl!.name.identifier!
+      // The last extension's current member conflicts with the entrypoint's members
+      dependencyMember: previousState.dependencies[previousIndex.dep].members[previousIndex.mem].name
     )
   }
 }
