@@ -1214,8 +1214,8 @@ extension TypeGraph._CycleDetectorFrame {
 
   /// Finds next dependency member given the `descended` and `stack` state.
   ///
-  /// Returns: `nil` if no items are left, `Optional(nil)` if we need to skip,
-  /// otherwise returns the next dependency member.
+  /// Returns: `nil` if no items are left, `Optional(nil)` if we just finished a descent and
+  /// need to skip, otherwise returns the next dependency member.
   fileprivate mutating func nextDependencyMember(
     graph: borrowing TypeGraph
   ) -> (
@@ -1225,7 +1225,7 @@ extension TypeGraph._CycleDetectorFrame {
   )?? {
     guard let (extensionDecl, index) = stack.last else { return nil }
 
-    // Use `newExtensionState` for first stack entry, if provided
+    // Use `firstExtensionState` for first stack entry, if provided
     // Pushed extensions introduce a dependency's declaration, so they must be admitted
     let state =
       stack.count == 1
@@ -1330,7 +1330,7 @@ extension TypeGraph {
     while let next = frame.nextDependencyMember(
       graph: self
     ) {
-      // Skip if requested
+      // Skip if `nil` (i.e., when we just finished a descent and we had to call `frame.advance`)
       guard let (newIndex, dependency, memberID, isFirstDecl, memberDecl) = next else { continue }
 
       // Check if this dependency introduces a cycle
@@ -1349,10 +1349,10 @@ extension TypeGraph {
         let dependencyExtension = memberDecl?.introducingExtensionOrMainDecl,
         // Stop if we already have a cycle
         visitedExtensions.insert(dependencyExtension).inserted,
-        // Don't admit if it doesn't have extensions
+        // Skip if it has no dependencies
         !extensionsToState[dependencyExtension, default: Self.internalError(.staleDependency)].dependencies.isEmpty
       else {
-        // No transitive deps; just advance
+        // No transitive dependencies; just advance
         frame.advance(newIndex: newIndex)
         continue
       }
@@ -1438,37 +1438,38 @@ extension TypeGraph {
     case remainingRegistredMemberType(memberTypeName: GlobalTypeName)
   }
 
-  mutating func _unbindMemberType(
-    baseTypeName: GlobalTypeName,
-    baseTypeDecl: Attached<DeclGroupSyntaxType>,
-    baseTypeFileInfo: FileInfo,
-    baseType: NominalType,
-    memberName: Identifier,
-    memberDecls: [Attached<TypeDeclSyntax>],
-    evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
-    symbolTable: SymbolTable
-  ) {
-    return withLogging(
-      request: "Unbinding member type '\(baseTypeName.debugDescription)' > '\(memberName.name)'",
-      describe: { "" },
-      perform: { `self` in
-        self._assertInvariants(symbolTable: symbolTable)
-        defer { self._assertInvariants(symbolTable: symbolTable) }
-        return self.__unbindMemberType(
-          baseTypeName: baseTypeName,
-          baseTypeDecl: baseTypeDecl,
-          baseTypeFileInfo: baseTypeFileInfo,
-          baseType: baseType,
-          memberName: memberName,
-          memberDecls: memberDecls,
-          evictedExtensions: &evictedExtensions,
-          symbolTable: symbolTable
-        )
-      }
-    )
-  }
+  // TODO: Remove
+  // mutating func _evictMemberType(
+  //   baseTypeName: GlobalTypeName,
+  //   baseTypeDecl: Attached<DeclGroupSyntaxType>,
+  //   baseTypeFileInfo: FileInfo,
+  //   baseType: NominalType,
+  //   memberName: Identifier,
+  //   memberDecls: [Attached<TypeDeclSyntax>],
+  //   evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
+  //   symbolTable: SymbolTable
+  // ) {
+  //   return withLogging(
+  //     request: "Unbinding member type '\(baseTypeName.debugDescription)' > '\(memberName.name)'",
+  //     describe: { "" },
+  //     perform: { `self` in
+  //       self._assertInvariants(symbolTable: symbolTable)
+  //       defer { self._assertInvariants(symbolTable: symbolTable) }
+  //       return self.__evictMemberType(
+  //         baseTypeName: baseTypeName,
+  //         baseTypeDecl: baseTypeDecl,
+  //         baseTypeFileInfo: baseTypeFileInfo,
+  //         baseType: baseType,
+  //         memberName: memberName,
+  //         memberDecls: memberDecls,
+  //         evictedExtensions: &evictedExtensions,
+  //         symbolTable: symbolTable
+  //       )
+  //     }
+  //   )
+  // }
 
-  mutating func __unbindMemberType(
+  mutating func _evictMemberType(
     baseTypeName: GlobalTypeName,
     baseTypeDecl: Attached<DeclGroupSyntaxType>,
     baseTypeFileInfo: FileInfo,
@@ -1537,7 +1538,7 @@ extension TypeGraph {
         log(
           "Visiting member type `\(memberNominal.mainDecl._memberlessDescription)` > '\(nestedMemberName.name)'"
         )
-        _unbindMemberType(
+        _evictMemberType(
           baseTypeName: memberNominalTypeName,
           baseTypeDecl: Attached<DeclGroupSyntaxType>(memberNominal.mainDecl),
           baseTypeFileInfo: baseTypeFileInfo,
@@ -1557,7 +1558,7 @@ extension TypeGraph {
       // will just skip it.
       for moduleExtensions in memberNominal.boundExtensions.values {
         for (extensionDecl, _) in moduleExtensions {
-          let evictedExtension = _unbindExtension(
+          let evictedExtension = _evictExtension(
             extensionDecl,
             evictedExtensions: &evictedExtensions,
             symbolTable: symbolTable
@@ -1581,62 +1582,56 @@ extension TypeGraph {
     }
   }
 
-  mutating func _unbindExtension(
-    _ extensionDecl: Attached<ExtensionDeclSyntax>,
-    evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
-    symbolTable: borrowing SymbolTable
-  ) -> Attached<ExtensionDeclSyntax>? {
-    return withLogging(
-      request: "Unbinding `\(extensionDecl._memberlessDescription)`",
-      describe: \.debugDescription,
-      perform: { `self` in
-        self._assertInvariants(symbolTable: symbolTable)
-        defer { self._assertInvariants(symbolTable: symbolTable) }
-        return self.__unbindExtension(
-          extensionDecl,
-          evictedExtensions: &evictedExtensions,
-          symbolTable: symbolTable
-        )
-      }
-    )
-  }
+  // mutating func _evictExtension(
+  //   _ extensionDecl: Attached<ExtensionDeclSyntax>,
+  //   evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
+  //   symbolTable: borrowing SymbolTable
+  // ) -> Attached<ExtensionDeclSyntax>? {
+  //   return withLogging(
+  //     request: "Unbinding `\(extensionDecl._memberlessDescription)`",
+  //     describe: \.debugDescription,
+  //     perform: { `self` in
+  //       self._assertInvariants(symbolTable: symbolTable)
+  //       defer { self._assertInvariants(symbolTable: symbolTable) }
+  //       return self.__evictExtension(
+  //         extensionDecl,
+  //         evictedExtensions: &evictedExtensions,
+  //         symbolTable: symbolTable
+  //       )
+  //     }
+  //   )
+  // }
 
-  mutating func __unbindExtension(
+  mutating func _evictExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
     symbolTable: borrowing SymbolTable
   ) -> Attached<ExtensionDeclSyntax>? {
     guard let extensionState = extensionsToState[extensionDecl] else {
+      // TODO: Convert to internalAssert
       assert(
         evictedExtensions.contains(extensionDecl),
         "Asked to unbind unregistered, non-evicted extension `\(extensionDecl._memberlessDescription)`."
       )
+      // TODO: When wud this actually happen tho?
       log("Skipping already evicted extension `\(extensionDecl._memberlessDescription)`")
       return nil
     }
-    guard let extensionFileInfo = symbolTable.getFileInfo(extensionDecl.fileRoot) else {
-      fatalError(
-        "[SwiftLexicalLookup] Internal error: Unexpectedly found admitted extension `\(extensionDecl._memberlessDescription)` whose source file is unregistered in the symbol table."
-      )
-    }
+    // TODO: Find error
+    let extensionFileInfo = symbolTable.getFileInfo(extensionDecl.fileRoot) ?? Self.internalError(.danglingExtension)
     // If bound, remove members
     if case .success(let extendedTypeName) = extensionState.resolvedType {
       // Get the extended-type name
-      guard let extendedType = namesToTypes[extendedTypeName] else {
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Extension `\(extensionDecl._memberlessDescription)` resolved to unregistered type '\(extendedTypeName)'"
-        )
-      }
+      let extendedType = namesToTypes[extendedTypeName, default: Self.internalError(.danglingExtension)]
       // Find the members
-      guard let extensionMembers = extendedType.boundExtensions[extensionFileInfo.module, default: [:]][extensionDecl]
-      else {
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Extension `\(extensionDecl._memberlessDescription)` resolved to but isn't bound to type '\(extendedTypeName)'"
-        )
-      }
+      // TODO: Find right error
+      let extensionMembers = extendedType.boundExtensions[extensionFileInfo.module, default: [:]][
+        extensionDecl,
+        default: Self.internalError(.danglingExtension)
+      ]
 
       for (memberName, memberDecls) in extensionMembers.typeMembersToDecls {
-        _unbindMemberType(
+        _evictMemberType(
           baseTypeName: extendedTypeName,
           baseTypeDecl: Attached<DeclGroupSyntaxType>(extensionDecl),
           baseTypeFileInfo: extensionFileInfo,
@@ -1735,7 +1730,7 @@ extension TypeGraph {
       // }
 
       log("Found conflict \(dependent.debugDescription)")
-      let evictedExtension = _unbindExtension(
+      let evictedExtension = _evictExtension(
         dependent.dependentExtension,
         evictedExtensions: &evictedExtensions,
         symbolTable: symbolTable
@@ -1796,8 +1791,6 @@ extension TypeGraph {
     evictedExtensions: [Attached<ExtensionDeclSyntax>]
   )
 
-  // TODO: Consider if any early error returns break invariants (lead to an
-  // invalid graph state)
   mutating func admitExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionFileInfo: FileInfo,
