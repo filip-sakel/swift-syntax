@@ -1438,37 +1438,6 @@ extension TypeGraph {
     case remainingRegistredMemberType(memberTypeName: GlobalTypeName)
   }
 
-  // TODO: Remove
-  // mutating func _evictMemberType(
-  //   baseTypeName: GlobalTypeName,
-  //   baseTypeDecl: Attached<DeclGroupSyntaxType>,
-  //   baseTypeFileInfo: FileInfo,
-  //   baseType: NominalType,
-  //   memberName: Identifier,
-  //   memberDecls: [Attached<TypeDeclSyntax>],
-  //   evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
-  //   symbolTable: SymbolTable
-  // ) {
-  //   return withLogging(
-  //     request: "Unbinding member type '\(baseTypeName.debugDescription)' > '\(memberName.name)'",
-  //     describe: { "" },
-  //     perform: { `self` in
-  //       self._assertInvariants(symbolTable: symbolTable)
-  //       defer { self._assertInvariants(symbolTable: symbolTable) }
-  //       return self.__evictMemberType(
-  //         baseTypeName: baseTypeName,
-  //         baseTypeDecl: baseTypeDecl,
-  //         baseTypeFileInfo: baseTypeFileInfo,
-  //         baseType: baseType,
-  //         memberName: memberName,
-  //         memberDecls: memberDecls,
-  //         evictedExtensions: &evictedExtensions,
-  //         symbolTable: symbolTable
-  //       )
-  //     }
-  //   )
-  // }
-
   mutating func _evictMemberType(
     baseTypeName: GlobalTypeName,
     baseTypeDecl: Attached<DeclGroupSyntaxType>,
@@ -1616,10 +1585,7 @@ extension TypeGraph {
 
     // Now that the members are gone, remove
     //
-    // We satisfy the preconditions as:
-    //
-    // This function messed up: we checked the extension is bound and resolved;
-    // we should have removed all remaining dependents and registered types
+    // We satisfy the preconditions as we removed all dependents & type members.
     _removeExtension(extensionDecl, extensionFileInfo: extensionFileInfo, symbolTable: symbolTable)
 
     return extensionDecl
