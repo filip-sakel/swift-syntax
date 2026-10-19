@@ -606,7 +606,7 @@ extension TypeGraph {
   ) {
     #if DEBUG
     if !condition() {
-      Self.internalError(error, resultType: Never.self)
+      Self.internalError(error, resultType: Never.self, file: file, line: line)
     }
     #endif
   }
@@ -1470,7 +1470,8 @@ extension TypeGraph {
       return
     }
 
-    // Remove nested members and extensions
+    // Ensure the extension contains the main declaration
+    // TODO: Why do we need this tho?
     //
     // We check that there are no redeclarations (cause then no extensions
     // could bind to the nominal type anyway), and that the member decls
@@ -1491,60 +1492,60 @@ extension TypeGraph {
     // '_(File.swift)::A' > 'B', and we find a type '_(File.swift)::A._(File.swift)::B',
     // but we don't have any nominal-type declaration to unbind.
     // TODO: Consider updating now that `NominalType/mainDecl` implies no redecls
+    guard memberDecls.contains(Attached<TypeDeclSyntax>(memberNominal.mainDecl)) else { return }
+
+    // Assert we don't have any nominal-type *re*declarations (checked in `admitType`)
     let memberNominalDecls: [Attached<NominalTypeDeclSyntax>] = memberDecls.compactMap({
       $0.as(NominalTypeDeclSyntax.self)
     })
-    if memberNominalDecls.contains(memberNominal.mainDecl) {
-      // Assert we don't have any nominal-type *re*declarations (checked in `admitType`)
-      precondition(
-        memberNominalDecls == [memberNominal.mainDecl],
-        "[SwiftLexicalLookup] Internal error: Expected nominal type '\(memberNominalTypeName.debugDescription)' to have the main decl `\(memberNominal.mainDecl._memberlessDescription)`, but instead got: \(memberNominalDecls.map(\._memberlessDescription).joined(separator: ", "))"
-      )
+    precondition(
+      memberNominalDecls == [memberNominal.mainDecl],
+      "[SwiftLexicalLookup] Internal error: Expected nominal type '\(memberNominalTypeName.debugDescription)' to have the main decl `\(memberNominal.mainDecl._memberlessDescription)`, but instead got: \(memberNominalDecls.map(\._memberlessDescription).joined(separator: ", "))"
+    )
 
-      // Remove all nested member types
-      for (nestedMemberName, nestedMemberDecls) in memberNominal.mainDeclMembers.typeMembersToDecls {
-        _evictMemberType(
-          baseTypeName: memberNominalTypeName,
-          baseTypeDecl: Attached<DeclGroupSyntaxType>(memberNominal.mainDecl),
-          baseTypeFileInfo: baseTypeFileInfo,
-          baseType: memberNominal,
-          memberName: nestedMemberName,
-          memberDecls: nestedMemberDecls,
-          evictedExtensions: &evictedExtensions,
-          symbolTable: symbolTable
-        )
-      }
-
-      // Remove bound extensions
-      // TODO: Why didn't this fail a test before?? Write a proper test
-      // Note: `memberNominal` is stale here but since extension eviction doesn't
-      // bind dependencies, this will always be a superset of the currently bound
-      // extensions. Further, if an extension was already evicted, `_unbindExtension`
-      // will just skip it.
-      for moduleExtensions in memberNominal.boundExtensions.values {
-        for (extensionDecl, _) in moduleExtensions {
-          let evictedExtension = _evictExtension(
-            extensionDecl,
-            evictedExtensions: &evictedExtensions,
-            symbolTable: symbolTable
-          )
-          guard let evictedExtension else { continue }
-          evictedExtensions.append(evictedExtension)
-        }
-      }
-    }
-
-    // === Unregister Nominals ===
-    for memberNominalDecl in memberNominalDecls {
-      // We handle preconditions by ensuring all dependents, extensions
-      // and member types were evicted.
-      _removeType(
-        // Same file info since this is a nested type
-        nominalDeclFileInfo: baseTypeFileInfo,
-        typeName: memberNominalTypeName,
+    // Remove all nested member types
+    for (nestedMemberName, nestedMemberDecls) in memberNominal.mainDeclMembers.typeMembersToDecls {
+      _evictMemberType(
+        baseTypeName: memberNominalTypeName,
+        baseTypeDecl: Attached<DeclGroupSyntaxType>(memberNominal.mainDecl),
+        baseTypeFileInfo: baseTypeFileInfo,
+        baseType: memberNominal,
+        memberName: nestedMemberName,
+        memberDecls: nestedMemberDecls,
+        evictedExtensions: &evictedExtensions,
         symbolTable: symbolTable
       )
     }
+
+    // Remove bound extensions
+    //
+    // TODO: Why didn't this fail a test before?? Write a proper test
+    // Note: `memberNominal` is stale here but since extension eviction doesn't
+    // bind dependencies, this will always be a superset of the currently bound
+    // extensions. Further, if an extension was already evicted, `_unbindExtension`
+    // will just skip it.
+    for moduleExtensions in memberNominal.boundExtensions.values {
+      for (extensionDecl, _) in moduleExtensions {
+        let evictedExtension = _evictExtension(
+          extensionDecl,
+          evictedExtensions: &evictedExtensions,
+          symbolTable: symbolTable
+        )
+        guard let evictedExtension else { continue }
+        evictedExtensions.append(evictedExtension)
+      }
+    }
+
+    // Unregister Nominal
+    //
+    // We handle preconditions by ensuring all dependents, extensions
+    // and member types were evicted.
+    _removeType(
+      // Same file info since this is a nested type
+      nominalDeclFileInfo: baseTypeFileInfo,
+      typeName: memberNominalTypeName,
+      symbolTable: symbolTable
+    )
   }
 
   mutating func _evictExtension(
@@ -1712,6 +1713,9 @@ extension TypeGraph {
     if let existingExtensionState = extensionsToState[extensionDecl] {
       return .failure(.cannotReadmit(existingState: existingExtensionState))
     }
+    log(
+      "Admitting `\(extensionDecl)` as '\((try? rawResult.get().qualifiedName.debugDescription) ?? "<error>")'"
+    )
 
     // Prepare to store extension state
     let extensionMembers = TypeTable(

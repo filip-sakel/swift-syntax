@@ -202,6 +202,47 @@ final class TypeResolutionTests: XCTestCase {
     ])
   }
 
+  /// Evicting an extension whose member redeclares a registered type from
+  /// another decl group (in the same file) shouldn't remove that type.
+  ///
+  /// Here, we're redeclaring `_(MyFile.swift)::A > B` because we bind
+  /// extensions in reverse order.
+  ///
+  /// Namely, we admit extensions as follows:
+  /// 1. First, `extension A { struct B { struct C {} } }}`
+  ///    admits '_(MyFile.swift)::A > B' and its member `C`
+  /// 2. Then, `extension A.B.C` binds without admitting new types
+  /// 3. We admit `extension A.T` as an erroneous/unbound extension
+  /// 4. `extension A { typealias T = A }` admits `_(MyFile.swift)::A > T`,
+  ///    thus evicting `extension A.T`
+  /// 5. Next, we re-admit `extension A.T`, which admits a redeclation for
+  ///    `_(MyFile.swift)::A > B`, thus evicting `extension A.B.C`
+  /// 6. We admit `extension A.B.C` as an erroneous extension
+  /// 7. `extension A { struct A {} }` admits `_(MyFile.swift)::A > A`,
+  ///    evicting `extension A.T` and `extension A.B.C`
+  /// 8. We finally re-admit and bind `extension A.T` to
+  ///    `_(MyFile.swift)::A._(MyFile.swift)::A`.
+  /// 9. We re-admit and bind `extension A.B.C` to
+  ///    `_(MyFile.swift)::A._(MyFile.swift)::B._(MyFile.swift)::C`.
+  /// 10. We profit!
+  func testEvictingRedeclarationAcrossExtensions() {
+    assertTypeResolution([
+      "MyFile.swift": """
+      struct A {}
+      extension A { struct A {} }
+      extension A { typealias T = A }
+      extension A.T { struct B {} }
+      extension A.B.C {}
+      extension A {
+        \(name: "_(MyFile.swift)::A._(MyFile.swift)::B")
+        struct B { struct C {} }
+      }
+
+      let _: \(nominal: "_(MyFile.swift)::A._(MyFile.swift)::B")A.B
+      """
+    ])
+  }
+
   // MARK: If Config
   func testIfConfig() {
     let baseSourceInterpolation: LexicalLookupSource<TypeResolutionMatcher>.Interpolation = """
