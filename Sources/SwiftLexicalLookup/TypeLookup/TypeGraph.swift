@@ -1533,11 +1533,7 @@ extension TypeGraph {
       )
 
       // Remove all nested member types
-      log("Found main decl `\(memberNominal.mainDecl._memberlessDescription)`; removing member types.")
       for (nestedMemberName, nestedMemberDecls) in memberNominal.mainDeclMembers.typeMembersToDecls {
-        log(
-          "Visiting member type `\(memberNominal.mainDecl._memberlessDescription)` > '\(nestedMemberName.name)'"
-        )
         _evictMemberType(
           baseTypeName: memberNominalTypeName,
           baseTypeDecl: Attached<DeclGroupSyntaxType>(memberNominal.mainDecl),
@@ -1582,47 +1578,21 @@ extension TypeGraph {
     }
   }
 
-  // mutating func _evictExtension(
-  //   _ extensionDecl: Attached<ExtensionDeclSyntax>,
-  //   evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
-  //   symbolTable: borrowing SymbolTable
-  // ) -> Attached<ExtensionDeclSyntax>? {
-  //   return withLogging(
-  //     request: "Unbinding `\(extensionDecl._memberlessDescription)`",
-  //     describe: \.debugDescription,
-  //     perform: { `self` in
-  //       self._assertInvariants(symbolTable: symbolTable)
-  //       defer { self._assertInvariants(symbolTable: symbolTable) }
-  //       return self.__evictExtension(
-  //         extensionDecl,
-  //         evictedExtensions: &evictedExtensions,
-  //         symbolTable: symbolTable
-  //       )
-  //     }
-  //   )
-  // }
-
   mutating func _evictExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
     symbolTable: borrowing SymbolTable
   ) -> Attached<ExtensionDeclSyntax>? {
-    guard let extensionState = extensionsToState[extensionDecl] else {
-      // TODO: Convert to internalAssert
-      assert(
-        evictedExtensions.contains(extensionDecl),
-        "Asked to unbind unregistered, non-evicted extension `\(extensionDecl._memberlessDescription)`."
-      )
-      // TODO: When wud this actually happen tho?
-      log("Skipping already evicted extension `\(extensionDecl._memberlessDescription)`")
-      return nil
-    }
-    // TODO: Find error
+    // TODO: Find right error
+    let extensionState = extensionsToState[extensionDecl, default: Self.internalError(.danglingExtension)]
+    // TODO: Find right error
     let extensionFileInfo = symbolTable.getFileInfo(extensionDecl.fileRoot) ?? Self.internalError(.danglingExtension)
+
     // If bound, remove members
     if case .success(let extendedTypeName) = extensionState.resolvedType {
       // Get the extended-type name
       let extendedType = namesToTypes[extendedTypeName, default: Self.internalError(.danglingExtension)]
+
       // Find the members
       // TODO: Find right error
       let extensionMembers = extendedType.boundExtensions[extensionFileInfo.module, default: [:]][
@@ -1650,11 +1620,7 @@ extension TypeGraph {
     //
     // This function messed up: we checked the extension is bound and resolved;
     // we should have removed all remaining dependents and registered types
-    _removeExtension(
-      extensionDecl,
-      extensionFileInfo: extensionFileInfo,
-      symbolTable: symbolTable
-    )
+    _removeExtension(extensionDecl, extensionFileInfo: extensionFileInfo, symbolTable: symbolTable)
 
     return extensionDecl
   }
@@ -1663,35 +1629,10 @@ extension TypeGraph {
     modifiedTypeName: GlobalTypeName,
     modifiedMembers: TypeTable,
     modifiedExtensionModule: ModuleName,
-    evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
-    symbolTable: borrowing SymbolTable
-  ) {  //-> [TypeDependent] {
-    return withLogging(
-      request:
-        "Evicting dependents of '\(modifiedTypeName.debugDescription)' > \(modifiedMembers.typeMembersToDecls.map(\.key.name))",
-      describe: { "\($0)" },
-      perform: { `self` in
-        self._assertInvariants(symbolTable: symbolTable)
-        defer { self._assertInvariants(symbolTable: symbolTable) }
-        return self.__evictDependents(
-          modifiedTypeName: modifiedTypeName,
-          modifiedMembers: modifiedMembers,
-          modifiedExtensionModule: modifiedExtensionModule,
-          evictedExtensions: &evictedExtensions,
-          symbolTable: symbolTable
-        )
-      }
-    )
-  }
-
-  fileprivate mutating func __evictDependents(
-    modifiedTypeName: GlobalTypeName,
-    modifiedMembers: TypeTable,
-    modifiedExtensionModule: ModuleName,
     // directDependents: [TypeDependent],
     evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
     symbolTable: borrowing SymbolTable
-  ) {  //-> [TypeDependent] {
+  ) {
     // TODO: Clean up if we go for immutable `get`
     func popLastConflictingDependent() -> TypeDependent? {
       // The base type must exist
