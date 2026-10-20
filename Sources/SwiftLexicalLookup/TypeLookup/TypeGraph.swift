@@ -2431,19 +2431,6 @@ extension SymbolTable {
 // MARK: Array Helpers
 
 extension Array {
-  /// Appends if the array has no duplicates using the given key
-  private mutating func _indexAfterInsertingUnique<Key: Equatable, Value>(
-    key: Key,
-    default defaultValue: Value
-  ) -> Int where Element == (key: Key, value: Value) {
-    if let existingIndex = firstIndex(where: { $0.key == key }) {
-      return existingIndex
-    } else {
-      let newIndex = count
-      append((key, defaultValue))
-      return newIndex
-    }
-  }
   /// Similar to dictionary's `subscript(_:default:)`.
   ///
   /// Only use for small array's and/or when it's important to maintain insertion order.
