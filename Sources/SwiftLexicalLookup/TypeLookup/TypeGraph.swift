@@ -81,7 +81,7 @@ import SwiftDiagnostics
 ///    - O(Σ D_T) over each dependency's type: duplicate check plus
 ///      copy-on-write of `dependents`.
 /// 5. Eviction (`_evictDependents` on `T` with `k` conflicting dependents):
-///    O(k · D_T) locally plus one `_unbindExtension` per evicted extension
+///    O(k · D_T) locally plus one `_evictExtension` per evicted extension
 ///    Each pop rescans `dependents`. An unbind costs O(m · h + Σ D_T + E_T):
 ///    it unbinds each member (recursing into nested types) and removes
 ///    itself from the dependents of each dependency. The cascade is
@@ -195,65 +195,6 @@ extension TypeGraph {
       self.boundExtensions = [:]
       self.dependents = []
     }
-
-    /// Returns a new version of the extended type, adding the given extension.
-    /// Returns `nil`  if extension is already bound.
-    fileprivate consuming func _bindingExtension(
-      _ extensionDecl: Attached<ExtensionDeclSyntax>,
-      extensionMembers: TypeTable,
-      extensionModule: ModuleName
-    ) -> NominalType? {
-      var copy = self
-      let oldValue = copy.boundExtensions[extensionModule, default: [:]].updateValue(
-        extensionMembers,
-        forKey: extensionDecl
-      )
-      guard oldValue == nil else { return nil }
-      copy.version &+= 1
-      return copy
-    }
-
-    fileprivate consuming func _unbindingExtension(
-      _ boundExtension: Attached<ExtensionDeclSyntax>,
-      module: ModuleName
-    ) -> (newNominal: NominalType, extensionTypeTable: TypeTable)? {
-      var copy = self
-      let extensionTypeTable = copy.boundExtensions[module, default: [:]].removeValue(forKey: boundExtension)
-      guard let extensionTypeTable else { return nil }
-      copy.version &+= 1
-      return (newNominal: copy, extensionTypeTable)
-    }
-    fileprivate consuming func _updatingDependents(
-      _ newDependents: [TypeDependent]
-    ) -> NominalType {
-      var copy = self
-      copy.dependents = newDependents
-      return copy
-    }
-
-    enum NominalUnbindingFailure: Error {
-      case nominalTypeNotAMainDecl
-      case remainingBoundExtensions
-      case remainingDependents
-    }
-
-    /// Adds the given dependent extension, or returns `nil` in DEBUG if
-    /// there's already such a dependent extension.
-    consuming func addingDependentExtension(
-      _ dependent: TypeDependent
-        // extensionDecl: SourceFileRoot<ExtensionDeclSyntax>,
-        // onMemberType memberType: Identifier
-    ) -> NominalType? {
-      var copy = self
-      // TODO: Refine (maybe convert `dependents` to a set? but it could be overkill/slower)
-      #if DEBUG
-      guard !copy.dependents.contains(dependent) else {
-        return nil
-      }
-      #endif
-      copy.dependents.append(dependent)
-      return copy
-    }
   }
 }
 
@@ -346,19 +287,25 @@ extension TypeGraph {
   @_spi(_QualifiedLookupTests)
   public struct ExtensionDependency: Sendable {
     /// The base type on whose members we depend.
-    let baseTypeName: TypeGraph.GlobalTypeName
+    fileprivate let baseTypeName: TypeGraph.GlobalTypeName
 
     /// The type members of base type on which we depend, in lookup order.
     ///
     /// This is an ordered list rather than a `[Identifier: ...]` dictionary,
     /// because want a deterministic order when evicting extensions to
     /// uphold `SymbolTable`'s determinism requirement.
-    fileprivate(set) var members: [(name: Identifier, decls: [Member])]
+    ///
+    /// Invariant: `members` is nonempty
+    fileprivate let members: [(name: Identifier, decls: [Member])]
 
-    @_spi(_QualifiedLookupTests) public init(
+    /// Precondition: `members` must be nonempty
+    @_spi(_QualifiedLookupTests)
+    public init(
       dependencyTypeName: TypeGraph.GlobalTypeName,
       members: [(name: Identifier, decls: [Member])]
     ) {
+      TypeGraph.internalAssert(!members.isEmpty, .emptyDependencyMembers)
+
       self.baseTypeName = dependencyTypeName
       self.members = members
     }
@@ -381,10 +328,13 @@ extension TypeGraph.ExtensionDependency {
     ///
     /// Note: We care about extensions and not nominal-type declarations,
     /// because cycles can only form between extensions.
-    @_spi(_QualifiedLookupTests) public let introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl
-    @_spi(_QualifiedLookupTests) public let typeDecl: Attached<TypeDeclSyntax>
+    @_spi(_QualifiedLookupTests)
+    public let introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl
+    @_spi(_QualifiedLookupTests)
+    public let typeDecl: Attached<TypeDeclSyntax>
 
-    @_spi(_QualifiedLookupTests) public init(
+    @_spi(_QualifiedLookupTests)
+    public init(
       introducingExtensionOrMainDecl: IntroducingExtensionOrMainDecl,
       typeDecl: Attached<TypeDeclSyntax>
     ) {
@@ -418,6 +368,7 @@ extension TypeGraph {
 }
 
 extension TypeGraph.ExtensionState {
+  // TODO: Explain why necessary to have a complex init
   fileprivate init(
     dependencies: [TypeGraph.QualifiedLookupDependency],
     resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
@@ -443,6 +394,7 @@ extension TypeGraph.ExtensionState {
     // Map to `ExtensionDependency`
     // Satisfies invariant of one dependency per type
     let orderedGroupedDependencies: [TypeGraph.ExtensionDependency] = groupedDependencies.map({ (typeName, members) in
+      // Note: `members` is nonempty by construction, satisfying the `ExtensionDependency.init` precondition.
       TypeGraph.ExtensionDependency(
         dependencyTypeName: typeName,
         members: members.map({ (name, typeDecls) in
@@ -591,11 +543,18 @@ extension TypeGraph {
     /// In `_removeExtension`, the given extension still has admitted nominal member types.
     case remainingExtensionMembers
 
+    /// In `_evictDependents`, `dependencyTypeName` isn't admitted.
+    case evictedDependencyType
+
     /// In `_CycleDetectorFrame/push`, the frame pushes an extension
     /// right after a descent without advancing the index.
     ///
     /// Explanation: Without advancing, we'll infinitely descend into the same decl.
     case cycleDetectorRedescent
+
+    // In `ExtensionDependency.init(dependencyTypeName:members:)`, the given
+    // `members` is empty.
+    case emptyDependencyMembers
   }
 
   private static func internalAssert(
@@ -1192,6 +1151,11 @@ extension TypeGraph {
     typealias Index = (dependency: Int, member: Int, decl: Int)
 
     let firstExtensionState: ExtensionState
+    /// The path to currently visited extension dependency. Note: `idx`
+    /// is initialized to `(0,0,0)`.
+    ///
+    /// Invariant: For all extensions, `extensionsToState[ext]?.dependents`
+    /// exists and is nonempty.
     var stack: [(ext: Attached<ExtensionDeclSyntax>, idx: Index)]
     private var descended: Bool = false
   }
@@ -1231,9 +1195,12 @@ extension TypeGraph._CycleDetectorFrame {
       stack.count == 1
       ? firstExtensionState
       : graph.extensionsToState[extensionDecl, default: TypeGraph.internalError(.staleDependency)]
+    // Note: The initial access at index `(0,0,0)` is safe because `members` is
+    // nonempty according to `ExtensionDependency` and `dependencies`
+    // is nonempty by the `stack` invariant. However, `decls` can be empty
+    // (we may depend on the type declarations being empty)
     let dependency = state.dependencies[index.dependency]
     let member = dependency.members[index.member]
-    // We may depend on the type declarations being empty.
     let decl = member.decls.isEmpty ? nil : member.decls[index.decl]
 
     let newIndex: Index?
@@ -1350,7 +1317,8 @@ extension TypeGraph {
         // Stop if we already have a cycle
         visitedExtensions.insert(dependencyExtension).inserted,
         // Skip if it has no dependencies
-        !extensionsToState[dependencyExtension, default: Self.internalError(.staleDependency)].dependencies.isEmpty
+        !extensionsToState[dependencyExtension, default: Self.internalError(.staleDependency)]
+          .dependencies.isEmpty
       else {
         // No transitive dependencies; just advance
         frame.advance(newIndex: newIndex)
@@ -1430,8 +1398,8 @@ extension TypeGraph {
   ) {
     // Evict dependent extensions
     _evictDependents(
-      modifiedTypeName: baseTypeName,
-      modifiedMembers: TypeTable(typeMembersToDecls: [memberName: memberDecls]),
+      dependencyTypeName: baseTypeName,
+      dependencyMembers: TypeTable(typeMembersToDecls: [memberName: memberDecls]),
       evictedExtensions: &evictedExtensions,
       symbolTable: symbolTable
     )
@@ -1499,7 +1467,7 @@ extension TypeGraph {
     // TODO: Why didn't this fail a test before?? Write a proper test
     // Note: `memberNominal` is stale here but since extension eviction doesn't
     // bind dependencies, this will always be a superset of the currently bound
-    // extensions. Further, if an extension was already evicted, `_unbindExtension`
+    // extensions. Further, if an extension was already evicted, `_evictExtension`
     // will just skip it.
     for moduleExtensions in memberNominal.boundExtensions.values {
       for (extensionDecl, _) in moduleExtensions {
@@ -1508,7 +1476,6 @@ extension TypeGraph {
           evictedExtensions: &evictedExtensions,
           symbolTable: symbolTable
         )
-        evictedExtensions.append(extensionDecl)
       }
     }
 
@@ -1564,43 +1531,53 @@ extension TypeGraph {
     //
     // We satisfy the preconditions as we removed all dependents & type members.
     _removeExtension(extensionDecl, extensionFileInfo: extensionFileInfo, symbolTable: symbolTable)
+
+    // Record eviction
+    evictedExtensions.append(extensionDecl)
   }
 
+  /// Evicts the extensions dependent on the given `dependencyMembers` of
+  /// `dependencyTypeName`.
+  ///
+  /// Complexity: The worst case is when `nextConflictingDependent` has to go to the end of
+  /// the `dependents` array to find a conflict, resulting in O(D_T^2)` complexity where
+  /// `D_T` is the number of the type's dependents. However, `D_T` is generally small.
+  ///
+  /// ### Example
+  ///
+  /// For instance, imagine our graph currently admits:
+  /// ```
+  /// struct A { struct B {}; struct C {} }
+  /// extension A.B {}
+  /// extension A.C {}
+  /// ```
+  /// Suppose we want to admit `extension A { struct C {} }`. Then, our type
+  /// `_(MyFile.swift)::A` should evict only extensions that are dependent
+  /// on the introduced member `C`. Thus, we leave `extension A.B` admitted
+  /// and only evict `extension A.C`
   fileprivate mutating func _evictDependents(
-    modifiedTypeName: GlobalTypeName,
-    modifiedMembers: TypeTable,
+    dependencyTypeName: GlobalTypeName,
+    dependencyMembers: TypeTable,
     evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
     symbolTable: borrowing SymbolTable
   ) {
-    /// Get the last dependent that has a conflict
-    func nextConflictingDependent() -> TypeDependent? {
-      // We access `namesToTypes[...].dependents` again, since recursive calls
-      // could have changed the dependents.
-      // TODO: Create error for `"[SwiftLexicalLookup] Internal error: Unexpectedly asked to evict unregistered type '\(modifiedTypeName.debugDescription)'."`
-      namesToTypes[modifiedTypeName, default: Self.internalError(.danglingExtension)]
-        .dependents
-        // TODO: Mention complexity
-        .last(where: { dependent in
-          modifiedMembers.typeMembersToDecls[dependent.memberType] != nil
-        })
-    }
-
-    while let dependent = nextConflictingDependent() {
+    // Each iteration, evict the next conflicting extension dependent on
+    // `dependencyMembers` until there are no conflicting dependents.
+    //
+    // Note: We use a `while` loop because `_evictExtension` is recursive and can,
+    // thus, change `namesToTypes[...].dependents` between iterations.
+    while let dependent = namesToTypes[dependencyTypeName, default: Self.internalError(.evictedDependencyType)]
+      .dependents
+      .last(where: { dependent in
+        dependencyMembers.typeMembersToDecls[dependent.memberType] != nil
+      })
+    {
       log("Found conflict \(dependent.debugDescription)")
       _evictExtension(
         dependent.dependentExtension,
         evictedExtensions: &evictedExtensions,
         symbolTable: symbolTable
       )
-
-      // Update dependents
-      // namesToTypes[modifiedTypeName]!.dependents.removeAll(where: { thisDependent in
-      //   thisDependent.memberType == dependent.memberType
-      //     && thisDependent.dependentExtension == dependent.dependentExtension
-      // })
-
-      // Record eviction
-      evictedExtensions.append(dependent.dependentExtension)
     }
   }
 }
@@ -1714,8 +1691,8 @@ extension TypeGraph {
       var evictedExtensionsTmp: [Attached<ExtensionDeclSyntax>] = []
       _assertInvariants(symbolTable: symbolTable)
       _evictDependents(
-        modifiedTypeName: extendedTypeName,
-        modifiedMembers: extensionMembers,
+        dependencyTypeName: extendedTypeName,
+        dependencyMembers: extensionMembers,
         evictedExtensions: &evictedExtensionsTmp,
         symbolTable: symbolTable
       )
