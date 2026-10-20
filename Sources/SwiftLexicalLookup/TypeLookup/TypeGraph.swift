@@ -347,28 +347,38 @@ extension TypeGraph.ExtensionDependency {
 // MARK: TypeGraph.QualifiedLookupDependency
 
 extension TypeGraph {
-  // TODO: Can we merge with other dependency types?
+  /// A `DependencyTracker` dependency.
+  ///
+  /// Unlike `ExtensionDependency`, `QualifiedLookupDependency` is built for
+  /// tracking the dependency order to allow for more accurate diagnostics in
+  /// the future. On the other hand, `ExtensionState/dependencies` groups
+  /// dependencies by base type, and member decls by their name to optimize for lookup.
   @_spi(_QualifiedLookupTests)
   public struct QualifiedLookupDependency: Sendable {
-    let extendedTypeName: TypeGraph.GlobalTypeName
+    let baseTypeName: TypeGraph.GlobalTypeName
     let member: Identifier
-    let typeDecls: [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)]
+    let memberDecls: [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)]
 
     @_spi(_QualifiedLookupTests)
     public init(
-      extendedTypeName: TypeGraph.GlobalTypeName,
+      baseTypeName: TypeGraph.GlobalTypeName,
       member: Identifier,
-      typeDecls: [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)]
+      memberDecls: [(Attached<DeclGroupSyntaxType>, Attached<TypeDeclSyntax>)]
     ) {
-      self.extendedTypeName = extendedTypeName
+      self.baseTypeName = baseTypeName
       self.member = member
-      self.typeDecls = typeDecls
+      self.memberDecls = memberDecls
     }
   }
 }
 
 extension TypeGraph.ExtensionState {
-  // TODO: Explain why necessary to have a complex init
+  /// Initializes state after converting `DependencyTracker/dependencies` to
+  /// `ExtensionState/dependencies`.
+  ///
+  /// The dependency tracker dependencies only guarantee there are no duplicates.
+  /// Hence, this initializer groups dependencies by type name and member name
+  /// to satisfy the `ExtensionState/dependencies` invariants.
   fileprivate init(
     dependencies: [TypeGraph.QualifiedLookupDependency],
     resolvedType: Result<TypeGraph.GlobalTypeName, TypeResolver.Failure>
@@ -385,14 +395,11 @@ extension TypeGraph.ExtensionState {
     for dependency in dependencies {
       // Note: We can assign directly because ``DependencyTracker/dependencies`` guarantees
       // that type/member-name pairs have just a single entry.
-      groupedDependencies[_key: dependency.extendedTypeName, default: []][_key: dependency.member, default: []]
-        .append(
-          contentsOf: dependency.typeDecls
-        )
+      groupedDependencies[_key: dependency.baseTypeName, default: []][_key: dependency.member, default: []]
+        .append(contentsOf: dependency.memberDecls)
     }
 
     // Map to `ExtensionDependency`
-    // Satisfies invariant of one dependency per type
     let orderedGroupedDependencies: [TypeGraph.ExtensionDependency] = groupedDependencies.map({ (typeName, members) in
       // Note: `members` is nonempty by construction, satisfying the `ExtensionDependency.init` precondition.
       TypeGraph.ExtensionDependency(
@@ -411,6 +418,7 @@ extension TypeGraph.ExtensionState {
       )
     })
 
+    // Note: Grouping satisfies "one dependency per type" invariant
     self.init(
       _uncheckedDependencies: orderedGroupedDependencies,
       resolvedType: resolvedType
@@ -446,7 +454,7 @@ extension TypeGraph {
       // we shouldn't have that many dependencies and small arrays are fast
       // at linear search.
       if let existingResult = dependencies.first(where: {
-        $0.extendedTypeName == baseTypeName && $0.member == memberTypeName
+        $0.baseTypeName == baseTypeName && $0.member == memberTypeName
       }) {
         return existingResult
       }
@@ -1826,7 +1834,7 @@ extension TypeGraph {
           }) ?? []
         typeDecls.append(contentsOf: introducedDecls)
       }
-      return QualifiedLookupDependency(extendedTypeName: baseTypeName, member: memberTypeName, typeDecls: typeDecls)
+      return QualifiedLookupDependency(baseTypeName: baseTypeName, member: memberTypeName, memberDecls: typeDecls)
     }
 
     // Add to the dependency tracker or get existing value
@@ -1837,7 +1845,7 @@ extension TypeGraph {
     )
 
     // Distill to type declarations (throw away declaration groups)
-    return .success(result.typeDecls)
+    return .success(result.memberDecls)
   }
 }
 
@@ -1914,19 +1922,19 @@ extension TypeGraph.NominalType {
 @_spi(_QualifiedLookupTests)
 extension TypeGraph.QualifiedLookupDependency: CustomDebugStringConvertible {
   @_spi(_QualifiedLookupTests) public var _succinctDescription: String {
-    let declGroupSources = typeDecls.map({ $0.0._memberlessDescription })
+    let declGroupSources = memberDecls.map({ $0.0._memberlessDescription })
     return """
-      '\(extendedTypeName.debugDescription)' > '\(member.name)' [from \(declGroupSources)]
+      '\(baseTypeName.debugDescription)' > '\(member.name)' [from \(declGroupSources)]
       """
   }
 
   public var debugDescription: String {
-    let typeDeclDescriptions = typeDecls.map({ (introducingExtensionOrMainDecl, typeDecl) in
+    let typeDeclDescriptions = memberDecls.map({ (introducingExtensionOrMainDecl, typeDecl) in
       "`\(introducingExtensionOrMainDecl._memberlessDescription)`: `\(typeDecl._memberlessDescription)`"
     }).joined(separator: ", ")
 
     return
-      "QualifiedLookupDependency(extendedTypeName: \(extendedTypeName.debugDescription), member: '\(member.name)', typeDecls: [\(typeDeclDescriptions)])"
+      "QualifiedLookupDependency(extendedTypeName: \(baseTypeName.debugDescription), member: '\(member.name)', typeDecls: [\(typeDeclDescriptions)])"
   }
 }
 
