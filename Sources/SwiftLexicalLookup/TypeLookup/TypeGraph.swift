@@ -1376,6 +1376,8 @@ extension TypeGraph {
     members: TypeTable,
     symbolTable: SymbolTable
   ) -> TypeGraph.GlobalTypeName? {
+    // TODO: Maybe assert `declGroup` is bound.
+
     for (memberName, memberDecls) in members.typeMembersToDecls {
       // Construct the type the member would have
       let potentialMemberTypeName = declGroupTypeName.addingComponent(
@@ -1391,6 +1393,14 @@ extension TypeGraph {
       guard let memberType = namesToTypes[potentialMemberTypeName] else { continue }
       let memberTypeName = potentialMemberTypeName
 
+      // TODO: When would this happen tho?? We derived `potentialMemberTypeName` from
+      // `memberName`, so clearly a member like that lives inside the decl group.
+      // The decl group should be bound, so the member is either:
+      // 1. lazily admitted (i.e., cud be admitted, but no one requested => `namesToTypes[...]==nil` => no work for us)
+      // 2. not aditted due to redecl (`memberType` doesn't exist => no work for us)
+      // 3. actually admitted (`memberType` exists => we have to remove)
+      // 4. admitted despite redeclarations? (shouldn't happen right? maybe in case of private decls or sm?)
+      //
       // If we get a type, we need to check if any of the member declarations are registered
       // in the type.
       //
@@ -1406,36 +1416,6 @@ extension TypeGraph {
     }
 
     return nil
-  }
-
-  enum ExtensionRemovalFailure: Error {
-    /// Extension has no registered state
-    case unregistered
-    // case notBound(failureOrUnregistered: TypeQualifier.Failure?)
-    case resolvedToUnregistered(typeName: TypeGraph.GlobalTypeName)
-    case resolvedButUnbound(typeName: TypeGraph.GlobalTypeName)
-    case dependencyToUnregistered(dependencyTpeName: TypeGraph.GlobalTypeName)
-    /// We have a dependency to a type that doesn't know we're dependent
-    case notInDependentsList(dependencyTypeName: TypeGraph.GlobalTypeName)
-    case remainingDependents(
-      typeName: TypeGraph.GlobalTypeName,
-      // TODO: Change to `Identifier`
-      extensionMembers: [String],
-      dependents: [TypeDependent]
-    )
-    case remainingRegistredMemberType(memberTypeName: TypeGraph.GlobalTypeName)
-  }
-
-  enum NominalRemovalFailure: Error {
-    case unregisteredName(TypeGraph.GlobalTypeName)
-    case nominalNotInRegisteredType(
-      typeName: TypeGraph.GlobalTypeName,
-      actualMainDecl: Attached<NominalTypeDeclSyntax>
-    )
-    /// The type still has extensions bound to it.
-    case remainingBoundExtensions
-    case remainingDependents(dependents: [TypeDependent])
-    case remainingRegistredMemberType(memberTypeName: GlobalTypeName)
   }
 
   mutating func _evictMemberType(
@@ -1457,6 +1437,9 @@ extension TypeGraph {
       symbolTable: symbolTable
     )
 
+    // TODO: Why is this after evicting dependent extensions??
+    // TODO: Could this construction/guard-let be merged with `_firstRegisteredMemberName`?
+    //
     // If there's no registered nominal type our name, we're done
     let memberTypeName = baseTypeName.addingComponent(
       GlobalTypeName.Component(
@@ -1489,16 +1472,13 @@ extension TypeGraph {
     // we're unbinding the second extension, we see members
     // '_(File.swift)::A' > 'B', and we find a type '_(File.swift)::A._(File.swift)::B',
     // but we don't have any nominal-type declaration to unbind.
-    // TODO: Consider updating now that `NominalType/mainDecl` implies no redecls
     guard memberDecls.contains(Attached<TypeDeclSyntax>(memberNominal.mainDecl)) else { return }
 
     // Assert we don't have any nominal-type *re*declarations (checked in `admitType`)
-    let memberNominalDecls: [Attached<NominalTypeDeclSyntax>] = memberDecls.compactMap({
-      $0.as(NominalTypeDeclSyntax.self)
-    })
+    // TODO: Substitute with `internalAssert`
     precondition(
-      memberNominalDecls == [memberNominal.mainDecl],
-      "[SwiftLexicalLookup] Internal error: Expected nominal type '\(memberTypeName.debugDescription)' to have the main decl `\(memberNominal.mainDecl._memberlessDescription)`, but instead got: \(memberNominalDecls.map(\._memberlessDescription).joined(separator: ", "))"
+      memberDecls.compactMap({ $0.as(NominalTypeDeclSyntax.self) }) == [memberNominal.mainDecl],
+      "[SwiftLexicalLookup] Internal error: Expected nominal type '\(memberTypeName.debugDescription)' to have the main decl `\(memberNominal.mainDecl._memberlessDescription)`"
     )
 
     // Remove all nested member types
@@ -1598,40 +1578,22 @@ extension TypeGraph {
     // TODO: Clean up if we go for immutable `get`
     func popLastConflictingDependent() -> TypeDependent? {
       // The base type must exist
-      guard let baseType = namesToTypes[modifiedTypeName] else {
-        fatalError(
-          "[SwiftLexicalLookup] Internal error: Unexpectedly asked to evict unregistered type '\(modifiedTypeName.debugDescription)'."
-        )
-      }
+      // TODO: Create error for `"[SwiftLexicalLookup] Internal error: Unexpectedly asked to evict unregistered type '\(modifiedTypeName.debugDescription)'."`
+      let newDependents = namesToTypes[modifiedTypeName, default: Self.internalError(.danglingExtension)].dependents
 
       // Get the the next conflicting dependent
-      guard
-        let nextIndex = baseType.dependents.lastIndex(where: { dependent in
-          modifiedMembers.typeMembersToDecls[dependent.memberType] != nil
-        })
-      else {
-        return nil
-      }
-      let newDependents = baseType.dependents
-      // let nextDependent = newDependents.remove(at: nextIndex)
-      let nextDependent = newDependents[nextIndex]
+      let nextIndex = newDependents.lastIndex(where: { dependent in
+        modifiedMembers.typeMembersToDecls[dependent.memberType] != nil
+      })
+      // Return `nil` if no conflicts remain
+      guard let nextIndex else { return nil }
 
-      namesToTypes[modifiedTypeName] = baseType._updatingDependents(newDependents)
+      let nextDependent = newDependents[nextIndex]
 
       return nextDependent
     }
 
-    // var newDependents = [TypeDependent]()
-
-    // TODO: We should track unbound extensions so different members don't evict different extensions
-    // TODO: Get rid of force unwrap
     while let dependent = popLastConflictingDependent() {
-      // // Only unbind conflicting (otherwise add to new dependents)
-      // guard modifiedMembers.typeMembersToDecls[dependent.memberType] != nil else {
-      //   newDependents.append(dependent)
-      //   continue
-      // }
-
       log("Found conflict \(dependent.debugDescription)")
       _evictExtension(
         dependent.dependentExtension,
@@ -1648,8 +1610,6 @@ extension TypeGraph {
       // Record eviction
       evictedExtensions.append(dependent.dependentExtension)
     }
-
-    // return newDependents
   }
 }
 
