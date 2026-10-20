@@ -1458,7 +1458,7 @@ extension TypeGraph {
     )
 
     // If there's no registered nominal type our name, we're done
-    let memberNominalTypeName = baseTypeName.addingComponent(
+    let memberTypeName = baseTypeName.addingComponent(
       GlobalTypeName.Component(
         name: memberName,
         file: baseTypeDecl.fileRoot,
@@ -1466,9 +1466,7 @@ extension TypeGraph {
         symbolTable: symbolTable
       )
     )
-    guard let memberNominal: NominalType = namesToTypes[memberNominalTypeName] else {
-      return
-    }
+    guard let memberNominal = namesToTypes[memberTypeName] else { return }
 
     // Ensure the extension contains the main declaration
     // TODO: Why do we need this tho?
@@ -1500,13 +1498,13 @@ extension TypeGraph {
     })
     precondition(
       memberNominalDecls == [memberNominal.mainDecl],
-      "[SwiftLexicalLookup] Internal error: Expected nominal type '\(memberNominalTypeName.debugDescription)' to have the main decl `\(memberNominal.mainDecl._memberlessDescription)`, but instead got: \(memberNominalDecls.map(\._memberlessDescription).joined(separator: ", "))"
+      "[SwiftLexicalLookup] Internal error: Expected nominal type '\(memberTypeName.debugDescription)' to have the main decl `\(memberNominal.mainDecl._memberlessDescription)`, but instead got: \(memberNominalDecls.map(\._memberlessDescription).joined(separator: ", "))"
     )
 
     // Remove all nested member types
     for (nestedMemberName, nestedMemberDecls) in memberNominal.mainDeclMembers.typeMembersToDecls {
       _evictMemberType(
-        baseTypeName: memberNominalTypeName,
+        baseTypeName: memberTypeName,
         baseTypeDecl: Attached<DeclGroupSyntaxType>(memberNominal.mainDecl),
         baseTypeFileInfo: baseTypeFileInfo,
         baseType: memberNominal,
@@ -1526,13 +1524,12 @@ extension TypeGraph {
     // will just skip it.
     for moduleExtensions in memberNominal.boundExtensions.values {
       for (extensionDecl, _) in moduleExtensions {
-        let evictedExtension = _evictExtension(
+        _evictExtension(
           extensionDecl,
           evictedExtensions: &evictedExtensions,
           symbolTable: symbolTable
         )
-        guard let evictedExtension else { continue }
-        evictedExtensions.append(evictedExtension)
+        evictedExtensions.append(extensionDecl)
       }
     }
 
@@ -1543,7 +1540,7 @@ extension TypeGraph {
     _removeType(
       // Same file info since this is a nested type
       nominalDeclFileInfo: baseTypeFileInfo,
-      typeName: memberNominalTypeName,
+      typeName: memberTypeName,
       symbolTable: symbolTable
     )
   }
@@ -1552,7 +1549,7 @@ extension TypeGraph {
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
     symbolTable: borrowing SymbolTable
-  ) -> Attached<ExtensionDeclSyntax>? {
+  ) {
     // TODO: Find right error
     let extensionState = extensionsToState[extensionDecl, default: Self.internalError(.danglingExtension)]
     // TODO: Find right error
@@ -1588,8 +1585,6 @@ extension TypeGraph {
     //
     // We satisfy the preconditions as we removed all dependents & type members.
     _removeExtension(extensionDecl, extensionFileInfo: extensionFileInfo, symbolTable: symbolTable)
-
-    return extensionDecl
   }
 
   fileprivate mutating func _evictDependents(
@@ -1638,18 +1633,11 @@ extension TypeGraph {
       // }
 
       log("Found conflict \(dependent.debugDescription)")
-      let evictedExtension = _evictExtension(
+      _evictExtension(
         dependent.dependentExtension,
         evictedExtensions: &evictedExtensions,
         symbolTable: symbolTable
       )
-      // Skip if we've already unbound
-      // This can happen if an extension has multiple dependencies.
-      // E.g. We introduce _(MyFile.swift)::A > ['B', 'C'] and an extension
-      // is dependent on both type memmebrs. When evicting
-      // _(MyFile.swift)::A > 'B', we'll unbind that extension but there's
-      // no use updating _(MyFile.swift)::A's dependents
-      guard let evictedExtension else { continue }
 
       // Update dependents
       namesToTypes[modifiedTypeName]!.dependents.removeAll(where: { thisDependent in
@@ -1658,7 +1646,7 @@ extension TypeGraph {
       })
 
       // Record eviction
-      evictedExtensions.append(evictedExtension)
+      evictedExtensions.append(dependent.dependentExtension)
     }
 
     // return newDependents
