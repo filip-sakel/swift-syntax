@@ -1432,7 +1432,6 @@ extension TypeGraph {
     _evictDependents(
       modifiedTypeName: baseTypeName,
       modifiedMembers: TypeTable(typeMembersToDecls: [memberName: memberDecls]),
-      modifiedExtensionModule: baseTypeFileInfo.module,
       evictedExtensions: &evictedExtensions,
       symbolTable: symbolTable
     )
@@ -1570,30 +1569,23 @@ extension TypeGraph {
   fileprivate mutating func _evictDependents(
     modifiedTypeName: GlobalTypeName,
     modifiedMembers: TypeTable,
-    modifiedExtensionModule: ModuleName,
-    // directDependents: [TypeDependent],
     evictedExtensions: inout [Attached<ExtensionDeclSyntax>],
     symbolTable: borrowing SymbolTable
   ) {
-    // TODO: Clean up if we go for immutable `get`
-    func popLastConflictingDependent() -> TypeDependent? {
-      // The base type must exist
+    /// Get the last dependent that has a conflict
+    func nextConflictingDependent() -> TypeDependent? {
+      // We access `namesToTypes[...].dependents` again, since recursive calls
+      // could have changed the dependents.
       // TODO: Create error for `"[SwiftLexicalLookup] Internal error: Unexpectedly asked to evict unregistered type '\(modifiedTypeName.debugDescription)'."`
-      let newDependents = namesToTypes[modifiedTypeName, default: Self.internalError(.danglingExtension)].dependents
-
-      // Get the the next conflicting dependent
-      let nextIndex = newDependents.lastIndex(where: { dependent in
-        modifiedMembers.typeMembersToDecls[dependent.memberType] != nil
-      })
-      // Return `nil` if no conflicts remain
-      guard let nextIndex else { return nil }
-
-      let nextDependent = newDependents[nextIndex]
-
-      return nextDependent
+      namesToTypes[modifiedTypeName, default: Self.internalError(.danglingExtension)]
+        .dependents
+        // TODO: Mention complexity
+        .last(where: { dependent in
+          modifiedMembers.typeMembersToDecls[dependent.memberType] != nil
+        })
     }
 
-    while let dependent = popLastConflictingDependent() {
+    while let dependent = nextConflictingDependent() {
       log("Found conflict \(dependent.debugDescription)")
       _evictExtension(
         dependent.dependentExtension,
@@ -1602,10 +1594,10 @@ extension TypeGraph {
       )
 
       // Update dependents
-      namesToTypes[modifiedTypeName]!.dependents.removeAll(where: { thisDependent in
-        thisDependent.memberType == dependent.memberType
-          && thisDependent.dependentExtension == dependent.dependentExtension
-      })
+      // namesToTypes[modifiedTypeName]!.dependents.removeAll(where: { thisDependent in
+      //   thisDependent.memberType == dependent.memberType
+      //     && thisDependent.dependentExtension == dependent.dependentExtension
+      // })
 
       // Record eviction
       evictedExtensions.append(dependent.dependentExtension)
@@ -1724,7 +1716,6 @@ extension TypeGraph {
       _evictDependents(
         modifiedTypeName: extendedTypeName,
         modifiedMembers: extensionMembers,
-        modifiedExtensionModule: extensionFileInfo.module,
         evictedExtensions: &evictedExtensionsTmp,
         symbolTable: symbolTable
       )
