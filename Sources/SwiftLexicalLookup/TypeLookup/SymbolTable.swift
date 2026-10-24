@@ -116,4 +116,14 @@ extension SymbolTable {
     var typeResolver = TypeResolver(symbolTable: self)
     return typeResolver.resolve(typeSyntax: typeSyntax)
   }
+
+  /// Resolves a nominal-type declaration, admitting it (and its enclosing
+  /// types) into `typeGraph` even if no type syntax references it.
+  @_spi(_QualifiedLookupTests)
+  public func resolve(
+    nominalTypeDecl: Attached<NominalTypeDeclSyntax>
+  ) -> TypeResolver.TypeResult {
+    var typeResolver = TypeResolver(symbolTable: self)
+    return typeResolver.resolve(nominalTypeDecl: nominalTypeDecl)
+  }
 }

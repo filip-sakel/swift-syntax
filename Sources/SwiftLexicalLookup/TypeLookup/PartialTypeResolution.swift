@@ -46,8 +46,8 @@ public enum PartiallyResolvedType {
 
 @_spi(_QualifiedLookupTests)
 public struct TypeReference: Sendable, CustomDebugStringConvertible {
-  let module: Identifier?
-  let name: Identifier
+  @_spi(_QualifiedLookupTests) public let module: Identifier?
+  @_spi(_QualifiedLookupTests) public let name: Identifier
   /// The `TypeSyntax` or `TokenSyntax` from which we derived this type reference component;
   /// used for targeted diagnostics.
   public let introducingSyntax: Attached<TypeSyntax>

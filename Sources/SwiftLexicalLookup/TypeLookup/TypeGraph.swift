@@ -10,10 +10,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-// TODO: Remove Glibc import
-@preconcurrency import Glibc
 import SwiftIfConfig
 import SwiftSyntax
+
+// TODO: Remove Glibc import
+#if canImport(Glibc)
+@preconcurrency import Glibc
+#elseif canImport(WASILibc)
+@preconcurrency import WASILibc
+#endif
 
 #if compiler(>=6)
 private import SwiftDiagnostics
@@ -137,7 +142,8 @@ public struct TypeGraph {
   ///   a. `namesToTypes[name.base!]?.mainDeclMembers` for the parent main declaration, xor
   ///   b. `namesToTypes[name.base!]?.boundExtensions[module]?[extensionDecl]` for
   ///      the parent extension `extensionDecl`.
-  private(set) var namesToTypes: [TypeGraph.GlobalTypeName: NominalType]
+  @_spi(_QualifiedLookupTests)
+  public private(set) var namesToTypes: [TypeGraph.GlobalTypeName: NominalType]
   /// Invariant (see `TypeGraph.md` > Implementation):
   /// - *Registered file roots*: `symbolTable.getFileInfo(extensionDecl.fileRoot) != nil`.
   @_spi(_QualifiedLookupTests)
@@ -150,7 +156,6 @@ public struct TypeGraph {
     namesToTypes = [:]
     extensionsToState = [:]
   }
-
 }
 
 // MARK: TypeGraph.NominalType
@@ -164,16 +169,17 @@ extension TypeGraph {
     /// Invariant (see `TypeGraph.md` > Implementation):
     /// - *No readmission*: no other type in `TypeGraph/namesToTypes` has the
     ///   same `mainDecl`.
-    fileprivate let mainDecl: Attached<NominalTypeDeclSyntax>
+    @_spi(_QualifiedLookupTests) public let mainDecl: Attached<NominalTypeDeclSyntax>
     /// The type members of `mainDecl`
-    fileprivate let mainDeclMembers: TypeTable
+    @_spi(_QualifiedLookupTests) public let mainDeclMembers: TypeTable
 
     /// Invariant (see `TypeGraph.md` > Implementation):
     /// - *Bound extensions*: for the type named `typeName`,
     ///   `boundExtensions[module]?[extensionDecl] != nil` if and only if
     ///   `TypeGraph/extensionsToState[extensionDecl]?.resolvedType == .success(typeName)`,
     ///   where `module` is `extensionDecl`'s module.
-    fileprivate(set) var boundExtensions: [ModuleName: [Attached<ExtensionDeclSyntax>: TypeTable]]
+    @_spi(_QualifiedLookupTests)
+    public fileprivate(set) var boundExtensions: [ModuleName: [Attached<ExtensionDeclSyntax>: TypeTable]]
 
     /// Extensions dependending on qualified lookup of `member` on this type.
     ///
@@ -187,7 +193,7 @@ extension TypeGraph {
     ///   if and only if
     ///   `TypeGraph/extensionsToState[extensionDecl]?.dependencies` contains a
     ///   dependency with `baseTypeName == typeName` on `member`.
-    fileprivate(set) var dependents: [TypeDependent]
+    @_spi(_QualifiedLookupTests) public fileprivate(set) var dependents: [TypeDependent]
 
     init(mainDecl: Attached<NominalTypeDeclSyntax>, mainDeclMembers: TypeTable) {
       self.mainDecl = mainDecl
@@ -208,23 +214,26 @@ public typealias IntroducingExtensionOrMainDecl = Attached<ExtensionDeclSyntax>?
 extension TypeGraph {
   /// The direct type members declared by a *single* declaration group (nominal
   /// type or extension).
-  struct TypeTable {
+  @_spi(_QualifiedLookupTests)
+  public struct TypeTable {
     /// Maps each member's name to every declaration introducing it in this
     /// declaration group. More than one declaration for the same name means
     /// the member is ambiguous (redeclared) within this one declaration group.
     ///
     /// Note: This is a `Dictionary`, so it must generally not be iterated to
     /// uphold `SymbolTable`'s determinism requirement.
-    fileprivate(set) var typeMembersToDecls: [Identifier: [Attached<TypeDeclSyntax>]]
+    @_spi(_QualifiedLookupTests)
+    public fileprivate(set) var typeMembersToDecls: [Identifier: [Attached<TypeDeclSyntax>]]
   }
 }
 
 // MARK: TypeGraph.TypeDependent
 
 extension TypeGraph {
-  struct TypeDependent: Sendable, Hashable, CustomDebugStringConvertible {
-    let memberType: Identifier
-    let dependentExtension: Attached<ExtensionDeclSyntax>
+  @_spi(_QualifiedLookupTests)
+  public struct TypeDependent: Sendable, Hashable, CustomDebugStringConvertible {
+    @_spi(_QualifiedLookupTests) public let memberType: Identifier
+    @_spi(_QualifiedLookupTests) public let dependentExtension: Attached<ExtensionDeclSyntax>
 
     public var debugDescription: String {
       "Self > '\(memberType.name)' => `\(dependentExtension.node._memberlessDescription)`"
@@ -287,7 +296,7 @@ extension TypeGraph {
   @_spi(_QualifiedLookupTests)
   public struct ExtensionDependency: Sendable {
     /// The base type on whose members we depend.
-    fileprivate let baseTypeName: TypeGraph.GlobalTypeName
+    @_spi(_QualifiedLookupTests) public let baseTypeName: TypeGraph.GlobalTypeName
 
     /// The type members of base type on which we depend, in lookup order.
     ///
@@ -296,7 +305,7 @@ extension TypeGraph {
     /// uphold `SymbolTable`'s determinism requirement.
     ///
     /// Invariant: `members` is nonempty
-    fileprivate let members: [(name: Identifier, decls: [Member])]
+    @_spi(_QualifiedLookupTests) public let members: [(name: Identifier, decls: [Member])]
 
     /// Precondition: `members` must be nonempty
     @_spi(_QualifiedLookupTests)

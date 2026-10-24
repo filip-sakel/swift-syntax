@@ -13,23 +13,26 @@ extension A.B { struct A {} }
 extension A { typealias B = A }
 ```
 
-TODO: Refine graph/formal description
-```
-                    | MyModule > A |
-                    /              \
-                  /                  \
-                /                      \
-  `extension A { typealias B = A }`   <main-decl>
-               |                          |
-               |                          |
- | MyModule.A > B = [MyModule.A] |    | MyModule.A > A = [] |
-                \                       /
-                  \                   /
-                    \               /
-             `extension A.B { struct A {} }`
-                           |
-                           |
-                     <cycle error>
+```mermaid
+flowchart TD
+    typeA[["Type: MyModule::A"]]
+    mainDecl["main declaration<br/>struct A {}"]
+    extA["extension A { typealias B = A }"]
+    memberB(["Member: MyModule::A > B<br/>resolves to [MyModule::A]"])
+    memberA(["Member: MyModule::A > A<br/>resolves to []"])
+    extAB["extension A.B { struct A {} }"]
+
+    typeA -- "declared by" --> mainDecl
+    typeA -- "bound extension" --> extA
+    extA -- "introduces" --> memberB
+    mainDecl -- "has no" --> memberA
+    memberB -- "dependency of" --> extAB
+    memberA -- "dependency of" --> extAB
+    extAB -. "would introduce (cycle error)" .-> memberA
+
+    classDef cycle stroke:#d33,stroke-width:2px
+    class extAB,memberA cycle
+    linkStyle 6 stroke:#d33,stroke-width:2px
 ```
 Think about how you would determine what `extension A.B` refers to. You'll notice that you can't directly admit all extensions in order; instead, it's an incremental process that requires `TypeGraph`. The following section explains how exactly we admit extensions.
 

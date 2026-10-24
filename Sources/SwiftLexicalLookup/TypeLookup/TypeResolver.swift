@@ -456,6 +456,16 @@ extension TypeResolver {
     )
   }
 
+  /// Resolves `nominalTypeDecl` in its own declaration context, as if some
+  /// type syntax had found it by lookup.
+  mutating func resolve(nominalTypeDecl: Attached<NominalTypeDeclSyntax>) -> TypeResult {
+    resolveTypeDecl(
+      typeDecl: nominalTypeDecl.as(TypeDeclSyntax.self)!,
+      declContext: _findDeclContext(ofDeclGroup: nominalTypeDecl.as(DeclGroupSyntaxType.self)!),
+      originatingSyntax: Attached<TypeLikeSyntax>(nominalTypeDecl)
+    )
+  }
+
   /// Helper for `resolveDeclGroup`
   fileprivate func _findDeclContext(ofDeclGroup node: Attached<DeclGroupSyntaxType>) -> DeclContext {
     var currentAncestor: Attached<Syntax>? = node.parent

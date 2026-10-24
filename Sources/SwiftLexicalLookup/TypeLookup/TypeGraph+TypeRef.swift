@@ -37,8 +37,8 @@ extension TypeGraph {
     /// A component of a qualified type name, external or internal. For instance,
     /// `Swift::Int` (external) and `_(FileA.swift)::MyType` (internal).
     public struct Component: Sendable, Hashable {
-      private let qualifier: Qualifier
-      private let name: String
+      @_spi(_QualifiedLookupTests) public let qualifier: Qualifier
+      @_spi(_QualifiedLookupTests) public let name: String
 
       fileprivate init(qualifier: TypeGraph.GlobalTypeName.Qualifier, name: String) {
         self.qualifier = qualifier
@@ -57,7 +57,8 @@ extension TypeGraph {
       self.components = _components
     }
 
-    var base: GlobalTypeName? {
+    @_spi(_QualifiedLookupTests)
+    public var base: GlobalTypeName? {
       GlobalTypeName(_components: components.dropLast())
     }
   }
@@ -138,8 +139,8 @@ extension TypeGraph {
   /// Contains the unique name and resolved main declaration.
   @_spi(_QualifiedLookupTests)
   public struct GlobalTypeRef: Hashable, Sendable {
-    let name: GlobalTypeName
-    let mainDecl: Attached<NominalTypeDeclSyntax>
+    @_spi(_QualifiedLookupTests) public let name: GlobalTypeName
+    @_spi(_QualifiedLookupTests) public let mainDecl: Attached<NominalTypeDeclSyntax>
     let _version: Int
 
     @_spi(_QualifiedLookupTests)
