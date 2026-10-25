@@ -396,7 +396,7 @@ public class WarningGroupControlTests: XCTestCase {
     )
   }
 
-  func testFileScopeUsingWarningGroupControl() throws {
+  func testFileScopedDefaultWarningGroupControl() throws {
     try assertWarningGroupControl(
       """
       0️⃣let x = 1
@@ -410,10 +410,9 @@ public class WarningGroupControlTests: XCTestCase {
           2️⃣return 11
         }
       }
-      using @diagnose(GroupID, as: error)
+      default @diagnose(GroupID, as: error)
       3️⃣let k = 1
       """,
-      experimentalFeatures: [.defaultIsolationPerFile],
       diagnosticGroupID: "GroupID",
       states: [
         "0️⃣": .error,
@@ -424,7 +423,7 @@ public class WarningGroupControlTests: XCTestCase {
     )
   }
 
-  func testDeclScopeUsingIgnored() throws {
+  func testDeclScopedDefaultIgnored() throws {
     try assertWarningGroupControl(
       """
       0️⃣let x = 1
@@ -433,19 +432,134 @@ public class WarningGroupControlTests: XCTestCase {
         1️⃣let y = 1
       }
       struct Foo {
-        using @diagnose(GroupID, as: error)
+        default @diagnose(GroupID, as: error)
         var property: Int {
           2️⃣return 11
         }
       }
 
       """,
-      experimentalFeatures: [.defaultIsolationPerFile],
       diagnosticGroupID: "GroupID",
       states: [
         "0️⃣": .none,
         "1️⃣": .warning,
         "2️⃣": .none,
+      ]
+    )
+  }
+
+  /// A file-scoped `default @diagnose` nested in an active `#if` clause still
+  /// applies to the whole file.
+  func testFileScopedDefaultInsideActiveIfConfig() throws {
+    try assertWarningGroupControl(
+      """
+      0️⃣let x = 1
+      #if STRICT
+      default @diagnose(GroupID, as: error)
+      #endif
+      1️⃣let k = 1
+      """,
+      customConditions: ["STRICT"],
+      diagnosticGroupID: "GroupID",
+      states: [
+        "0️⃣": .error,
+        "1️⃣": .error,
+      ]
+    )
+  }
+
+  /// A file-scoped `default @diagnose` in an inactive `#if` clause contributes nothing.
+  func testFileScopedDefaultInsideInactiveIfConfig() throws {
+    try assertWarningGroupControl(
+      """
+      0️⃣let x = 1
+      #if STRICT
+      default @diagnose(GroupID, as: error)
+      #endif
+      1️⃣let k = 1
+      """,
+      diagnosticGroupID: "GroupID",
+      states: [
+        "0️⃣": .none,
+        "1️⃣": .none,
+      ]
+    )
+  }
+
+  /// Each `#if` clause may specify its own file-scoped `default @diagnose`.
+  func testFileScopedDefaultIfConfigElseClause() throws {
+    let source =
+      """
+      #if STRICT
+      default @diagnose(GroupID, as: error)
+      #else
+      default @diagnose(GroupID, as: ignored)
+      #endif
+      0️⃣let x = 1
+      """
+
+    try assertWarningGroupControl(
+      source,
+      customConditions: ["STRICT"],
+      diagnosticGroupID: "GroupID",
+      states: ["0️⃣": .error]
+    )
+
+    try assertWarningGroupControl(
+      source,
+      diagnosticGroupID: "GroupID",
+      states: ["0️⃣": .ignored]
+    )
+  }
+
+  /// Nested `#if` directives around a file-scoped `default @diagnose`: the whole
+  /// chain must be active.
+  func testFileScopedDefaultInsideNestedIfConfig() throws {
+    let source =
+      """
+      #if OUTER
+      #if INNER
+      default @diagnose(GroupID, as: error)
+      #endif
+      #endif
+      0️⃣let x = 1
+      """
+
+    try assertWarningGroupControl(
+      source,
+      customConditions: ["OUTER", "INNER"],
+      diagnosticGroupID: "GroupID",
+      states: ["0️⃣": .error]
+    )
+
+    try assertWarningGroupControl(
+      source,
+      customConditions: ["INNER"],
+      diagnosticGroupID: "GroupID",
+      states: ["0️⃣": .none]
+    )
+  }
+
+  /// A `default @diagnose` inside an `#if` nested in a type body stays decl-scoped,
+  /// and so contributes no file-level default.
+  func testDeclScopedDefaultInsideIfConfigIgnored() throws {
+    try assertWarningGroupControl(
+      """
+      0️⃣let x = 1
+      struct Foo {
+        #if STRICT
+        default @diagnose(GroupID, as: error)
+        #endif
+        var property: Int {
+          1️⃣return 11
+        }
+      }
+      """,
+      customConditions: ["STRICT"],
+      diagnosticGroupID: "GroupID",
+      states: [
+        "0️⃣": .none,
+        "1️⃣": .none,
       ]
     )
   }
@@ -748,7 +862,7 @@ private func assertWarningGroupControl(
   customConditions: Set<String> = [],
   globalControls: [(DiagnosticGroupIdentifier, WarningGroupControl)] = [],
   groupInheritanceTree: DiagnosticGroupInheritanceTree? = nil,
-  experimentalFeatures: Parser.ExperimentalFeatures? = nil,
+  languageFeatures: Parser.LanguageFeatures? = nil,
   diagnosticGroupID: DiagnosticGroupIdentifier,
   states: [String: WarningGroupControl?],
   file: StaticString = #filePath,
@@ -756,8 +870,8 @@ private func assertWarningGroupControl(
 ) throws {
   // Pull out the markers that we'll use to dig out nodes to query.
   let (markerLocations, source) = extractMarkers(markedSource)
-  let experimentalFeatures = experimentalFeatures ?? []
-  var parser = Parser(source, experimentalFeatures: experimentalFeatures)
+  let languageFeatures = languageFeatures ?? []
+  var parser = Parser(source, languageFeatures: languageFeatures)
   let tree = SourceFileSyntax.parse(from: &parser)
   let buildConfig = StaticBuildConfiguration(
     customConditions: customConditions,

@@ -20,6 +20,7 @@ add_swift_syntax_library(SwiftParser
   IsValidIdentifier.swift
   Lookahead.swift
   LoopProgressCondition.swift
+  MemoryLayout.swift
   Modifiers.swift
   Names.swift
   Nominals.swift
@@ -27,6 +28,7 @@ add_swift_syntax_library(SwiftParser
   Parser.swift
   ParseSourceFile.swift
   Patterns.swift
+  RawSyntaxNodeListBuilder.swift
   TokenSpec.swift
   TokenSpecSet.swift
   Recovery.swift
@@ -34,6 +36,7 @@ add_swift_syntax_library(SwiftParser
   Statements.swift
   StringLiteralRepresentedLiteralValue.swift
   StringLiterals.swift
+  SwiftParserCompatibility.swift
   SwiftVersion.swift
   SyntaxUtils.swift
   TokenConsumer.swift
@@ -42,7 +45,7 @@ add_swift_syntax_library(SwiftParser
   TriviaParser.swift
   Types.swift
 
-  generated/ExperimentalFeatures.swift
+  generated/LanguageFeatures.swift
   generated/IsLexerClassified.swift
   generated/LayoutNodes+Parsable.swift
   generated/Parser+TokenSpecSet.swift

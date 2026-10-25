@@ -58,7 +58,7 @@ final class ValueDeclTests: XCTestCase {
     isStatic: Result<Bool, ValueDeclSyntax.StaticLookupFailure>,
     isTypeDecl: Bool,
     scopeKind: SyntaxKind?,
-    file: StaticString = #file,
+    file: StaticString = #filePath,
     line: UInt = #line
   ) {
     // Cast to value declaration
@@ -592,6 +592,4 @@ final class ValueDeclTests: XCTestCase {
       "Expected initialization to value declaration to fail: var declarations aren't values; patter identifiers are."
     )
   }
-
-  // TODO: Add name matching
 }

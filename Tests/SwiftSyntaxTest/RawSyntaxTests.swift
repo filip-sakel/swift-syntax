@@ -48,13 +48,13 @@ private func cannedStructDecl(arena: ParsingRawSyntaxArena) -> RawStructDeclSynt
   )
   let memberBlock = RawMemberBlockSyntax(
     leftBrace: lBrace,
-    members: RawMemberBlockItemListSyntax(elements: [], arena: arena),
+    members: RawMemberBlockItemListSyntax(elements: .init(), arena: arena),
     rightBrace: rBrace,
     arena: arena
   )
   return RawStructDeclSyntax(
-    attributes: RawAttributeListSyntax(elements: [], arena: arena),
-    modifiers: RawDeclModifierListSyntax(elements: [], arena: arena),
+    attributes: RawAttributeListSyntax(elements: .init(), arena: arena),
+    modifiers: RawDeclModifierListSyntax(elements: .init(), arena: arena),
     structKeyword: structKW,
     name: fooID,
     genericParameterClause: nil,
@@ -115,6 +115,16 @@ final class RawSyntaxTests: XCTestCase {
       XCTAssertEqual(missingIdent.tokenText, "")
       XCTAssertEqual(missingIdent.description, "")
     }
+  }
+
+  func testMaterializedTokenWithKind() {
+    let privateKeyword = TokenSyntax.keyword(.private, trailingTrivia: .space)
+    let fileprivateKeyword = privateKeyword.with(\.tokenKind, .keyword(.fileprivate))
+
+    XCTAssertEqual(fileprivateKeyword.tokenKind, .keyword(.fileprivate))
+    XCTAssertEqual(fileprivateKeyword.description, "fileprivate ")
+    XCTAssertEqual(fileprivateKeyword.totalLength, SourceLength(utf8Length: 12))
+    XCTAssertEqual(fileprivateKeyword.syntaxTextBytes, Array("fileprivate ".utf8))
   }
 
   func testParsedToken() {

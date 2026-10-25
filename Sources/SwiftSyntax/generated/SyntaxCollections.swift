@@ -816,6 +816,46 @@ public struct FunctionParameterListSyntax: SyntaxCollection, SyntaxHashable {
   public static let syntaxKind = SyntaxKind.functionParameterList
 }
 
+/// A list of function yield represented by `FunctionYieldListSyntax`.
+/// 
+/// ### Example
+/// 
+/// ```swift
+/// func foo() yields (Int, inout Float) {
+/// 
+/// }
+/// ```
+///
+/// - Note: Requires experimental feature `coroutineFunctions`.
+///
+/// ### Children
+/// 
+/// `FunctionYieldSyntax` `*`
+///
+/// ### Contained in
+/// 
+///  - `FunctionYieldClauseSyntax`.`FunctionYieldClauseSyntax/yields`
+@_spi(ExperimentalLanguageFeatures)
+public struct FunctionYieldListSyntax: SyntaxCollection, SyntaxHashable {
+  public typealias Element = FunctionYieldSyntax
+
+  public let _syntaxNode: Syntax
+
+  public init?(_ node: some SyntaxProtocol) {
+    guard node.raw.kind == .functionYieldList else {
+      return nil
+    }
+    self._syntaxNode = node._syntaxNode
+  }
+
+  @_transparent
+  init(unsafeCasting node: Syntax) {
+    self._syntaxNode = node
+  }
+
+  public static let syntaxKind = SyntaxKind.functionYieldList
+}
+
 /// ### Children
 /// 
 /// ``GenericArgumentSyntax`` `*`
@@ -1751,7 +1791,7 @@ public struct SwitchCaseItemListSyntax: SyntaxCollection, SyntaxHashable {
 
 /// ### Children
 /// 
-/// (``SwitchCaseSyntax`` | ``IfConfigDeclSyntax``) `*`
+/// (``SwitchCaseSyntax`` | ``IfConfigDeclSyntax`` | ``MacroExpansionDeclSyntax``) `*`
 ///
 /// ### Contained in
 /// 
@@ -1778,12 +1818,16 @@ public struct SwitchCaseListSyntax: SyntaxCollection, SyntaxHashable {
     /// ```
     case switchCase(SwitchCaseSyntax)
     case ifConfigDecl(IfConfigDeclSyntax)
+    /// The expansion of a freestanding macro in a position that expects a declaration.
+    case macroExpansionDecl(MacroExpansionDeclSyntax)
 
     public var _syntaxNode: Syntax {
       switch self {
       case .switchCase(let node):
         return node._syntaxNode
       case .ifConfigDecl(let node):
+        return node._syntaxNode
+      case .macroExpansionDecl(let node):
         return node._syntaxNode
       }
     }
@@ -1796,18 +1840,24 @@ public struct SwitchCaseListSyntax: SyntaxCollection, SyntaxHashable {
       self = .ifConfigDecl(node)
     }
 
+    public init(_ node: MacroExpansionDeclSyntax) {
+      self = .macroExpansionDecl(node)
+    }
+
     public init?(_ node: __shared some SyntaxProtocol) {
       if let node = node.as(SwitchCaseSyntax.self) {
         self = .switchCase(node)
       } else if let node = node.as(IfConfigDeclSyntax.self) {
         self = .ifConfigDecl(node)
+      } else if let node = node.as(MacroExpansionDeclSyntax.self) {
+        self = .macroExpansionDecl(node)
       } else {
         return nil
       }
     }
 
     public static var structure: SyntaxNodeStructure {
-      return .choices([.node(SwitchCaseSyntax.self), .node(IfConfigDeclSyntax.self)])
+      return .choices([.node(SwitchCaseSyntax.self), .node(IfConfigDeclSyntax.self), .node(MacroExpansionDeclSyntax.self)])
     }
 
     /// Checks if the current syntax node can be cast to ``SwitchCaseSyntax``.
@@ -1852,6 +1902,28 @@ public struct SwitchCaseListSyntax: SyntaxCollection, SyntaxHashable {
     /// - Warning: This function will crash if the cast is not possible. Use `as` to safely attempt a cast.
     public func cast(_ syntaxType: IfConfigDeclSyntax.Type) -> IfConfigDeclSyntax {
       return self.as(IfConfigDeclSyntax.self)!
+    }
+
+    /// Checks if the current syntax node can be cast to ``MacroExpansionDeclSyntax``.
+    ///
+    /// - Returns: `true` if the node can be cast, `false` otherwise.
+    public func `is`(_ syntaxType: MacroExpansionDeclSyntax.Type) -> Bool {
+      return self.as(syntaxType) != nil
+    }
+
+    /// Attempts to cast the current syntax node to ``MacroExpansionDeclSyntax``.
+    ///
+    /// - Returns: An instance of ``MacroExpansionDeclSyntax``, or `nil` if the cast fails.
+    public func `as`(_ syntaxType: MacroExpansionDeclSyntax.Type) -> MacroExpansionDeclSyntax? {
+      return MacroExpansionDeclSyntax.init(self)
+    }
+
+    /// Force-casts the current syntax node to ``MacroExpansionDeclSyntax``.
+    ///
+    /// - Returns: An instance of ``MacroExpansionDeclSyntax``.
+    /// - Warning: This function will crash if the cast is not possible. Use `as` to safely attempt a cast.
+    public func cast(_ syntaxType: MacroExpansionDeclSyntax.Type) -> MacroExpansionDeclSyntax {
+      return self.as(MacroExpansionDeclSyntax.self)!
     }
   }
 

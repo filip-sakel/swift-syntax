@@ -10,15 +10,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if compiler(>=6)
 public import SwiftDiagnostics
 @_spi(Diagnostics) internal import SwiftParser
 @_spi(ExperimentalLanguageFeatures) public import SwiftSyntax
-#else
-import SwiftDiagnostics
-@_spi(Diagnostics) import SwiftParser
-@_spi(ExperimentalLanguageFeatures) import SwiftSyntax
-#endif
 
 private func getTokens(between first: TokenSyntax, and second: TokenSyntax) -> [TokenSyntax] {
   var first = first
@@ -1042,6 +1036,15 @@ public class ParseDiagnosticsGenerator: SyntaxAnyVisitor {
       return .skipChildren
     }
     handleMisplacedEffectSpecifiers(effectSpecifiers: node.effectSpecifiers, output: node.returnClause)
+    return .visitChildren
+  }
+
+  @_spi(ExperimentalLanguageFeatures)
+  public override func visit(_ node: FunctionYieldClauseSyntax) -> SyntaxVisitorContinueKind {
+    if shouldSkip(node) {
+      return .skipChildren
+    }
+    // TODO: What do we want to check here?
     return .visitChildren
   }
 

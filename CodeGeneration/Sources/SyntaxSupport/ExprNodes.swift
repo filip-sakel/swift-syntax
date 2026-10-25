@@ -89,6 +89,12 @@ public let EXPR_NODES: [Node] = [
         isOptional: true
       ),
       Child(
+        name: "yieldClause",
+        kind: .node(kind: .functionYieldClause),
+        experimentalFeature: .coroutineFunctions,
+        isOptional: true
+      ),
+      Child(
         name: "arrow",
         kind: .token(choices: [.token(.arrow)])
       ),
@@ -350,7 +356,7 @@ public let EXPR_NODES: [Node] = [
     children: [
       Child(
         name: "specifier",
-        kind: .token(choices: [.keyword(.weak), .keyword(.unowned)])
+        kind: .token(choices: [.keyword(.weak), .keyword(.unowned), .keyword(.sending)])
       ),
       Child(
         name: "leftParen",
@@ -629,6 +635,12 @@ public let EXPR_NODES: [Node] = [
       Child(
         name: "effectSpecifiers",
         kind: .node(kind: .typeEffectSpecifiers),
+        isOptional: true
+      ),
+      Child(
+        name: "yieldClause",
+        kind: .node(kind: .functionYieldClause),
+        experimentalFeature: .coroutineFunctions,
         isOptional: true
       ),
       Child(
@@ -1941,7 +1953,7 @@ public let EXPR_NODES: [Node] = [
     kind: .switchCaseList,
     base: .syntaxCollection,
     nameForDiagnostics: nil,
-    elementChoices: [.switchCase, .ifConfigDecl]
+    elementChoices: [.switchCase, .ifConfigDecl, .macroExpansionDecl]
   ),
 
   Node(

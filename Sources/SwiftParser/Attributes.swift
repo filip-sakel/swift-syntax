@@ -10,11 +10,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if compiler(>=6)
 @_spi(ExperimentalLanguageFeatures) @_spi(RawSyntax) internal import SwiftSyntax
-#else
-@_spi(ExperimentalLanguageFeatures) @_spi(RawSyntax) import SwiftSyntax
-#endif
 
 extension Parser {
   private mutating func parseAttributeListElement() -> RawAttributeListSyntax.Element {
@@ -41,7 +37,7 @@ extension Parser {
   }
 
   mutating func parseAttributeList() -> RawAttributeListSyntax {
-    var elements = [RawAttributeListSyntax.Element]()
+    var elements = RawSyntaxNodeListBuilder<RawAttributeListSyntax.Element>()
 
     func shouldContinue() -> Bool {
       if self.at(.atSign) {
@@ -56,12 +52,12 @@ extension Parser {
     var loopProgress = LoopProgressCondition()
     while self.hasProgressed(&loopProgress) && shouldContinue() {
       let attribute = self.parseAttributeListElement()
-      elements.append(attribute)
+      elements.append(attribute, allocator: self.nodeListAllocator)
     }
     if elements.isEmpty {
       return self.emptyCollection(RawAttributeListSyntax.self)
     } else {
-      return RawAttributeListSyntax(elements: elements, arena: self.arena)
+      return RawAttributeListSyntax(elements: elements.build(), arena: self.arena)
     }
   }
 }
@@ -75,6 +71,7 @@ extension Parser {
     case _effects
     case _implements
     case _originallyDefinedIn
+    case section
     case specialized
     case _specialize
     case _spi_available
@@ -89,29 +86,33 @@ extension Parser {
     case objc
     case Sendable
     case transpose
+    case `yield_once`
 
-    init?(lexeme: Lexer.Lexeme, experimentalFeatures: Parser.ExperimentalFeatures) {
-      switch PrepareForKeywordMatch(lexeme) {
-      case TokenSpec(._backDeploy): self = ._backDeploy
-      case TokenSpec(._documentation): self = ._documentation
-      case TokenSpec(._dynamicReplacement): self = ._dynamicReplacement
-      case TokenSpec(._effects): self = ._effects
-      case TokenSpec(._implements): self = ._implements
-      case TokenSpec(._originallyDefinedIn): self = ._originallyDefinedIn
-      case TokenSpec(.specialized): self = .specialized
-      case TokenSpec(._specialize): self = ._specialize
-      case TokenSpec(._spi_available): self = ._spi_available
-      case TokenSpec(.`rethrows`): self = .rethrows
-      case TokenSpec(.abi): self = .abi
-      case TokenSpec(.attached): self = .attached
-      case TokenSpec(.available): self = .available
-      case TokenSpec(.backDeployed): self = .backDeployed
-      case TokenSpec(.derivative): self = .derivative
-      case TokenSpec(.differentiable): self = .differentiable
-      case TokenSpec(.freestanding): self = .freestanding
-      case TokenSpec(.objc): self = .objc
-      case TokenSpec(.Sendable): self = .Sendable
-      case TokenSpec(.transpose): self = .transpose
+    init?(lexeme: Lexer.Lexeme, languageFeatures: Parser.LanguageFeatures) {
+      let keyword = lexeme.keyword
+      switch keyword {
+      case ._backDeploy: self = ._backDeploy
+      case ._documentation: self = ._documentation
+      case ._dynamicReplacement: self = ._dynamicReplacement
+      case ._effects: self = ._effects
+      case ._implements: self = ._implements
+      case ._originallyDefinedIn: self = ._originallyDefinedIn
+      case .section: self = .section
+      case .specialized: self = .specialized
+      case ._specialize: self = ._specialize
+      case ._spi_available: self = ._spi_available
+      case .`rethrows`: self = .rethrows
+      case .abi: self = .abi
+      case .attached: self = .attached
+      case .available: self = .available
+      case .backDeployed: self = .backDeployed
+      case .derivative: self = .derivative
+      case .differentiable: self = .differentiable
+      case .freestanding: self = .freestanding
+      case .objc: self = .objc
+      case .Sendable: self = .Sendable
+      case .transpose: self = .transpose
+      case .`yield_once` where languageFeatures.contains(.coroutineFunctions): self = .yield_once
       default:
         return nil
       }
@@ -125,6 +126,7 @@ extension Parser {
       case ._effects: return .keyword(._effects)
       case ._implements: return .keyword(._implements)
       case ._originallyDefinedIn: return .keyword(._originallyDefinedIn)
+      case .section: return .keyword(.section)
       case .specialized: return .keyword(.specialized)
       case ._specialize: return .keyword(._specialize)
       case ._spi_available: return .keyword(._spi_available)
@@ -139,6 +141,7 @@ extension Parser {
       case .objc: return .keyword(.objc)
       case .Sendable: return .keyword(.Sendable)
       case .transpose: return .keyword(.transpose)
+      case .`yield_once`: return .keyword(.yield_once)
       }
     }
   }
@@ -290,6 +293,10 @@ extension Parser {
       return parseAttribute(argumentMode: .required) { parser in
         return (nil, .specializedArguments(parser.parseSpecializedAttributeArgument()))
       }
+    case .section:
+      return parseAttribute(argumentMode: .required) { parser in
+        return (nil, .sectionArguments(parser.parseSectionAttributeArgument()))
+      }
     case ._specialize:
       return parseAttribute(argumentMode: .required) { parser in
         return (nil, .specializeArguments(parser.parseSpecializeAttributeArgumentList()))
@@ -306,11 +313,13 @@ extension Parser {
       return parseAttribute(argumentMode: .required) { parser in
         // The contents of the @_effects attribute are parsed in SIL, we just
         // represent the contents as a list of tokens in SwiftSyntax.
-        var tokens: [RawTokenSyntax] = []
+        var tokens = RawSyntaxNodeListBuilder<RawTokenSyntax>()
         while !parser.at(.rightParen, .endOfFile) {
-          tokens.append(parser.consumeAnyToken())
+          tokens.append(parser.consumeAnyToken(), allocator: parser.nodeListAllocator)
         }
-        return (nil, .effectsArguments(RawEffectsAttributeArgumentListSyntax(elements: tokens, arena: parser.arena)))
+        return (
+          nil, .effectsArguments(RawEffectsAttributeArgumentListSyntax(elements: tokens.build(), arena: parser.arena))
+        )
       }
     case ._implements:
       return parseAttribute(argumentMode: .required) { parser in
@@ -346,6 +355,10 @@ extension Parser {
     case .Sendable:
       return parseAttribute(argumentMode: .noArgument) { parser in
         preconditionFailure("Sendable has no argument")
+      }
+    case .yield_once:
+      return parseAttribute(argumentMode: .noArgument) { parser in
+        preconditionFailure("yield_once has no argument")
       }
     case nil:
       return parseAttribute(argumentMode: .customAttribute) { parser in
@@ -388,7 +401,7 @@ extension RawLabeledExprSyntax {
 }
 
 extension Parser {
-  mutating func parseMacroRoleArguments() -> [RawLabeledExprSyntax] {
+  mutating func parseMacroRoleArguments() -> RawSyntaxNodeList<RawLabeledExprSyntax> {
     let (unexpectedBeforeRole, role) = self.expect(
       .identifier,
       TokenSpec(.extension, remapping: .identifier),
@@ -408,7 +421,12 @@ extension Parser {
       flavor: .attributeArguments,
       allowTrailingComma: false
     )
-    return [roleElement] + additionalArgs
+    var resultBuilder = RawSyntaxNodeListBuilder<RawLabeledExprSyntax>(
+      initialCapacity: additionalArgs.count + 1
+    )
+    resultBuilder.append(roleElement, allocator: self.nodeListAllocator)
+    resultBuilder.append(contentsOf: additionalArgs.buffer, allocator: self.nodeListAllocator)
+    return resultBuilder.build()
   }
 }
 
@@ -502,17 +520,17 @@ extension Parser {
       )
     }
 
-    var elements = [RawDifferentiabilityArgumentSyntax]()
+    var elements = RawSyntaxNodeListBuilder<RawDifferentiabilityArgumentSyntax>()
     var loopProgress = LoopProgressCondition()
     while !self.at(.endOfFile, .rightParen) && self.hasProgressed(&loopProgress) {
       guard let param = self.parseDifferentiabilityArgument() else {
         break
       }
-      elements.append(param)
+      elements.append(param, allocator: self.nodeListAllocator)
     }
     let (unexpectedBeforeRightParen, rightParen) = self.expect(.rightParen)
 
-    let arguments = RawDifferentiabilityArgumentListSyntax(elements: elements, arena: self.arena)
+    let arguments = RawDifferentiabilityArgumentListSyntax(elements: elements.build(), arena: self.arena)
     let list = RawDifferentiabilityArgumentsSyntax(
       leftParen: leftParen,
       arguments: arguments,
@@ -658,7 +676,7 @@ extension Parser {
 
 extension Parser {
   mutating func parseObjectiveCSelector() -> RawObjCSelectorPieceListSyntax {
-    var elements = [RawObjCSelectorPieceSyntax]()
+    var elements = RawSyntaxNodeListBuilder<RawObjCSelectorPieceSyntax>()
     var loopProgress = LoopProgressCondition()
     while self.hasProgressed(&loopProgress) {
       // Empty selector piece, splitting `::` into two colons.
@@ -668,7 +686,8 @@ extension Parser {
             name: nil,
             colon: colon,
             arena: self.arena
-          )
+          ),
+          allocator: self.nodeListAllocator
         )
         continue
       } else if self.at(.identifier, .wildcard) || self.currentToken.isLexerClassifiedKeyword {
@@ -681,7 +700,8 @@ extension Parser {
               name: name,
               colon: nil,
               arena: self.arena
-            )
+            ),
+            allocator: self.nodeListAllocator
           )
           break
         }
@@ -694,24 +714,47 @@ extension Parser {
             unexpectedBeforeColon,
             colon: colon,
             arena: self.arena
-          )
+          ),
+          allocator: self.nodeListAllocator
         )
       } else {
         break
       }
     }
-    return RawObjCSelectorPieceListSyntax(elements: elements, arena: self.arena)
+    return RawObjCSelectorPieceListSyntax(elements: elements.build(), arena: self.arena)
   }
 }
 
 extension Parser {
   mutating func parseSpecializedAttributeArgument() -> RawSpecializedAttributeArgumentSyntax {
+    var exportedArgument: RawLabeledSpecializeArgumentSyntax? = nil
+    if self.languageFeatures.contains(.extendedSpecializedAttribute),
+      let label = self.consume(if: .keyword(.exported))
+    {
+      let (unexpectedBeforeColon, colon) = self.expect(.colon)
+      let (unexpectedBeforeValue, value) = self.expect(.keyword(.true), .keyword(.false), default: .keyword(.false))
+      let (unexpectedBeforeComma, comma) = self.expect(.comma)
+      exportedArgument = RawLabeledSpecializeArgumentSyntax(
+        label: label,
+        unexpectedBeforeColon,
+        colon: colon,
+        unexpectedBeforeValue,
+        value: value,
+        unexpectedBeforeComma,
+        trailingComma: comma,
+        arena: self.arena
+      )
+    }
     let whereClause = self.parseGenericWhereClause()
-    return RawSpecializedAttributeArgumentSyntax(genericWhereClause: whereClause, arena: self.arena)
+    return RawSpecializedAttributeArgumentSyntax(
+      exportedArgument: exportedArgument,
+      genericWhereClause: whereClause,
+      arena: self.arena
+    )
   }
 
   mutating func parseSpecializeAttributeArgumentList() -> RawSpecializeAttributeArgumentListSyntax {
-    var elements = [RawSpecializeAttributeArgumentListSyntax.Element]()
+    var elements = RawSyntaxNodeListBuilder<RawSpecializeAttributeArgumentListSyntax.Element>()
     // Parse optional "exported" and "kind" labeled parameters.
     var loopProgress = LoopProgressCondition()
     LOOP: while !self.at(.endOfFile, .rightParen, .keyword(.where)) && self.hasProgressed(&loopProgress) {
@@ -731,7 +774,8 @@ extension Parser {
               trailingComma: comma,
               arena: self.arena
             )
-          )
+          ),
+          allocator: self.nodeListAllocator
         )
       case (.availability, let handle)?:
         let label = self.eat(handle)
@@ -749,7 +793,8 @@ extension Parser {
               semicolon: semi,
               arena: self.arena
             )
-          )
+          ),
+          allocator: self.nodeListAllocator
         )
       case (.exported, let handle)?:
         let label = self.eat(handle)
@@ -767,7 +812,8 @@ extension Parser {
               trailingComma: comma,
               arena: self.arena
             )
-          )
+          ),
+          allocator: self.nodeListAllocator
         )
       case (.kind, let handle)?:
         let label = self.eat(handle)
@@ -784,7 +830,8 @@ extension Parser {
               trailingComma: comma,
               arena: self.arena
             )
-          )
+          ),
+          allocator: self.nodeListAllocator
         )
       case (.spiModule, let handle)?,
         (.spi, let handle)?:
@@ -802,7 +849,8 @@ extension Parser {
               trailingComma: comma,
               arena: self.arena
             )
-          )
+          ),
+          allocator: self.nodeListAllocator
         )
       case nil:
         break LOOP
@@ -812,9 +860,9 @@ extension Parser {
     // Parse the where clause.
     if self.at(.keyword(.where)) {
       let whereClause = self.parseGenericWhereClause()
-      elements.append(.genericWhereClause(whereClause))
+      elements.append(.genericWhereClause(whereClause), allocator: self.nodeListAllocator)
     }
-    return RawSpecializeAttributeArgumentListSyntax(elements: elements, arena: self.arena)
+    return RawSpecializeAttributeArgumentListSyntax(elements: elements.build(), arena: self.arena)
   }
 }
 
@@ -837,6 +885,20 @@ extension Parser {
 }
 
 extension Parser {
+  /// Parse the argument of a `@section` attribute, which is either the
+  /// `default` keyword or an expression describing the name of the section.
+  mutating func parseSectionAttributeArgument() -> RawSectionAttributeArgumentSyntax {
+    let section: RawSectionAttributeArgumentSyntax.Section
+    if let defaultKeyword = self.consume(if: .keyword(.default)) {
+      section = .defaultKeyword(defaultKeyword)
+    } else {
+      section = .expression(self.parseExpression(flavor: .attributeArguments, pattern: .none))
+    }
+    return RawSectionAttributeArgumentSyntax(section: section, arena: self.arena)
+  }
+}
+
+extension Parser {
   mutating func parseIsolatedAttributeArguments() -> RawLabeledExprListSyntax {
     let (unexpectedBeforeIsolationKind, isolationKind) =
       self.expectIdentifier(allowKeywordsAsIdentifier: true)
@@ -847,10 +909,7 @@ extension Parser {
       arena: self.arena
     )
 
-    return RawLabeledExprListSyntax(
-      elements: [isolationKindElement],
-      arena: self.arena
-    )
+    return RawLabeledExprListSyntax(elements: self.nodeListAllocator.listOfOne(isolationKindElement), arena: self.arena)
   }
 }
 
@@ -865,7 +924,7 @@ extension Parser {
       return RawABIAttributeArgumentsSyntax(
         provider: .missing(
           RawMissingDeclSyntax(
-            unexpectedBefore.isEmpty ? nil : RawUnexpectedNodesSyntax(elements: unexpectedBefore, arena: self.arena),
+            RawUnexpectedNodesSyntax(unexpectedBefore, arena: self.arena),
             attributes: self.emptyCollection(RawAttributeListSyntax.self),
             modifiers: self.emptyCollection(RawDeclModifierListSyntax.self),
             placeholder: self.missingToken(.identifier, text: "<#declaration#>"),
@@ -899,7 +958,9 @@ extension Parser {
       let ifConfig = self.parsePoundIfDirective({ parser in
         let decl = parser.parseDeclaration(in: .argumentList)
         let member = RawMemberBlockItemSyntax(decl: decl, semicolon: nil, arena: parser.arena)
-        return .decls(RawMemberBlockItemListSyntax(elements: [member], arena: parser.arena))
+        return .decls(
+          RawMemberBlockItemListSyntax(elements: parser.nodeListAllocator.listOfOne(member), arena: parser.arena)
+        )
       })
       decl = ifConfig.makeUnexpectedKeepingFirstNode(
         of: RawDeclSyntax.self,
@@ -931,7 +992,7 @@ extension Parser {
   mutating func parseBackDeployedAttributeArguments() -> RawBackDeployedAttributeArgumentsSyntax {
     let (unexpectedBeforeLabel, label) = self.expect(.keyword(.before))
     let (unexpectedBeforeColon, colon) = self.expect(.colon)
-    var elements: [RawPlatformVersionItemSyntax] = []
+    var elements = RawSyntaxNodeListBuilder<RawPlatformVersionItemSyntax>()
     var keepGoing: RawTokenSyntax? = nil
     repeat {
       let versionRestriction = self.parsePlatformVersion()
@@ -941,7 +1002,8 @@ extension Parser {
           platformVersion: versionRestriction,
           trailingComma: keepGoing,
           arena: self.arena
-        )
+        ),
+        allocator: self.nodeListAllocator
       )
     } while keepGoing != nil
     return RawBackDeployedAttributeArgumentsSyntax(
@@ -949,7 +1011,7 @@ extension Parser {
       beforeLabel: label,
       unexpectedBeforeColon,
       colon: colon,
-      platforms: RawPlatformVersionItemListSyntax(elements: elements, arena: self.arena),
+      platforms: RawPlatformVersionItemListSyntax(elements: elements.build(), arena: self.arena),
       arena: self.arena
     )
   }
@@ -962,7 +1024,7 @@ extension Parser {
     let moduleName = self.parseStringLiteral()
     let (unexpectedBeforeComma, comma) = self.expect(.comma)
 
-    var platforms: [RawPlatformVersionItemSyntax] = []
+    var platforms = RawSyntaxNodeListBuilder<RawPlatformVersionItemSyntax>()
     var keepGoing: RawTokenSyntax?
     repeat {
       let restriction = self.parsePlatformVersion(allowStarAsVersionNumber: true)
@@ -972,7 +1034,8 @@ extension Parser {
           platformVersion: restriction,
           trailingComma: keepGoing,
           arena: self.arena
-        )
+        ),
+        allocator: self.nodeListAllocator
       )
     } while keepGoing != nil
 
@@ -984,7 +1047,7 @@ extension Parser {
       moduleName: moduleName,
       unexpectedBeforeComma,
       comma: comma,
-      platforms: RawPlatformVersionItemListSyntax(elements: platforms, arena: self.arena),
+      platforms: RawPlatformVersionItemListSyntax(elements: platforms.build(), arena: self.arena),
       arena: self.arena
     )
   }
@@ -1020,7 +1083,7 @@ extension Parser {
 
 extension Parser {
   mutating func parseDocumentationAttributeArguments() -> RawDocumentationAttributeArgumentListSyntax {
-    var arguments: [RawDocumentationAttributeArgumentSyntax] = []
+    var arguments = RawSyntaxNodeListBuilder<RawDocumentationAttributeArgumentSyntax>()
 
     var keepGoing: RawTokenSyntax? = nil
     repeat {
@@ -1053,14 +1116,15 @@ extension Parser {
             }
           }
 
-          init?(lexeme: Lexer.Lexeme, experimentalFeatures: Parser.ExperimentalFeatures) {
-            switch PrepareForKeywordMatch(lexeme) {
-            case TokenSpec(.private): self = .private
-            case TokenSpec(.fileprivate): self = .fileprivate
-            case TokenSpec(.internal): self = .internal
-            case TokenSpec(.package): self = .package
-            case TokenSpec(.public): self = .public
-            case TokenSpec(.open): self = .open
+          init?(lexeme: Lexer.Lexeme, languageFeatures: Parser.LanguageFeatures) {
+            let keyword = lexeme.keyword
+            switch keyword {
+            case .private: self = .private
+            case .fileprivate: self = .fileprivate
+            case .internal: self = .internal
+            case .package: self = .package
+            case .public: self = .public
+            case .open: self = .open
             default: return nil
             }
           }
@@ -1091,11 +1155,12 @@ extension Parser {
           value: value,
           trailingComma: keepGoing,
           arena: self.arena
-        )
+        ),
+        allocator: self.nodeListAllocator
       )
     } while keepGoing != nil
 
-    return RawDocumentationAttributeArgumentListSyntax(elements: arguments, arena: self.arena)
+    return RawDocumentationAttributeArgumentListSyntax(elements: arguments.build(), arena: self.arena)
   }
 }
 
@@ -1140,6 +1205,8 @@ extension Parser.Lookahead {
         TokenSpec(.rightBrace),
         TokenSpec(.rightSquare),
         TokenSpec(.rightAngle):
+        return false
+      case TokenSpec(.yields) where languageFeatures.contains(.coroutineFunctions):
         return false
       case _ where lookahead.at(.keyword(.async)):
         return false

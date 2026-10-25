@@ -15,12 +15,15 @@ import SwiftSyntaxBuilder
 import SyntaxSupport
 import Utils
 
-let experimentalFeaturesFile = SourceFileSyntax(leadingTrivia: copyrightHeader) {
+let languageFeaturesFile = SourceFileSyntax(leadingTrivia: copyrightHeader) {
   DeclSyntax(
     """
     extension Parser {
-      @_spi(ExperimentalLanguageFeatures)
-      public struct ExperimentalFeatures: OptionSet, Hashable, Sendable {
+      /// The type is public so it can appear in the (non-SPI) parser API, but
+      /// the individual features are `@_spi(ExperimentalLanguageFeatures)` since
+      /// they are unstable. Clients that don't enable experimental features only
+      /// ever use the empty set.
+      public struct LanguageFeatures: OptionSet, Hashable, Sendable {
         public let rawValue: UInt
         public init(rawValue: UInt) {
           self.rawValue = rawValue
@@ -30,11 +33,12 @@ let experimentalFeaturesFile = SourceFileSyntax(leadingTrivia: copyrightHeader) 
     """
   )
 
-  try! ExtensionDeclSyntax("extension Parser.ExperimentalFeatures") {
+  try! ExtensionDeclSyntax("extension Parser.LanguageFeatures") {
     for (i, feature) in ExperimentalFeature.allCases.enumerated() {
       DeclSyntax(
         """
         /// Whether to enable the parsing of \(raw: feature.documentationDescription).
+        @_spi(ExperimentalLanguageFeatures)
         public static let \(feature.token) = Self(rawValue: 1 << \(raw: i))
         """
       )
@@ -44,6 +48,7 @@ let experimentalFeaturesFile = SourceFileSyntax(leadingTrivia: copyrightHeader) 
       """
       /// Creates a new value representing the experimental feature with the
       /// given name, or returns nil if the name is not recognized.
+      @_spi(ExperimentalLanguageFeatures)
       public init?(name: String)
       """
     ) {

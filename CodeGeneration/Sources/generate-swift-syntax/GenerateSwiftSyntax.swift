@@ -94,7 +94,7 @@ struct GenerateSwiftSyntax: AsyncParsableCommand {
 
     var fileSpecs: [GeneratedFileSpec] = [
       // SwiftParser
-      GeneratedFileSpec(swiftParserGeneratedDir + ["ExperimentalFeatures.swift"], experimentalFeaturesFile),
+      GeneratedFileSpec(swiftParserGeneratedDir + ["LanguageFeatures.swift"], languageFeaturesFile),
       GeneratedFileSpec(swiftParserGeneratedDir + ["IsLexerClassified.swift"], isLexerClassifiedFile),
       GeneratedFileSpec(swiftParserGeneratedDir + ["LayoutNodes+Parsable.swift"], layoutNodesParsableFile),
       GeneratedFileSpec(swiftParserGeneratedDir + ["Parser+TokenSpecSet.swift"], parserTokenSpecSetFile),

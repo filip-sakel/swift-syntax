@@ -156,7 +156,7 @@ final class ExpressionTypeTests: ParserTestCase {
       assertParse(
         "\(source)()",
         { ExprSyntax.parse(from: &$0) },
-        experimentalFeatures: .literalExpressions,
+        languageFeatures: .literalExpressions,
         line: line
       )
     }
@@ -176,7 +176,7 @@ final class ExpressionTypeTests: ParserTestCase {
         { ExprSyntax.parse(from: &$0) },
         substructure: IdentifierTypeSyntax(name: .identifier("X")),
         substructureAfterMarker: "1️⃣",
-        experimentalFeatures: .literalExpressions,
+        languageFeatures: .literalExpressions,
         line: line
       )
     }

@@ -71,6 +71,15 @@ final class ExpressionTests: ParserTestCase {
       }
       """
     )
+
+    assertParse(
+      """
+      { [sending self, sending sendingB = b] foo in
+        return 0
+      }
+      """,
+      languageFeatures: [.onceFunctions]
+    )
   }
 
   func testTrailingClosures() {
@@ -350,7 +359,7 @@ final class ExpressionTests: ParserTestCase {
           )
         ])
       ),
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
@@ -377,7 +386,7 @@ final class ExpressionTests: ParserTestCase {
           )
         ])
       ),
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
@@ -404,7 +413,7 @@ final class ExpressionTests: ParserTestCase {
           )
         ])
       ),
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
@@ -431,7 +440,7 @@ final class ExpressionTests: ParserTestCase {
           )
         ])
       ),
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
@@ -458,7 +467,7 @@ final class ExpressionTests: ParserTestCase {
           )
         ])
       ),
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
@@ -496,7 +505,7 @@ final class ExpressionTests: ParserTestCase {
           ),
         ])
       ),
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
@@ -519,7 +528,7 @@ final class ExpressionTests: ParserTestCase {
           )
         ])
       ),
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
@@ -555,7 +564,7 @@ final class ExpressionTests: ParserTestCase {
           )
         ])
       ),
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
@@ -570,7 +579,7 @@ final class ExpressionTests: ParserTestCase {
         )
       ],
       fixedSource: #"\Foo.method(<#expression#>)"#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
@@ -579,7 +588,7 @@ final class ExpressionTests: ParserTestCase {
         DiagnosticSpec(message: "expected identifier in key path method component", fixIts: ["insert identifier"])
       ],
       fixedSource: #"\Foo.<#identifier#>()"#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
@@ -590,7 +599,7 @@ final class ExpressionTests: ParserTestCase {
           message: "unexpected code '<Int>' in key path method component"
         )
       ],
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
@@ -607,77 +616,77 @@ final class ExpressionTests: ParserTestCase {
         ),
       ],
       fixedSource: #"\Foo.method<Int>(arg: <#expression#>)"#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
       #"""
       S()[keyPath: \.i] = 1
       """#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
       #"""
       public let keyPath2FromLibB = \AStruct.Type.property
       """#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
       #"""
       public let keyPath9FromLibB = \AStruct.Type.init(val: 2025)
       """#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
       #"""
       _ = ([S]()).map(\.i)
       """#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
       #"""
       let some = Some(keyPath: \Demo.here)
       """#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
       #"""
       _ = ([S.Type]()).map(\.init)
       """#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
       #"""
       \Lens<Lens<Point>>.obj.x
       """#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
       #"""
       _ = \Lens<Point>.y
       """#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
       #"""
       _ = f(\String?.!.count)
       """#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
       #"""
       let _ = \K.Type.init(val: 2025)
       """#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
 
     assertParse(
@@ -685,7 +694,7 @@ final class ExpressionTests: ParserTestCase {
       let _ = \K.Type.init
       let _ = \K.Type.init()
       """#,
-      experimentalFeatures: .keypathWithMethodMembers
+      languageFeatures: .keypathWithMethodMembers
     )
   }
 

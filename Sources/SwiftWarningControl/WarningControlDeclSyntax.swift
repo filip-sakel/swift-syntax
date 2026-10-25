@@ -11,7 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 import SwiftIfConfig
-@_spi(ExperimentalLanguageFeatures) import SwiftSyntax
+import SwiftSyntax
 
 extension AttributeSyntax {
   var warningGroupControl: (DiagnosticGroupIdentifier, WarningGroupControl)? {
@@ -84,7 +84,7 @@ extension AttributeListSyntax {
   }
 }
 
-extension UsingDeclSyntax {
+extension FileDefaultDeclSyntax {
   var warningControl: (DiagnosticGroupIdentifier, WarningGroupControl)? {
     guard case .attribute(let attributeSyntax) = self.specifier,
       let warningGroupControl = attributeSyntax.warningGroupControl

@@ -12,7 +12,7 @@
 
 import SwiftBasicFormat
 @_spi(Testing) @_spi(RawSyntax) @_spi(ExperimentalLanguageFeatures) import SwiftParser
-@_spi(RawSyntax) @_spi(ExperimentalLanguageFeatures) import SwiftSyntax
+@_spi(RawSyntax) import SwiftSyntax
 import SwiftSyntaxBuilder
 import XCTest
 
@@ -1250,6 +1250,29 @@ final class DeclarationTests: ParserTestCase {
         }
       }
       """
+    )
+  }
+
+  func testYields() {
+    assertParse(
+      "func test() yields(Int) -> Int { }"
+    )
+
+    assertParse(
+      "func test() yields(inout Int) -> Int { }"
+    )
+
+    assertParse(
+      "func test() throws(MyError) yields(inout Int) -> Int { }"
+    )
+
+    assertParse(
+      "func test() yields(inout Int) 1️⃣throws(MyError) -> Int { }",
+      diagnostics: [
+        DiagnosticSpec(locationMarker: "1️⃣", message: "unexpected code 'throws(MyError) -> Int' in function")
+      ]
+      // TODO: Enable after fixits would be added
+      // fixedSource: "func test() throws(MyError) yields(inout Int) -> Int { }"
     )
   }
 
@@ -3382,7 +3405,7 @@ final class DeclarationTests: ParserTestCase {
   func testInitializerWithReturnType() {
     assertParse(
       "init(_ ptr: UnsafeRawBufferPointer, _ a: borrowing Array<Int>) -> dependsOn(a) Self",
-      experimentalFeatures: .nonescapableTypes
+      languageFeatures: .nonescapableTypes
     )
 
     // Not actually valid, needs to be diagnosed during type checking
@@ -3474,7 +3497,7 @@ final class DeclarationTests: ParserTestCase {
         }
       }
       """,
-      experimentalFeatures: .coroutineAccessors
+      languageFeatures: .coroutineAccessors
     )
     assertParse(
       """
@@ -3493,7 +3516,7 @@ final class DeclarationTests: ParserTestCase {
         }
       }
       """,
-      experimentalFeatures: .coroutineAccessors
+      languageFeatures: .coroutineAccessors
     )
     assertParse(
       """
@@ -3670,273 +3693,6 @@ final class DeclarationTests: ParserTestCase {
         T1,
         T2,
       > {}
-      """
-    )
-  }
-}
-
-final class UsingDeclarationTests: ParserTestCase {
-  override var experimentalFeatures: Parser.ExperimentalFeatures {
-    [.defaultIsolationPerFile]
-  }
-
-  func testUsing() {
-    assertParse(
-      "using @MainActor",
-      substructure: UsingDeclSyntax(
-        usingKeyword: .keyword(.using),
-        specifier: .attribute(
-          AttributeSyntax(
-            attributeName: IdentifierTypeSyntax(
-              name: .identifier("MainActor")
-            )
-          )
-        )
-      )
-    )
-    assertParse(
-      "using nonisolated",
-      substructure: UsingDeclSyntax(
-        usingKeyword: .keyword(.using),
-        specifier: .modifier(.identifier("nonisolated"))
-      )
-    )
-
-    assertParse(
-      "using @Test",
-      substructure: UsingDeclSyntax(
-        usingKeyword: .keyword(.using),
-        specifier: .attribute(
-          AttributeSyntax(
-            attributeName: IdentifierTypeSyntax(
-              name: .identifier("Test")
-            )
-          )
-        )
-      )
-    )
-
-    assertParse(
-      "using test",
-      substructure: UsingDeclSyntax(
-        usingKeyword: .keyword(.using),
-        specifier: .modifier(.identifier("test"))
-      )
-    )
-
-    assertParse(
-      "using @warn(DiagGroupID, as: warning)",
-      substructure: UsingDeclSyntax(
-        usingKeyword: .keyword(.using),
-        specifier: .attribute(
-          AttributeSyntax(
-            attributeName: IdentifierTypeSyntax(
-              name: .identifier("warn")
-            ),
-            leftParen: .leftParenToken(),
-            arguments: .argumentList(
-              LabeledExprListSyntax([
-                LabeledExprSyntax(
-                  expression: DeclReferenceExprSyntax(
-                    baseName: .identifier("DiagGroupID")
-                  ),
-                  trailingComma: .commaToken()
-                ),
-                LabeledExprSyntax(
-                  label: .identifier("as"),
-                  colon: .colonToken(),
-                  expression: DeclReferenceExprSyntax(
-                    baseName: .identifier("warning")
-                  )
-                ),
-              ])
-            ),
-            rightParen: .rightParenToken()
-          )
-        )
-      )
-    )
-
-    assertParse(
-      "using @diagnose(DiagGroupID, as: error)",
-      substructure: UsingDeclSyntax(
-        usingKeyword: .keyword(.using),
-        specifier: .attribute(
-          AttributeSyntax(
-            attributeName: IdentifierTypeSyntax(
-              name: .identifier("diagnose")
-            ),
-            leftParen: .leftParenToken(),
-            arguments: .argumentList(
-              LabeledExprListSyntax([
-                LabeledExprSyntax(
-                  expression: DeclReferenceExprSyntax(
-                    baseName: .identifier("DiagGroupID")
-                  ),
-                  trailingComma: .commaToken()
-                ),
-                LabeledExprSyntax(
-                  label: .identifier("as"),
-                  colon: .colonToken(),
-                  expression: DeclReferenceExprSyntax(
-                    baseName: .identifier("error")
-                  )
-                ),
-              ])
-            ),
-            rightParen: .rightParenToken()
-          )
-        )
-      )
-    )
-
-    assertParse(
-      """
-      nonisolated
-      using
-      """,
-      substructure: CodeBlockSyntax(
-        DeclReferenceExprSyntax(baseName: .identifier("using"))
-      )
-    )
-
-    assertParse(
-      """
-      1️⃣@MainActor
-      using2️⃣
-      """,
-      substructure: CodeBlockItemSyntax(
-        item: CodeBlockItemSyntax.Item(
-          UsingDeclSyntax(
-            UnexpectedNodesSyntax([
-              Syntax(
-                AttributeSyntax(
-                  atSign: .atSignToken(),
-                  attributeName: TypeSyntax(IdentifierTypeSyntax(name: .identifier("MainActor")))
-                )
-              )
-            ]),
-            usingKeyword: .keyword(.using),
-            specifier: UsingDeclSyntax.Specifier(.identifier("", presence: .missing))
-          )
-        )
-      ),
-      diagnostics: [
-        DiagnosticSpec(locationMarker: "1️⃣", message: "unexpected code '@MainActor' before using"),
-        DiagnosticSpec(locationMarker: "2️⃣", message: "expected identifier in using", fixIts: ["insert identifier"]),
-      ],
-      fixedSource: """
-        @MainActor
-        using <#identifier#>
-        """
-    )
-
-    assertParse(
-      """
-      using
-      @MainActor 1️⃣
-      """,
-      diagnostics: [
-        DiagnosticSpec(
-          message: "expected declaration after attribute",
-          fixIts: ["insert declaration"]
-        )
-      ],
-      fixedSource:
-        """
-        using
-        @MainActor <#declaration#>
-        """
-    )
-
-    assertParse(
-      """
-      using
-      nonisolated
-      """,
-      substructure: CodeBlockSyntax(
-        DeclReferenceExprSyntax(baseName: .identifier("using"))
-      )
-    )
-
-    assertParse(
-      """
-      func
-      using (x: Int) {}
-      """
-    )
-
-    assertParse(
-      """
-      func
-      using
-      (x: Int) {}
-      """
-    )
-
-    assertParse(
-      """
-      let
-        using = 42
-      """
-    )
-
-    assertParse("let (x: Int, using: String) = (x: 42, using: \"\")")
-
-    assertParse(
-      """
-      do {
-        using @MainActor
-      }
-      """
-    )
-  }
-
-  func testAccessorBlockDisambiguationMarker() {
-    assertParse(
-      """
-      var value = initialValue { @_accessorBlock
-        get
-      }
-      """,
-      substructure: VariableDeclSyntax(
-        bindingSpecifier: .keyword(.var),
-        bindings: [
-          PatternBindingSyntax(
-            pattern: IdentifierPatternSyntax(identifier: .identifier("value")),
-            initializer: InitializerClauseSyntax(
-              value: DeclReferenceExprSyntax(baseName: .identifier("initialValue"))
-            ),
-            accessorBlock: AccessorBlockSyntax(
-              leftBrace: .leftBraceToken(),
-              accessors: .accessors([
-                AccessorDeclSyntax(
-                  attributes: [
-                    .attribute(
-                      AttributeSyntax(
-                        atSign: .atSignToken(),
-                        attributeName: IdentifierTypeSyntax(name: .identifier("_accessorBlock"))
-                      )
-                    )
-                  ],
-                  accessorSpecifier: .keyword(.get)
-                )
-              ])
-            )
-          )
-        ]
-      )
-    )
-  }
-
-  func testAccessorBlockAfterPatternBindingDeclWithAttribute() {
-    assertParse(
-      """
-      var x: Int = foo()
-      {
-        @available(*, deprecated)
-        didSet {}
-      }
       """
     )
   }

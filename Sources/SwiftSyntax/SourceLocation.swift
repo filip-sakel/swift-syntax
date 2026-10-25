@@ -814,22 +814,27 @@ fileprivate extension RawSyntax {
     handleSourceLocationDirective: (_ position: AbsolutePosition, _ rawSyntax: RawSyntax) -> Void
   ) -> AbsolutePosition {
     var position = position
-    switch self.rawData.payload {
-    case .parsedToken(let dat):
-      position = dat.wholeText.forEachEndOfLine(position: position, body: body)
-    case .materializedToken(let dat):
-      position = dat.leadingTrivia.forEachEndOfLine(position: position, body: body)
-      position = dat.tokenText.forEachEndOfLine(position: position, body: body)
-      position = dat.trailingTrivia.forEachEndOfLine(position: position, body: body)
-    case .layout(let dat):
+    switch self.header {
+    case .smolParsedToken:
+      position = self.asSmolParsedToken.wholeText
+        .forEachEndOfLine(position: position, body: body)
+    case .parsedToken:
+      position = self.asParsedToken.wholeText
+        .forEachEndOfLine(position: position, body: body)
+    case .materializedToken:
+      position = self.asMaterializedToken.leadingTrivia.forEachEndOfLine(position: position, body: body)
+      position = self.asMaterializedToken.tokenText.forEachEndOfLine(position: position, body: body)
+      position = self.asMaterializedToken.trailingTrivia.forEachEndOfLine(position: position, body: body)
+    case .layout:
       // Handle '#sourceLocation' directive.
-      if dat.kind == .poundSourceLocation {
+      if self.asLayout.kind == .poundSourceLocation {
         // Do this before `node.forEachEndOfLine` call below so the caller can
         // know the exact position of the directive.
         handleSourceLocationDirective(position, self)
       }
 
-      for case let node? in dat.layout where SyntaxTreeViewMode.sourceAccurate.shouldTraverse(node: node) {
+      self.forEachChildInSourceOrder { node in
+        guard SyntaxTreeViewMode.sourceAccurate.shouldTraverse(node: node) else { return }
         position = node.forEachEndOfLine(
           position: position,
           body: body,

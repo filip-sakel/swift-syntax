@@ -11,7 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 import SwiftIfConfig
-@_spi(ExperimentalLanguageFeatures) import SwiftSyntax
+import SwiftSyntax
 
 /// Compute the full set of warning control regions in this syntax node
 extension SyntaxProtocol {
@@ -122,14 +122,14 @@ private class WarningControlRegionVisitor: ActiveSyntaxAnyVisitor {
     if let withAttributesSyntax = node.asProtocol(WithAttributesSyntax.self) {
       tree.addWarningControlRegions(for: withAttributesSyntax)
     }
-    // Handle file-scoped `using` declarations before the `containingPosition`
+    // Handle file-scoped `default` declarations before the `containingPosition`
     // check since they may only appear in top-level code and may affect
     // warning group control of all positions in this source file.
-    if let usingAttributedSyntax = node.as(UsingDeclSyntax.self),
+    if let fileDefault = node.as(FileDefaultDeclSyntax.self),
       node.isTopLevelCode(),
-      let usingWarningControl = usingAttributedSyntax.warningControl
+      let fileDefaultWarningControl = fileDefault.warningControl
     {
-      tree.addRootWarningGroupControls(controls: [usingWarningControl])
+      tree.addRootWarningGroupControls(controls: [fileDefaultWarningControl])
     }
     // Skip all declarations which do not contain the specified
     // `containingPosition`.
@@ -147,12 +147,17 @@ extension SyntaxProtocol {
   /// Determines if this syntax node is top-level code (not contained in any declaration
   /// or other scoped source in top-level script code).
   func isTopLevelCode() -> Bool {
-    let current = Syntax(self)
-    if current.parent?.is(CodeBlockItemSyntax.self) ?? false,
-      current.parent?.parent?.is(CodeBlockItemListSyntax.self) ?? false,
-      current.parent?.parent?.parent?.is(SourceFileSyntax.self) ?? false
-    {
-      return true
+    var current = Syntax(self)
+    while let parent = current.parent {
+      switch parent.kind {
+      case .sourceFile:
+        return true
+      // Statement lists and active `#if` directives introduce no scope of their own.
+      case .codeBlockItem, .codeBlockItemList, .ifConfigDecl, .ifConfigClauseList, .ifConfigClause:
+        current = parent
+      default:
+        return false
+      }
     }
     return false
   }

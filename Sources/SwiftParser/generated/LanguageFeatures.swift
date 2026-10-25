@@ -14,8 +14,11 @@
 // swift-format-ignore-file
 
 extension Parser {
-  @_spi(ExperimentalLanguageFeatures)
-  public struct ExperimentalFeatures: OptionSet, Hashable, Sendable {
+  /// The type is public so it can appear in the (non-SPI) parser API, but
+  /// the individual features are `@_spi(ExperimentalLanguageFeatures)` since
+  /// they are unstable. Clients that don't enable experimental features only
+  /// ever use the empty set.
+  public struct LanguageFeatures: OptionSet, Hashable, Sendable {
     public let rawValue: UInt
 
     public init(rawValue: UInt) {
@@ -24,45 +27,66 @@ extension Parser {
   }
 }
 
-extension Parser.ExperimentalFeatures {
+extension Parser.LanguageFeatures {
   /// Whether to enable the parsing of reference bindings.
+  @_spi(ExperimentalLanguageFeatures)
   public static let referenceBindings = Self (rawValue: 1 << 0)
 
   /// Whether to enable the parsing of 'then' statements.
+  @_spi(ExperimentalLanguageFeatures)
   public static let thenStatements = Self (rawValue: 1 << 1)
 
   /// Whether to enable the parsing of 'do' expressions.
+  @_spi(ExperimentalLanguageFeatures)
   public static let doExpressions = Self (rawValue: 1 << 2)
 
   /// Whether to enable the parsing of non-escapable types.
+  @_spi(ExperimentalLanguageFeatures)
   public static let nonescapableTypes = Self (rawValue: 1 << 3)
 
   /// Whether to enable the parsing of trailing commas.
+  @_spi(ExperimentalLanguageFeatures)
   public static let trailingComma = Self (rawValue: 1 << 4)
 
   /// Whether to enable the parsing of coroutine accessors.
+  @_spi(ExperimentalLanguageFeatures)
   public static let coroutineAccessors = Self (rawValue: 1 << 5)
 
   /// Whether to enable the parsing of keypaths with method members.
+  @_spi(ExperimentalLanguageFeatures)
   public static let keypathWithMethodMembers = Self (rawValue: 1 << 6)
 
   /// Whether to enable the parsing of `_move` and `_borrow` as ownership operators.
+  @_spi(ExperimentalLanguageFeatures)
   public static let oldOwnershipOperatorSpellings = Self (rawValue: 1 << 7)
 
-  /// Whether to enable the parsing of set default actor isolation for a file.
-  public static let defaultIsolationPerFile = Self (rawValue: 1 << 8)
-
   /// Whether to enable the parsing of borrow and mutate accessors.
-  public static let borrowAndMutateAccessors = Self (rawValue: 1 << 9)
+  @_spi(ExperimentalLanguageFeatures)
+  public static let borrowAndMutateAccessors = Self (rawValue: 1 << 8)
 
   /// Whether to enable the parsing of constant-foldable literal expressions.
-  public static let literalExpressions = Self (rawValue: 1 << 10)
+  @_spi(ExperimentalLanguageFeatures)
+  public static let literalExpressions = Self (rawValue: 1 << 9)
+
+  /// Whether to enable the parsing of `@once` and `@callable(once)` function types.
+  @_spi(ExperimentalLanguageFeatures)
+  public static let onceFunctions = Self (rawValue: 1 << 10)
 
   /// Whether to enable the parsing of a test feature that parses everything as unexpected.
+  @_spi(ExperimentalLanguageFeatures)
   public static let _test_EverythingUnexpected = Self (rawValue: 1 << 11)
+
+  /// Whether to enable the parsing of functions as coroutines.
+  @_spi(ExperimentalLanguageFeatures)
+  public static let coroutineFunctions = Self (rawValue: 1 << 12)
+
+  /// Whether to enable the parsing of `exported:` argument of the `@specialized` attribute.
+  @_spi(ExperimentalLanguageFeatures)
+  public static let extendedSpecializedAttribute = Self (rawValue: 1 << 13)
 
   /// Creates a new value representing the experimental feature with the
   /// given name, or returns nil if the name is not recognized.
+  @_spi(ExperimentalLanguageFeatures)
   public init?(name: String) {
     switch name {
     case "ReferenceBindings":
@@ -81,14 +105,18 @@ extension Parser.ExperimentalFeatures {
       self = .keypathWithMethodMembers
     case "OldOwnershipOperatorSpellings":
       self = .oldOwnershipOperatorSpellings
-    case "DefaultIsolationPerFile":
-      self = .defaultIsolationPerFile
     case "BorrowAndMutateAccessors":
       self = .borrowAndMutateAccessors
     case "LiteralExpressions":
       self = .literalExpressions
+    case "OnceFunctions":
+      self = .onceFunctions
     case "_test_EverythingUnexpected":
       self = ._test_EverythingUnexpected
+    case "CoroutineFunctions":
+      self = .coroutineFunctions
+    case "ExtendedSpecializedAttribute":
+      self = .extendedSpecializedAttribute
     default:
       return nil
     }

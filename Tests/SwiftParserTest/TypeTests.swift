@@ -438,9 +438,9 @@ final class TypeTests: ParserTestCase {
   }
 
   func testLifetimeSpecifier() {
-    assertParse("func foo() -> dependsOn(x) X", experimentalFeatures: [.nonescapableTypes])
+    assertParse("func foo() -> dependsOn(x) X", languageFeatures: [.nonescapableTypes])
 
-    assertParse("func foo() -> dependsOn(x, y) X", experimentalFeatures: [.nonescapableTypes])
+    assertParse("func foo() -> dependsOn(x, y) X", languageFeatures: [.nonescapableTypes])
 
     assertParse(
       "func foo() -> dependsOn(1️⃣) X",
@@ -452,7 +452,7 @@ final class TypeTests: ParserTestCase {
         )
       ],
       fixedSource: "func foo() -> dependsOn(<#identifier#>) X",
-      experimentalFeatures: [.nonescapableTypes]
+      languageFeatures: [.nonescapableTypes]
     )
 
     assertParse(
@@ -465,12 +465,12 @@ final class TypeTests: ParserTestCase {
         )
       ],
       fixedSource: "func foo() -> dependsOn(x, <#identifier#>) X",
-      experimentalFeatures: [.nonescapableTypes]
+      languageFeatures: [.nonescapableTypes]
     )
 
-    assertParse("func foo() -> dependsOn(x) dependsOn(scoped y) X", experimentalFeatures: [.nonescapableTypes])
+    assertParse("func foo() -> dependsOn(x) dependsOn(scoped y) X", languageFeatures: [.nonescapableTypes])
 
-    assertParse("func foo() -> dependsOn(scoped x) X", experimentalFeatures: [.nonescapableTypes])
+    assertParse("func foo() -> dependsOn(scoped x) X", languageFeatures: [.nonescapableTypes])
 
     assertParse(
       "func foo() -> dependsOn1️⃣ X",
@@ -482,7 +482,7 @@ final class TypeTests: ParserTestCase {
         )
       ],
       fixedSource: "func foo() -> dependsOn(<#identifier#>) X",
-      experimentalFeatures: [.nonescapableTypes]
+      languageFeatures: [.nonescapableTypes]
     )
 
     assertParse(
@@ -496,7 +496,7 @@ final class TypeTests: ParserTestCase {
       ],
       fixedSource:
         "func foo() -> dependsOn(<#identifier#>) @Sendable (Int, isolated (any Actor)?) async throws -> Void",
-      experimentalFeatures: [.nonescapableTypes]
+      languageFeatures: [.nonescapableTypes]
     )
 
     assertParse(
@@ -510,12 +510,12 @@ final class TypeTests: ParserTestCase {
         DiagnosticSpec(locationMarker: "1️⃣", message: "unexpected code '*' in lifetime specifier"),
       ],
       fixedSource: "func foo() -> dependsOn(<#identifier#>*) X",
-      experimentalFeatures: [.nonescapableTypes]
+      languageFeatures: [.nonescapableTypes]
     )
 
-    assertParse("func foo() -> dependsOn(0) X", diagnostics: [], experimentalFeatures: [.nonescapableTypes])
+    assertParse("func foo() -> dependsOn(0) X", diagnostics: [], languageFeatures: [.nonescapableTypes])
 
-    assertParse("func foo() -> dependsOn(self) X", experimentalFeatures: [.nonescapableTypes])
+    assertParse("func foo() -> dependsOn(self) X", languageFeatures: [.nonescapableTypes])
 
     assertParse(
       "func foo() -> dependsOn1️⃣(0)2️⃣ X",
@@ -548,7 +548,7 @@ final class TypeTests: ParserTestCase {
         DiagnosticSpec(message: "unexpected code '-1' in lifetime specifier"),
       ],
       fixedSource: "func foo() -> dependsOn(<#identifier#>-1) X",
-      experimentalFeatures: [.nonescapableTypes]
+      languageFeatures: [.nonescapableTypes]
     )
   }
 
@@ -772,6 +772,30 @@ final class TypeTests: ParserTestCase {
       """
     )
   }
+
+  func testYields() {
+    assertParse(
+      """
+      { () yields(Int) -> Void in }
+      """
+    )
+
+    assertParse(
+      "typealias T = () yields(Int) -> Void"
+    )
+
+    assertParse(
+      """
+      { () yields(inout Int) -> Void in }
+      """
+    )
+
+    assertParse(
+      """
+      { () yields(inout Int) -> Int in }
+      """
+    )
+  }
 }
 
 final class InlineArrayTypeTests: ParserTestCase {
@@ -898,7 +922,7 @@ final class InlineArrayTypeTests: ParserTestCase {
         trailingComma: .commaToken()
       ),
       substructureAfterMarker: "1️⃣",
-      experimentalFeatures: .literalExpressions
+      languageFeatures: .literalExpressions
     )
   }
 
@@ -929,7 +953,7 @@ final class InlineArrayTypeTests: ParserTestCase {
         separator: .keyword(.of),
         element: .init(argument: .type(TypeSyntax("Int")))
       ),
-      experimentalFeatures: .literalExpressions
+      languageFeatures: .literalExpressions
     )
   }
 
@@ -937,7 +961,7 @@ final class InlineArrayTypeTests: ParserTestCase {
     // Nested inline arrays with expression counts
     assertParse(
       "[(1 + 1) of [(2 + 1) of Int]]",
-      experimentalFeatures: .literalExpressions
+      languageFeatures: .literalExpressions
     )
   }
 }

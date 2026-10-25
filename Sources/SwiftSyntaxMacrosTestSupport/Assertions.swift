@@ -10,23 +10,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if compiler(>=6)
 public import SwiftIfConfig
 public import SwiftSyntax
 public import SwiftSyntaxMacroExpansion
 public import SwiftSyntaxMacros
 @_spi(XCTestFailureLocation) public import SwiftSyntaxMacrosGenericTestSupport
 private import XCTest
+
 #if canImport(Testing)
 private import Testing
-#endif
-#else
-import SwiftIfConfig
-import SwiftSyntax
-import SwiftSyntaxMacroExpansion
-import SwiftSyntaxMacros
-@_spi(XCTestFailureLocation) import SwiftSyntaxMacrosGenericTestSupport
-import XCTest
 #endif
 
 // Re-export the spec types from `SwiftSyntaxMacrosGenericTestSupport`.
@@ -99,8 +91,8 @@ public func assertMacroExpansion(
 ///   - diagnostics: The diagnostics when expanding any macro
 ///   - macroSpecs: The macros that should be expanded, provided as a dictionary
 ///     mapping macro names (e.g., `"CodableMacro"`) to specification with macro type
-///     (e.g., `CodableMacro.self`) and a list of conformances macro provides
-///     (e.g., `["Decodable", "Encodable"]`).
+///     (e.g., `CodableMacro.self`), optional module name, and a list of conformances
+///     the macro provides (e.g., `["Decodable", "Encodable"]`).
 ///   - applyFixIts: If specified, filters the Fix-Its that are applied to generate `fixedSource` to only those whose message occurs in this array. If `nil`, all Fix-Its from the diagnostics are applied.
 ///   - fixedSource: If specified, asserts that the source code after applying Fix-Its matches this string.
 ///   - testModuleName: The name of the test module to use.

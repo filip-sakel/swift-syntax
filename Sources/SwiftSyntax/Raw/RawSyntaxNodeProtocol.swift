@@ -80,23 +80,6 @@ extension RawSyntax: RawSyntaxNodeProtocol {
   }
 }
 
-#if swift(<5.8)
-// Cherry-pick this function from SE-0370
-extension Slice {
-  @_spi(RawSyntax)
-  @inlinable
-  public func initialize<S>(
-    from source: S
-  ) -> (unwritten: S.Iterator, index: Index)
-  where S: Sequence, Base == UnsafeMutableBufferPointer<S.Element> {
-    let buffer = Base(rebasing: self)
-    let (iterator, index) = buffer.initialize(from: source)
-    let distance = buffer.distance(from: buffer.startIndex, to: index)
-    return (iterator, startIndex.advanced(by: distance))
-  }
-}
-#endif
-
 @_spi(RawSyntax)
 public struct RawTokenSyntax: RawSyntaxNodeProtocol {
   @_spi(RawSyntax)
@@ -142,7 +125,7 @@ public struct RawTokenSyntax: RawSyntaxNodeProtocol {
 
   @_spi(RawSyntax)
   public var byteLength: Int {
-    return raw.byteLength
+    return Int(raw.byteLength)
   }
 
   @_spi(RawSyntax)
@@ -185,10 +168,38 @@ public struct RawTokenSyntax: RawSyntaxNodeProtocol {
     tokenDiagnostic: TokenDiagnostic?,
     arena: __shared ParsingRawSyntaxArena
   ) {
+    // This text is already arena owned rather than lexed, so the buffer stops at
+    // the token and its text is copied exactly.
+    self.init(
+      kind: kind,
+      sourceBuffer: UnsafeBufferPointer(start: wholeText.baseAddress, count: wholeText.count),
+      leadingTriviaByteLength: textRange.lowerBound,
+      textByteLength: textRange.count,
+      wholeTextLength: wholeText.count,
+      presence: presence,
+      tokenDiagnostic: tokenDiagnostic,
+      arena: arena
+    )
+  }
+
+  /// Creates a ``RawTokenSyntax`` from what the lexer holds: the buffer it is
+  /// reading, positioned at the token, and the token's byte lengths.
+  public init(
+    kind: RawTokenKind,
+    sourceBuffer: UnsafeBufferPointer<UInt8>,
+    leadingTriviaByteLength: Int,
+    textByteLength: Int,
+    wholeTextLength: Int,
+    presence: SourcePresence,
+    tokenDiagnostic: TokenDiagnostic?,
+    arena: __shared ParsingRawSyntaxArena
+  ) {
     let raw = RawSyntax.parsedToken(
       kind: kind,
-      wholeText: wholeText,
-      textRange: textRange,
+      sourceBuffer: sourceBuffer,
+      leadingTriviaByteLength: leadingTriviaByteLength,
+      textByteLength: textByteLength,
+      wholeTextLength: wholeTextLength,
       presence: presence,
       tokenDiagnostic: tokenDiagnostic,
       arena: arena

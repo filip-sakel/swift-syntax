@@ -116,29 +116,29 @@ final class TrailingCommaTests: ParserTestCase {
   }
 
   func testIfConditions() {
-    assertParse("if true, { }", experimentalFeatures: .trailingComma)
+    assertParse("if true, { }", languageFeatures: .trailingComma)
 
-    assertParse("if true, { }; { }()", experimentalFeatures: .trailingComma)
+    assertParse("if true, { }; { }()", languageFeatures: .trailingComma)
 
     assertParse(
       """
       if true, { print("if-body") } else { print("else-body") }
       """,
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
 
     assertParse(
       """
       if true, { print("if-body") } else if true, { print("else-if-body") } { print("else-body") }
       """,
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
 
-    assertParse("if true, { if true { { } } }", experimentalFeatures: .trailingComma)
+    assertParse("if true, { if true { { } } }", languageFeatures: .trailingComma)
 
-    assertParse("{ if true, { print(0) } }", experimentalFeatures: .trailingComma)
+    assertParse("{ if true, { print(0) } }", languageFeatures: .trailingComma)
 
-    assertParse("( if true, { print(0) } )", experimentalFeatures: .trailingComma)
+    assertParse("( if true, { print(0) } )", languageFeatures: .trailingComma)
 
     assertParse(
       """
@@ -151,7 +151,7 @@ final class TrailingCommaTests: ParserTestCase {
         ],
         body: "{ print(0) }"
       ),
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
 
     assertParse(
@@ -165,7 +165,7 @@ final class TrailingCommaTests: ParserTestCase {
         ],
         body: "{ print(0) }"
       ),
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
 
     assertParse(
@@ -179,7 +179,7 @@ final class TrailingCommaTests: ParserTestCase {
         ],
         body: "{ print(0) }"
       ),
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
 
     assertParse(
@@ -193,7 +193,7 @@ final class TrailingCommaTests: ParserTestCase {
         ],
         body: "{ print(0) }"
       ),
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
 
     assertParse(
@@ -207,7 +207,7 @@ final class TrailingCommaTests: ParserTestCase {
         ],
         body: "{ true }"
       ),
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
 
     assertParse(
@@ -222,7 +222,7 @@ final class TrailingCommaTests: ParserTestCase {
         ],
         body: "{ print(0) }"
       ),
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
 
     assertParse(
@@ -237,7 +237,7 @@ final class TrailingCommaTests: ParserTestCase {
         ],
         body: "{ print(0) }"
       ),
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
 
     assertParse(
@@ -251,7 +251,7 @@ final class TrailingCommaTests: ParserTestCase {
         ],
         body: "{ print(0) }"
       ),
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
 
     assertParse(
@@ -269,36 +269,36 @@ final class TrailingCommaTests: ParserTestCase {
         ],
         body: "{ print(0) }"
       ),
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
 
     assertParse(
       "if 1️⃣, { }",
       diagnostics: [DiagnosticSpec(message: "missing condition in 'if' statement")],
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
   }
 
   func testGuardConditions() {
-    assertParse("guard true, else { break }", experimentalFeatures: .trailingComma)
+    assertParse("guard true, else { break }", languageFeatures: .trailingComma)
 
     assertParse(
       "guard true, 1️⃣, else { return }",
       diagnostics: [DiagnosticSpec(message: "expected expression in 'guard' statement", fixIts: ["insert expression"])],
       fixedSource: "guard true, <#expression#>, else { return }",
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
 
     assertParse(
       "guard true, 1️⃣{ return }",
       diagnostics: [DiagnosticSpec(message: "expected 'else' in 'guard' statement", fixIts: ["insert 'else'"])],
       fixedSource: "guard true, else { return }",
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
   }
 
   func testWhileConditions() {
-    assertParse("while true, { print(0) }", experimentalFeatures: .trailingComma)
+    assertParse("while true, { print(0) }", languageFeatures: .trailingComma)
   }
 
   func testSwitchCaseLabel() {
@@ -311,7 +311,7 @@ final class TrailingCommaTests: ParserTestCase {
           break
       }
       """,
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
   }
 
@@ -320,14 +320,14 @@ final class TrailingCommaTests: ParserTestCase {
       """
       struct T: P1, P2, { }
       """,
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
 
     assertParse(
       """
       struct T: P1, P2, where P1: Equatable, P2: Equatable { }
       """,
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
   }
 
@@ -336,7 +336,7 @@ final class TrailingCommaTests: ParserTestCase {
       """
       struct T: P1, P2, where P1: Equatable, P2: Equatable, { }
       """,
-      experimentalFeatures: .trailingComma
+      languageFeatures: .trailingComma
     )
   }
 }

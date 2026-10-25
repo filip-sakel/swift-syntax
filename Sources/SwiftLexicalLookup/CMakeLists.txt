@@ -18,7 +18,7 @@ add_swift_syntax_library(SwiftLexicalLookup
   Scopes/GenericParameterScopeSyntax.swift
   Scopes/IntroducingToSequentialParentScopeSyntax.swift
   Scopes/LookInMembersScopeSyntax.swift
-  Scopes/NominalTypeDeclSyntax.swift
+  Scopes/NominalTypeDeclScopeSyntax.swift
   Scopes/ScopeImplementations.swift
   Scopes/ScopeSyntax.swift
   Scopes/SequentialScopeSyntax.swift
@@ -29,16 +29,22 @@ add_swift_syntax_library(SwiftLexicalLookup
   QualifiedLookup/DeclName.swift
   QualifiedLookup/DeclScope.swift
   QualifiedLookup/MemberKind.swift
+  QualifiedLookup/ModuleLookup.swift
   QualifiedLookup/NominalTypeDeclSyntax.swift
+  QualifiedLookup/TypeDeclSyntax.swift
+  QualifiedLookup/TypeLikeSyntax.swift
   QualifiedLookup/ValueDeclSyntax.swift
 
-  # TypeLookup/MemberLookupResult.swift
-  # TypeLookup/ModuleLookup.swift
+  TypeLookup/ExtensionFinder.swift
   TypeLookup/PartialTypeResolution.swift
-  # TypeLookup/SymbolTable.swift
-  # TypeLookup/TypeName.swift
-  # TypeLookup/TypeNameResolution.swift
-  # TypeLookup/TypeResolution.swift
+  TypeLookup/SymbolTable+TypeGraph.swift
+  TypeLookup/SymbolTable.swift
+  TypeLookup/TypeGraph+TypeRef.swift
+  TypeLookup/TypeGraph.swift
+  TypeLookup/TypeResolver+Failure.swift
+  TypeLookup/TypeResolver+TypeResult.swift
+  TypeLookup/TypeResolver.swift
+  TypeLookup/UnqualifiedTypeLookup.swift
 )
 
 target_link_swift_syntax_libraries(SwiftLexicalLookup PUBLIC

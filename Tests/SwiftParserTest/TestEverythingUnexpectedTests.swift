@@ -27,7 +27,7 @@ final class TestEverythingUnexpectedTests: ParserTestCase {
       }
       """
 
-    var parser = Parser(source, experimentalFeatures: ._test_EverythingUnexpected)
+    var parser = Parser(source, languageFeatures: ._test_EverythingUnexpected)
     let sourceFile = SourceFileSyntax.parse(from: &parser)
 
     // With _test_EverythingUnexpected, statements should be empty

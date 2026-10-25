@@ -139,7 +139,7 @@ public struct GenericArgumentClauseSyntax: SyntaxProtocol, SyntaxHashable, _Leaf
   public func addArgument(_ element: GenericArgumentSyntax) -> GenericArgumentClauseSyntax {
     var collection: RawSyntax
     let arena = RawSyntaxArena()
-    if let col = raw.layoutView!.children[3] {
+    if let col = raw.layoutView!.realChild(at: 1) {
       collection = col.layoutView!.appending(element.raw, arena: arena)
     } else {
       collection = RawSyntax.makeLayout(kind: SyntaxKind.genericArgumentList,
@@ -547,7 +547,7 @@ public struct GenericParameterClauseSyntax: SyntaxProtocol, SyntaxHashable, _Lea
   public func addParameter(_ element: GenericParameterSyntax) -> GenericParameterClauseSyntax {
     var collection: RawSyntax
     let arena = RawSyntaxArena()
-    if let col = raw.layoutView!.children[3] {
+    if let col = raw.layoutView!.realChild(at: 1) {
       collection = col.layoutView!.appending(element.raw, arena: arena)
     } else {
       collection = RawSyntax.makeLayout(kind: SyntaxKind.genericParameterList,
@@ -748,7 +748,7 @@ public struct GenericParameterSyntax: SyntaxProtocol, SyntaxHashable, _LeafSynta
   public func addAttribute(_ element: Syntax) -> GenericParameterSyntax {
     var collection: RawSyntax
     let arena = RawSyntaxArena()
-    if let col = raw.layoutView!.children[1] {
+    if let col = raw.layoutView!.realChild(at: 0) {
       collection = col.layoutView!.appending(element.raw, arena: arena)
     } else {
       collection = RawSyntax.makeLayout(kind: SyntaxKind.attributeList,
@@ -1376,7 +1376,7 @@ public struct GenericWhereClauseSyntax: SyntaxProtocol, SyntaxHashable, _LeafSyn
   public func addRequirement(_ element: GenericRequirementSyntax) -> GenericWhereClauseSyntax {
     var collection: RawSyntax
     let arena = RawSyntaxArena()
-    if let col = raw.layoutView!.children[3] {
+    if let col = raw.layoutView!.realChild(at: 1) {
       collection = col.layoutView!.appending(element.raw, arena: arena)
     } else {
       collection = RawSyntax.makeLayout(kind: SyntaxKind.genericRequirementList,
@@ -1435,6 +1435,8 @@ public struct GuardStmtSyntax: StmtSyntaxProtocol, SyntaxHashable, _LeafStmtSynt
 
   /// - Parameters:
   ///   - leadingTrivia: Trivia to be prepended to the leading trivia of the node’s first token. If the node is empty, there is no token to attach the trivia to and the parameter is ignored.
+  ///   - conditions: The comma-separated conditions of the guard statement.
+  ///   - body: The code block executed if any of the conditions is not satisfied.
   ///   - trailingTrivia: Trivia to be appended to the trailing trivia of the node’s last token. If the node is empty, there is no token to attach the trivia to and the parameter is ignored.
   public init(
     leadingTrivia: Trivia? = nil,
@@ -1514,6 +1516,7 @@ public struct GuardStmtSyntax: StmtSyntaxProtocol, SyntaxHashable, _LeafStmtSynt
     }
   }
 
+  /// The comma-separated conditions of the guard statement.
   public var conditions: ConditionElementListSyntax {
     get {
       return Syntax(self).child(at: 3)!.cast(ConditionElementListSyntax.self)
@@ -1534,7 +1537,7 @@ public struct GuardStmtSyntax: StmtSyntaxProtocol, SyntaxHashable, _LeafStmtSynt
   public func addCondition(_ element: ConditionElementSyntax) -> GuardStmtSyntax {
     var collection: RawSyntax
     let arena = RawSyntaxArena()
-    if let col = raw.layoutView!.children[3] {
+    if let col = raw.layoutView!.realChild(at: 1) {
       collection = col.layoutView!.appending(element.raw, arena: arena)
     } else {
       collection = RawSyntax.makeLayout(kind: SyntaxKind.conditionElementList,
@@ -1580,6 +1583,7 @@ public struct GuardStmtSyntax: StmtSyntaxProtocol, SyntaxHashable, _LeafStmtSynt
     }
   }
 
+  /// The code block executed if any of the conditions is not satisfied.
   public var body: CodeBlockSyntax {
     get {
       return Syntax(self).child(at: 7)!.cast(CodeBlockSyntax.self)
@@ -2278,7 +2282,7 @@ public struct IfConfigDeclSyntax: DeclSyntaxProtocol, SyntaxHashable, _LeafDeclS
   public func addClause(_ element: IfConfigClauseSyntax) -> IfConfigDeclSyntax {
     var collection: RawSyntax
     let arena = RawSyntaxArena()
-    if let col = raw.layoutView!.children[1] {
+    if let col = raw.layoutView!.realChild(at: 0) {
       collection = col.layoutView!.appending(element.raw, arena: arena)
     } else {
       collection = RawSyntax.makeLayout(kind: SyntaxKind.ifConfigClauseList,
@@ -2548,7 +2552,7 @@ public struct IfExprSyntax: ExprSyntaxProtocol, SyntaxHashable, _LeafExprSyntaxN
   public func addCondition(_ element: ConditionElementSyntax) -> IfExprSyntax {
     var collection: RawSyntax
     let arena = RawSyntaxArena()
-    if let col = raw.layoutView!.children[3] {
+    if let col = raw.layoutView!.realChild(at: 1) {
       collection = col.layoutView!.appending(element.raw, arena: arena)
     } else {
       collection = RawSyntax.makeLayout(kind: SyntaxKind.conditionElementList,
@@ -3043,7 +3047,7 @@ public struct ImportDeclSyntax: DeclSyntaxProtocol, SyntaxHashable, _LeafDeclSyn
   public func addAttribute(_ element: Syntax) -> ImportDeclSyntax {
     var collection: RawSyntax
     let arena = RawSyntaxArena()
-    if let col = raw.layoutView!.children[1] {
+    if let col = raw.layoutView!.realChild(at: 0) {
       collection = col.layoutView!.appending(element.raw, arena: arena)
     } else {
       collection = RawSyntax.makeLayout(kind: SyntaxKind.attributeList,
@@ -3089,7 +3093,7 @@ public struct ImportDeclSyntax: DeclSyntaxProtocol, SyntaxHashable, _LeafDeclSyn
   public func addModifier(_ element: DeclModifierSyntax) -> ImportDeclSyntax {
     var collection: RawSyntax
     let arena = RawSyntaxArena()
-    if let col = raw.layoutView!.children[3] {
+    if let col = raw.layoutView!.realChild(at: 1) {
       collection = col.layoutView!.appending(element.raw, arena: arena)
     } else {
       collection = RawSyntax.makeLayout(kind: SyntaxKind.declModifierList,
@@ -3192,7 +3196,7 @@ public struct ImportDeclSyntax: DeclSyntaxProtocol, SyntaxHashable, _LeafDeclSyn
   public func addPathComponent(_ element: ImportPathComponentSyntax) -> ImportDeclSyntax {
     var collection: RawSyntax
     let arena = RawSyntaxArena()
-    if let col = raw.layoutView!.children[9] {
+    if let col = raw.layoutView!.realChild(at: 4) {
       collection = col.layoutView!.appending(element.raw, arena: arena)
     } else {
       collection = RawSyntax.makeLayout(kind: SyntaxKind.importPathComponentList,
@@ -3748,7 +3752,7 @@ public struct InheritanceClauseSyntax: SyntaxProtocol, SyntaxHashable, _LeafSynt
   public func addInheritedType(_ element: InheritedTypeSyntax) -> InheritanceClauseSyntax {
     var collection: RawSyntax
     let arena = RawSyntaxArena()
-    if let col = raw.layoutView!.children[3] {
+    if let col = raw.layoutView!.realChild(at: 1) {
       collection = col.layoutView!.appending(element.raw, arena: arena)
     } else {
       collection = RawSyntax.makeLayout(kind: SyntaxKind.inheritedTypeList,
@@ -4186,7 +4190,7 @@ public struct InitializerDeclSyntax: DeclSyntaxProtocol, SyntaxHashable, _LeafDe
   public func addAttribute(_ element: Syntax) -> InitializerDeclSyntax {
     var collection: RawSyntax
     let arena = RawSyntaxArena()
-    if let col = raw.layoutView!.children[1] {
+    if let col = raw.layoutView!.realChild(at: 0) {
       collection = col.layoutView!.appending(element.raw, arena: arena)
     } else {
       collection = RawSyntax.makeLayout(kind: SyntaxKind.attributeList,
@@ -4232,7 +4236,7 @@ public struct InitializerDeclSyntax: DeclSyntaxProtocol, SyntaxHashable, _LeafDe
   public func addModifier(_ element: DeclModifierSyntax) -> InitializerDeclSyntax {
     var collection: RawSyntax
     let arena = RawSyntaxArena()
-    if let col = raw.layoutView!.children[3] {
+    if let col = raw.layoutView!.realChild(at: 1) {
       collection = col.layoutView!.appending(element.raw, arena: arena)
     } else {
       collection = RawSyntax.makeLayout(kind: SyntaxKind.declModifierList,
