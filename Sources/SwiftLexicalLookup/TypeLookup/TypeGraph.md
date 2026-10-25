@@ -5,6 +5,8 @@ The `TypeGraph` keeps track of which declaration groups introduce which type mem
 1. Type aliases make finding extensions a global problem. To resolve “A,” we can’t just find `extension A {}`; we also need, say, `extension AliasedA {}`. Instead, we have to bind all accessible extensions to determine which extensions actually resolve to `A`.
 2. We can extend a type declared in an extension, making extension binding incremental. In other words, one-by-one, we must resolve each extension, admit it into a dependency graph, and evict any dependent extensions.
 
+## Design
+
 ### Conceptual Graph
 
 Conceptually, `TypeGraph` is a directed acyclic graph where:
@@ -151,7 +153,9 @@ flowchart TD
 
 > Note: `TypeGraph` stores only part of this: each extension's state, plus the nominal type `MyModule::A` (with the type tables of `struct A` and `extension A`, and `extension A.B` as a dependent on its members `B` and `A`). We find the members `A > B` and `A > A` in those type tables on demand.
 
-## Implementation
+## Detailed Design
+
+### Invariants
 
 Our graph is complex, so we need to maintain some core invariants:
 
@@ -194,17 +198,91 @@ Only these operations should mutate the graph. Each core operation assumes the g
 
 ### Lookup
 
-`findMemberType` looks up the member `Base > Name`. A local base type has no extensions, so we just search its main declaration. For an admitted base type, we collect the type tables of its main declaration and every bound extension, and order them for shadowing: declaration groups in the origin's file first, then the rest of the origin's module, then other modules. We then gather every declaration of `Name` in that order. The result is recorded in the `DependencyTracker`, so repeating a lookup with the same tracker reuses it, and the recorded lookups become the extension's dependencies.
+`findMemberType` looks up the member `Base > Name`. A local base type has no extensions, so we just search its main declaration. For an admitted base type, we collect the type tables of its main declaration and every bound extension, and order them for shadowing: declaration groups in the origin's file first, then the rest of the origin's module, then other modules. Then, we then gather every declaration of `Name` in that order. The result is recorded in the `DependencyTracker`, so repeating a lookup with the same tracker reuses it, and the recorded lookups become the extension's dependencies.
 
-Lookup is slow: it costs O(E_T) for the base type `T`, since it visits and buckets every bound extension of `T`, even ones that don't declare `Name`. That's because, for now, we want constant-time access to extensions when admitting and evicting them (`boundExtensions` is a dictionary keyed by extension), which a sorted or indexed structure wouldn't preserve. We could improve this in the future.
+Lookup is slow: it costs `O(E_T)` for the base type `T`, since it visits and buckets every bound extension of `T`, even ones that don't declare `Name`. That's because, for now, we want constant-time access to extensions when admitting and evicting them (`boundExtensions` is a dictionary keyed by extension), which a sorted or indexed structure wouldn't preserve. We could improve this inefficiency in the future.
 
-### Eviction Ops
+### Admission & Eviction
 
-Extension/Type Eviction + Example
+The following operations are mutually recursive. Each primitive (drawn rounded below) is called after we've taken all the rights steps to meet the preconditions.
 
-## Complexity
+#### Evict Extension
 
-## Design Rationale
+`_evictExtension` removes an extension from the graph. If the extension is bound, it first evicts each member type the extension introduces, which also evicts their dependents and any nested nominal types.
+
+```mermaid
+flowchart LR
+    evictExt["_evictExtension(ext)"]
+    hasMember{{"Is there a member<br/>'T > M'?"}}
+    evictMember["_evictMemberType(T > M)"]
+    removeExt(["_removeExtension(ext)"])
+
+    evictExt --> hasMember
+    hasMember -->|Yes| evictMember
+    evictMember --> hasMember
+    hasMember -->|No| removeExt
+```
+
+#### Evict Dependents
+
+To remove a declaration group, we need to ensure the members it introduces don't have any lingering dependents, which is where `_evictDependents` comes in. Given a type `T` and a set of members, it evicts every extension that depends on some `T > M` in that set.
+
+```mermaid
+flowchart LR
+    evictDeps["_evictDependents(T, members)"]
+    whileDep{{"while there's a _dependent_ on some 'M' in 'members'"}}
+    evictExt["_evictExtension(dependent)"]
+
+    evictDeps --> whileDep --> evictExt
+```
+
+#### Evict Member Type
+
+`_evictMemberType` evicts one member `T > M` introduced by a declaration group. It evicts the member's dependents and, if the member declares the admitted nominal type `T.M`, removes `T.M`: first its nested member types and bound extensions, then the type itself.
+
+```mermaid
+flowchart LR
+    evictMember["_evictMemberType(T > M)"]
+    evictDeps["_evictDependents(T, [M])"]
+    isNominal{{"Does 'M' admit the<br/>nominal type 'T.M'?"}}
+    done["return"]
+    hasNested{{"Is there a member<br/>'T.M > N'?"}}
+    evictNested["_evictMemberType(T.M > N)"]
+    hasExt{{"Is there an extension<br/>bound to 'T.M'?"}}
+    evictExt["_evictExtension(ext)"]
+    removeType(["_removeType(T.M)"])
+
+    evictMember --> evictDeps --> isNominal
+    isNominal -->|No| done
+    isNominal -->|Yes| hasNested
+    hasNested -->|Yes| evictNested
+    evictNested --> hasNested
+    hasNested -->|No| hasExt
+    hasExt -->|Yes| evictExt
+    evictExt --> hasExt
+    hasExt -->|No| removeType
+```
+
+#### `admitExtension`
+
+`admitExtension` uses the above. If binding the extension to `T` would create a cycle, we admit it unbound instead. Otherwise, its members change the result of any lookup of `T > M` for those members, so we evict `T`'s dependents on them before adding the extension.
+
+```mermaid
+flowchart LR
+    admitExt["admitExtension(ext)"]
+    isBound{{"Does 'ext' bind to some 'T'<br/>without a cycle?"}}
+    evictDeps["_evictDependents(T, ext.members)"]
+    addExt(["_addExtension(ext)"])
+
+    admitExt --> isBound
+    isBound -->|Yes| evictDeps
+    evictDeps --> addExt
+    isBound -->|No| addExt
+```
+
+The recursion `_evictDependents → _evictExtension → _evictMemberType → _evictDependents` terminates because each `_evictExtension` removes an admitted extension, and the graph is finite.
+
+### Design Rationale
 
 #### Why not derive dependencies from the extended type?
 
@@ -221,3 +299,7 @@ Because `TypeResolver` ultimately cares about resolving to unique nominal types.
 #### Why are `namesToTypes` and `extensionsToState` keyed by syntax nodes?
 
 While the conceptual graph has member types as nodes and declaration groups as edges, `SymbolTable` drives `TypeGraph` through `NominalTypeDeclSyntax` and `ExtensionDeclSyntax` syntax nodes. That is, `SymbolTable` will request that a particular nominal type or extension be admitted; it doesn't have knowledge of member types.
+
+#### Why "admit" and not "bind" extensions?
+
+The compiler uses the term "extension binding." However, here, we say that the graph *admits* extensions (whether valid or invalid), and only *binds* them if they successfully resolve and don't cause cycles. Thus, "extension admission" emphasizes that the graph is often in an imperfect state that contains unbound/erroneous extensions.
