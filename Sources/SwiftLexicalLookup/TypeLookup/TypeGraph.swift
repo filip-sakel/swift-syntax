@@ -21,13 +21,18 @@ private import SwiftDiagnostics
 import SwiftDiagnostics
 #endif
 
-/// A directed acyclic graph where types are nodes and extensions are edges.
+/// A directed acyclic graph where type members (`Base > Name`) are nodes and
+/// dependencies are edges, each labeled with the declaration group that
+/// introduces its target member (see `TypeGraph.md` > The conceptual graph).
 ///
-///
-/// Note: This graph is complex because extension binding depends on type members, e.g.
-///       ResolvedType>TypeMember because the resolved type might be invalid or on alias.
-///       However, we also keep track of nominal types because they might be introduced by
-///       extensions and we crucially resolve to them and need a unique reference to each.
+/// Note: The graph is stored compactly. We only store:
+///       1. Admitted nominal types (`namesToTypes`), because resolution must
+///          produce a unique reference to each nominal type.
+///       2. The state of each admitted extension (`extensionsToState`), because
+///          extension binding is incremental, so we must quickly admit and
+///          evict extensions.
+///       `TypeResolver` recovers the other members (type aliases, redeclarations,
+///       missing members) from the type tables on demand.
 ///
 /// Complexity
 /// ==========
@@ -150,7 +155,6 @@ public struct TypeGraph {
     namesToTypes = [:]
     extensionsToState = [:]
   }
-
 }
 
 // MARK: TypeGraph.NominalType
@@ -751,13 +755,16 @@ extension TypeGraph {
 // MARK: Mutation Primitives
 
 extension TypeGraph {
-  /// Add the given extension state and register its dependents.
+  /// Add the given extension state, register its dependents,
+  /// and bind to type (if resolved).
   ///
   /// Preconditions:
-  /// 1. The graph is valid
-  /// 2. If bound, the extended type is valid and has no dependents on the introduced
-  ///    members
-  /// 3. The given dependencies reference valid types
+  /// 0. The graph is valid
+  /// 1. The extension is unadmitted
+  /// 2. Its dependencies match the current type members and form no cycle
+  /// 3. If bound, the extended type is valid and has no dependents on the
+  ///    introduced members
+  /// 4. The given dependencies reference valid types
   private mutating func _addExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionMembers: TypeTable,
@@ -821,9 +828,14 @@ extension TypeGraph {
     }
   }
 
-  /// Removes extension maintaining all invariants.
-  /// The extension must be bound, its type members must have no
-  /// dependents and must be unregistered.
+  /// Removes extension state, unregister as dependent, unbind from
+  /// type (if bound).
+  ///
+  /// Preconditions:
+  /// 0. The graph is valid
+  /// 1. The extension must be admitted
+  /// 2. Its member types must have no dependents (if bound)
+  /// 3. Its member types must be unregistered (if bound)
   private mutating func _removeExtension(
     _ extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionFileInfo: FileInfo,
@@ -839,11 +851,10 @@ extension TypeGraph {
 
     // Ensure we don't have dependents/members if bound
     if case .success(let extendedTypeName) = extensionState.resolvedType {
-      // TODO: Shouldn't it suffice to check that we simply have no members (if we keep assett)
-      // (Because if there are no registered members, we can't have any dependents on our members -- vacuously)
-      //
-      // Answer: Maybe it's because type member != nominal type (i.e., someone cud still depend on our type aliases,
-      // even if we've evicted all member nominal types)
+      // Note: It doesn't suffice to check that we simply have no bound members, because
+      // `TypeGraph` is dense, meaning that it doesn't store members like type aliases.
+      // Thus, someone could still depend on a type alias we introduce even if we evicted
+      // all member nominal types.
 
       // Get the type
       let extendedType = namesToTypes[extendedTypeName, default: Self.internalError(.danglingExtension)]
@@ -896,6 +907,16 @@ extension TypeGraph {
 }
 
 extension TypeGraph {
+  /// Adds the given nominal type.
+  ///
+  /// Preconditions:
+  /// 0. The graph is valid
+  /// 1. The type must be unadmitted
+  /// 2. The type is declared in a registered file root
+  /// 3. The type's parent must be admitted (if nested)
+  /// 4. If nested, call the parent `Outer` and the admitted type `Inner`.
+  ///    `Outer` must have no dependents on `Outer > Inner`.
+  /// 5. The given `mainDecl` cannot be admitted under a different name
   fileprivate mutating func _addType(
     mainDecl: Attached<NominalTypeDeclSyntax>,
     typeMembers: TypeTable,
@@ -912,6 +933,7 @@ extension TypeGraph {
     Self.internalAssert(namesToTypes[typeName] == nil, .typeReadmission)
     // Assert file info exists
     Self.internalAssert(symbolTable.getFileInfo(mainDecl.fileRoot) != nil, .unknownTypeFile)
+    // FIXME: Assert precondition 5 & make sure callers know.
 
     // Create a new type
     let type = NominalType(
@@ -924,8 +946,12 @@ extension TypeGraph {
     return type
   }
 
-  /// Removes the given type. Requires that the type have no bound extensions,
-  /// no dependents, and that `nominalDecl` matches the expected
+  /// Removes the given type.
+  ///
+  /// Preconditions:
+  /// 1. The type has no bound extensions
+  /// 2. The type has no dependents
+  /// 3. The type has no admitted member types
   private mutating func _removeType(
     nominalDeclFileInfo: FileInfo,
     typeName: GlobalTypeName,
@@ -936,7 +962,6 @@ extension TypeGraph {
 
     // Asserts
     _assertInvariants(symbolTable: symbolTable)
-    // _assertInvariants only traps if this primitive is wrong; the asserts below cover the preconditions.
     defer { _assertInvariants(symbolTable: symbolTable) }
     // Ensure we have no bound extensions (if we have redeclarations,
     // the type is ambiguous so not extensions should have resolved to
