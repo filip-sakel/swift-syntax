@@ -1502,6 +1502,9 @@ extension TypeGraph {
     // bind dependencies, this will always be a superset of the currently bound
     // extensions. Further, if an extension was already evicted, `_evictExtension`
     // will just skip it.
+    //
+    // FIXME: Possible bug (from reading, not tested): in _evictMemberType (TypeGraph.swift:1505), the loop over memberNominal.boundExtensions uses a copy taken before the nested-member recursion. The comment says _evictExtension "will just skip" an extension that's already been evicted. It doesn't: _evictExtension calls internalError(.danglingExtension) when the extension has no stored state.
+    // This could happen if an extension bound to T.M also depends on a member T.M > N. For example, inside T.M there's typealias N = M, and the extension is extension T.M.N. The nested recursion evicts that extension, and then the loop over the stale copy hits it again.
     for moduleExtensions in memberNominal.boundExtensions.values {
       for (extensionDecl, _) in moduleExtensions {
         _evictExtension(
