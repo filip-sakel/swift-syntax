@@ -914,9 +914,7 @@ extension TypeGraph {
   /// 1. The type must be unadmitted
   /// 2. The type is declared in a registered file root
   /// 3. The type's parent must be admitted (if nested)
-  /// 4. If nested, call the parent `Outer` and the admitted type `Inner`.
-  ///    `Outer` must have no dependents on `Outer > Inner`.
-  /// 5. The given `mainDecl` cannot be admitted under a different name
+  /// 4. The given `mainDecl` cannot be admitted under a different name
   fileprivate mutating func _addType(
     mainDecl: Attached<NominalTypeDeclSyntax>,
     typeMembers: TypeTable,
@@ -933,7 +931,6 @@ extension TypeGraph {
     Self.internalAssert(namesToTypes[typeName] == nil, .typeReadmission)
     // Assert file info exists
     Self.internalAssert(symbolTable.getFileInfo(mainDecl.fileRoot) != nil, .unknownTypeFile)
-    // FIXME: Assert precondition 5 & make sure callers know.
 
     // Create a new type
     let type = NominalType(

@@ -184,6 +184,8 @@ Only these operations should mutate the graph. Each core operation assumes the g
 
 `_addType` imposes the additional precondition that if the given type "Inner" is nested, it's parent "Outer" (resolved through a nominal type or extension) is admitted and without dependents on the member "Outer" > "Inner". `_addType` simply adds the given type node to the graph.
 
+> Note: We don't care about dependents on "Outer" > "Inner" when adding a type "Outer.Inner", because admitting "Inner" doesn't affect lookup of `Outer > Inner`, keeping dependents valid. Specifically, lookup results only change when `NominalType/boundExtensions` changes, hence why only `_addExtension` and `_removeExtension` check for dependents.
+
 #### Remove Type
 
 `_removeType` imposes the additional precondition that the given type declaration have no bound extensions, or any type members, and it's parent doesn't have dependents on its member. `_removeType` simply removes the given type node from the graph.
