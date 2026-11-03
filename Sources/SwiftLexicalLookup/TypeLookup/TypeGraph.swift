@@ -548,8 +548,6 @@ extension TypeGraph {
 
     /// In `_removeExtension`, the extension isn't admitted.
     case invalidExtension
-    /// In `_removeExtension`, the given extension is already non-admitted.
-    case extensionReeviction
     /// In `_removeExtension`, the given extension's type members still have dependents.
     case remainingExtensionDependents
     /// In `_removeExtension`, the given extension still has admitted nominal member types.
@@ -564,8 +562,8 @@ extension TypeGraph {
     /// Explanation: Without advancing, we'll infinitely descend into the same decl.
     case cycleDetectorRedescent
 
-    // In `ExtensionDependency.init(dependencyTypeName:members:)`, the given
-    // `members` is empty.
+    /// In `ExtensionDependency.init(dependencyTypeName:members:)`, the given
+    /// `members` is empty.
     case emptyDependencyMembers
   }
 
@@ -864,7 +862,7 @@ extension TypeGraph {
       // Get the extension members and the type with the extension unbound
       let extensionMembers = extendedType.boundExtensions[extensionFileInfo.module, default: [:]][
         extensionDecl,
-        default: Self.internalError(.extensionReeviction) as TypeTable
+        default: Self.internalError(.invalidExtension) as TypeTable
       ]
       // Ensure no one depends on our members
       Self.internalAssert(
@@ -1999,7 +1997,7 @@ extension TypeGraph.ExtensionState: CustomDebugStringConvertible {
         dependencies: [
           \(dependenciesDescriptions)
         ],
-        resolvedType: \(indentedTypeDescription))
+        resolvedType: \(indentedTypeDescription)
       )
       """
   }
