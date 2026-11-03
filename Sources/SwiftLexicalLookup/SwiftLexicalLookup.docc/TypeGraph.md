@@ -39,7 +39,7 @@ In the conceptual graph, member nodes are boxes and each edge passes through a p
 ```mermaid
 flowchart TD
     root["MyModule"]
-    memberA["MyModule.A > A<br/>(admits MyModule::A)"]
+    memberA["MyModule.A > A<br/>(admits 'MyModule::A')"]
     file(["main.swift"])
 
     root --- file
@@ -57,7 +57,7 @@ struct A {}
 //     `- Type 'MyModule::A'
 extension A.B { struct A {} }
 //        |- Resolved type: failed (type 'A' has no member type 'B')
-//        `- Depends on type 'A' > member 'B"
+//        `- Depends on type 'A' > member 'B'
 extension A { typealias B = A }
 ```
 
@@ -200,7 +200,7 @@ Only these operations should mutate the graph. Each core operation assumes the g
 
 ### Lookup
 
-`findMemberType` looks up the member `Base > Name`. A local base type has no extensions, so we just search its main declaration. For an admitted base type, we collect the type tables of its main declaration and every bound extension, and order them for shadowing: declaration groups in the origin's file first, then the rest of the origin's module, then other modules. Then, we then gather every declaration of `Name` in that order. The result is recorded in the `DependencyTracker`, so repeating a lookup with the same tracker reuses it, and the recorded lookups become the extension's dependencies.
+`findMemberType` looks up the member `Base > Name`. A local base type has no extensions, so we just search its main declaration. For an admitted base type, we collect the type tables of its main declaration and every bound extension, and order them for shadowing: declaration groups in the origin's file first, then the rest of the origin's module, then other modules. Then, we gather every declaration of `Name` in that order. The result is recorded in the `DependencyTracker`, so repeating a lookup with the same tracker reuses it, and the recorded lookups become the extension's dependencies.
 
 Lookup is slow: it costs `O(E_T)` for the base type `T`, since it visits and buckets every bound extension of `T`, even ones that don't declare `Name`. That's because, for now, we want constant-time access to extensions when admitting and evicting them (`boundExtensions` is a dictionary keyed by extension), which a sorted or indexed structure wouldn't preserve. We could improve this inefficiency in the future.
 
