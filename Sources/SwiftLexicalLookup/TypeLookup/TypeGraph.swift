@@ -308,7 +308,7 @@ extension TypeGraph {
       dependencyTypeName: TypeGraph.GlobalTypeName,
       members: [(name: Identifier, decls: [Member])]
     ) {
-      TypeGraph.internalAssert(!members.isEmpty, .emptyDependencyMembers)
+      assert(!members.isEmpty, "`members` must be nonempty")
 
       self.baseTypeName = dependencyTypeName
       self.members = members
@@ -474,8 +474,7 @@ extension TypeGraph {
 // MARK: Invariants
 
 extension TypeGraph {
-  /// The first cases are spec invariants (see `_firstInvariantViolation`); the
-  /// rest are cheap, targeted mutation-primitive preconditions that pinpoint the failing caller.
+  /// Specification invariants (see `_firstInvariantViolation`)
   @_spi(_QualifiedLookupTests)
   public enum GraphFailure {
     /// A nominal-type declaration is admitted under more than one name.
@@ -511,82 +510,6 @@ extension TypeGraph {
     /// A bound extension's recursive dependencies rely on a member that the
     /// extension introduces.
     case dependencyCycle
-
-    /// In `_addType`, the given type is already admitted.
-    case typeReadmission
-    /// In `_addType`, the given type declaration isn't in the `SymbolTable`.
-    case unknownTypeFile
-    /// In `_addType`, the base declaration group is invalid. One of the
-    /// following happened:
-    /// 1. We have a nested name but `baseDeclGroup == nil`
-    /// 2. The base declaratin group is a nominal type that's not admitted.
-    /// 3. The base declaration group is an extension that's not admitted
-    ///    or not bound to the base type name.
-    case invalidBaseDeclGroup
-
-    /// In `_removeType`, the given type isn't admitted.
-    case invalidType
-    /// In `_removeType`, the given type still has bound extensions.
-    case remainingTypeExtensions
-    /// In `_removeType`, the given type still has dependents.
-    case remainingTypeDependents
-    /// In `_removeType`, the given type still has admitted nominal member types.
-    case remainingTypeMembers
-    /// In `_removeType`, the extracted file info for `nominalDecl` doesn't match
-    /// the type's main decl.
-    case invalidFileInfo
-
-    /// In `_addExtension`, the given extension is already admitted.
-    case extensionReadmission
-    /// In `_addExtension`, the given extension declaration isn't in the
-    /// `SymbolTable`.
-    case unknownExtensionFile
-    /// In `_addExtension`, the extension's resolved type isn't admitted.
-    case invalidExtendedType
-    /// In `_addExtension`, `QualifiedLookupDependency/extendedTypeName` refers to an unadmitted type.
-    case invalidDependencyType
-
-    /// In `_removeExtension`, the extension isn't admitted.
-    case invalidExtension
-    /// In `_removeExtension`, the given extension's type members still have dependents.
-    case remainingExtensionDependents
-    /// In `_removeExtension`, the given extension still has admitted nominal member types.
-    case remainingExtensionMembers
-
-    /// In `_evictDependents`, `dependencyTypeName` isn't admitted.
-    case evictedDependencyType
-
-    /// In `_CycleDetectorFrame/push`, the frame pushes an extension
-    /// right after a descent without advancing the index.
-    ///
-    /// Explanation: Without advancing, we'll infinitely descend into the same decl.
-    case cycleDetectorRedescent
-
-    /// In `ExtensionDependency.init(dependencyTypeName:members:)`, the given
-    /// `members` is empty.
-    case emptyDependencyMembers
-  }
-
-  private static func internalAssert(
-    _ condition: @autoclosure () -> Bool,
-    _ error: GraphFailure,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) {
-    #if DEBUG
-    if !condition() {
-      Self.internalError(error, resultType: Never.self, file: file, line: line)
-    }
-    #endif
-  }
-
-  private static func internalError<T>(
-    _ error: GraphFailure,
-    resultType: T.Type = T.self,
-    file: StaticString = #file,
-    line: UInt = #line
-  ) -> T {
-    fatalError("[SwiftLexicalLookup] Internal error: \(error)", file: file, line: line)
   }
 }
 
@@ -601,7 +524,7 @@ extension TypeGraph {
   ) {
     #if DEBUG
     if let violation = _firstInvariantViolation(symbolTable: symbolTable) {
-      Self.internalError(violation, resultType: Never.self, file: file, line: line)
+      assertionFailure("\(violation)", file: file, line: line)
     }
     #endif
   }
@@ -779,18 +702,23 @@ extension TypeGraph {
     //    the extension introduces (`.staleDependency`).
     defer { _assertInvariants(symbolTable: symbolTable) }
     // Assert extension isn't already admitted
-    Self.internalAssert(extensionsToState[extensionDecl] == nil, .extensionReadmission)
+    assert(extensionsToState[extensionDecl] == nil, "Extension is already admitted")
     // Assert extension is in symbol table.
-    Self.internalAssert(symbolTable.getFileInfo(extensionDecl.fileRoot) != nil, .unknownExtensionFile)
+    assert(
+      symbolTable.getFileInfo(extensionDecl.fileRoot) != nil,
+      "Extension file isn't registered in the symbol table"
+    )
     // Assert type has no conflicting dependents
     if case .success(let typeName) = resolvedType {
-      Self.internalAssert(
-        namesToTypes[typeName, default: Self.internalError(.invalidExtendedType)].dependents.allSatisfy({
-          dependent in
+      guard let extendedType = namesToTypes[typeName] else {
+        fatalError("Extended type isn't admitted")
+      }
+      assert(
+        extendedType.dependents.allSatisfy({ dependent in
           dependent.dependentExtension != extensionDecl
             || extensionMembers.typeMembersToDecls[dependent.memberType] == nil
         }),
-        .remainingExtensionDependents
+        "Extended type has dependents on the extension's members"
       )
     }
 
@@ -811,18 +739,20 @@ extension TypeGraph {
         )
       })
       // Add dependents
-      namesToTypes[dependency.baseTypeName, default: Self.internalError(.invalidDependencyType)].dependents.append(
-        contentsOf: dependents
-      )
+      guard var dependencyType = namesToTypes[dependency.baseTypeName] else {
+        fatalError("Dependency type isn't admitted")
+      }
+      dependencyType.dependents.append(contentsOf: dependents)
+      namesToTypes[dependency.baseTypeName] = dependencyType
     }
 
     // Bind to type, if resolved
     if case .success(let typeName) = resolvedType {
-      namesToTypes[typeName, default: Self.internalError(.invalidExtendedType)]
-        .boundExtensions[
-          extensionModule,
-          default: [:]
-        ][extensionDecl] = extensionMembers
+      guard var extendedType = namesToTypes[typeName] else {
+        fatalError("Extended type isn't admitted")
+      }
+      extendedType.boundExtensions[extensionModule, default: [:]][extensionDecl] = extensionMembers
+      namesToTypes[typeName] = extendedType
     }
   }
 
@@ -845,7 +775,9 @@ extension TypeGraph {
     defer { _assertInvariants(symbolTable: symbolTable) }
 
     // Remove state
-    let extensionState = extensionsToState.removeValue(forKey: extensionDecl) ?? Self.internalError(.invalidExtension)
+    guard let extensionState = extensionsToState.removeValue(forKey: extensionDecl) else {
+      fatalError("Extension isn't admitted")
+    }
 
     // Ensure we don't have dependents/members if bound
     if case .success(let extendedTypeName) = extensionState.resolvedType {
@@ -855,24 +787,25 @@ extension TypeGraph {
       // all member nominal types.
 
       // Get the type
-      let extendedType = namesToTypes[extendedTypeName, default: Self.internalError(.danglingExtension)]
+      guard let extendedType = namesToTypes[extendedTypeName] else {
+        fatalError("\(GraphFailure.danglingExtension)")
+      }
 
       // Check for dependents
       //
       // Get the extension members and the type with the extension unbound
-      let extensionMembers = extendedType.boundExtensions[extensionFileInfo.module, default: [:]][
-        extensionDecl,
-        default: Self.internalError(.invalidExtension) as TypeTable
-      ]
+      guard let extensionMembers = extendedType.boundExtensions[extensionFileInfo.module]?[extensionDecl] else {
+        fatalError("\(GraphFailure.unboundExtension)")
+      }
       // Ensure no one depends on our members
-      Self.internalAssert(
+      assert(
         extendedType.dependents.allSatisfy({
           extensionMembers.typeMembersToDecls[$0.memberType] == nil
         }),
-        .remainingExtensionDependents
+        "Extension's members still have dependents"
       )
       // Ensure all members are unregistered (only happens with nominal-type declarations)
-      Self.internalAssert(
+      assert(
         _firstRegisteredMemberName(
           declGroup: Attached<DeclGroupSyntaxType>(extensionDecl),
           declGroupFileInfo: extensionFileInfo,
@@ -880,26 +813,29 @@ extension TypeGraph {
           members: extensionMembers,
           symbolTable: symbolTable
         ) == nil,
-        .remainingExtensionMembers
+        "Extension still has admitted nominal member types"
       )
     }
 
     // Remove dependents
     for dependency in extensionState.dependencies {
       // Get dependency type
-      namesToTypes[dependency.baseTypeName, default: Self.internalError(.danglingDependency)]
-        .dependents.removeAll(where: { dependent in
-          dependent.dependentExtension == extensionDecl
-        })
+      guard var dependencyType = namesToTypes[dependency.baseTypeName] else {
+        fatalError("\(GraphFailure.danglingDependency)")
+      }
+      dependencyType.dependents.removeAll(where: { dependent in
+        dependent.dependentExtension == extensionDecl
+      })
+      namesToTypes[dependency.baseTypeName] = dependencyType
     }
 
     // Unbind from type, if resolved
     if case .success(let typeName) = extensionState.resolvedType {
-      namesToTypes[typeName, default: Self.internalError(.invalidExtendedType)]
-        .boundExtensions[
-          extensionFileInfo.module,
-          default: [:]
-        ][extensionDecl] = nil
+      guard var extendedType = namesToTypes[typeName] else {
+        fatalError("Extended type isn't admitted")
+      }
+      extendedType.boundExtensions[extensionFileInfo.module, default: [:]][extensionDecl] = nil
+      namesToTypes[typeName] = extendedType
     }
   }
 }
@@ -926,9 +862,12 @@ extension TypeGraph {
     // 2. `mainDecl` is already admitted under a different name (`.duplicateMainDecl`).
     defer { _assertInvariants(symbolTable: symbolTable) }
     // Assert we're not readmitting
-    Self.internalAssert(namesToTypes[typeName] == nil, .typeReadmission)
+    assert(namesToTypes[typeName] == nil, "Type is already admitted")
     // Assert file info exists
-    Self.internalAssert(symbolTable.getFileInfo(mainDecl.fileRoot) != nil, .unknownTypeFile)
+    assert(
+      symbolTable.getFileInfo(mainDecl.fileRoot) != nil,
+      "Type file isn't registered in the symbol table"
+    )
 
     // Create a new type
     let type = NominalType(
@@ -953,7 +892,9 @@ extension TypeGraph {
     symbolTable: SymbolTable
   ) {
     // Get the state
-    let type = namesToTypes[typeName, default: Self.internalError(.invalidType)]
+    guard let type = namesToTypes[typeName] else {
+      fatalError("Type isn't admitted")
+    }
 
     // Asserts
     _assertInvariants(symbolTable: symbolTable)
@@ -964,14 +905,14 @@ extension TypeGraph {
     // lingering extensions be bound to an unregistered type)
     //
     // Here, we check that each module has an empty list.
-    Self.internalAssert(
+    assert(
       type.boundExtensions.allSatisfy(\.value.isEmpty),
-      .remainingTypeExtensions
+      "Type still has bound extensions"
     )
     // Ensure we have no dependents (similar reasoning with above)
-    Self.internalAssert(
+    assert(
       type.dependents.isEmpty,
-      .remainingTypeDependents
+      "Type still has dependents"
     )
 
     // Ensure we have no member types (if originally bound)
@@ -990,7 +931,7 @@ extension TypeGraph {
       members: type.mainDeclMembers,
       symbolTable: symbolTable
     )
-    Self.internalAssert(memberTypeName == nil, .remainingTypeMembers)
+    assert(memberTypeName == nil, "Type still has admitted nominal member types")
 
     namesToTypes[typeName] = nil
   }
@@ -1032,7 +973,10 @@ extension TypeGraph._CycleDetectorFrame {
     }
   }
   fileprivate mutating func push(_ extensionDecl: Attached<ExtensionDeclSyntax>, index: Index) {
-    TypeGraph.internalAssert(!descended, .cycleDetectorRedescent)
+    assert(
+      !descended,
+      "Pushed an extension right after a descent without advancing (would descend infinitely)"
+    )
     stack.append((extensionDecl, index))
   }
 
@@ -1051,10 +995,15 @@ extension TypeGraph._CycleDetectorFrame {
 
     // Use `firstExtensionState` for first stack entry, if provided
     // Pushed extensions introduce a dependency's declaration, so they must be admitted
-    let state =
-      stack.count == 1
-      ? firstExtensionState
-      : graph.extensionsToState[extensionDecl, default: TypeGraph.internalError(.staleDependency)]
+    let state: TypeGraph.ExtensionState
+    if stack.count == 1 {
+      state = firstExtensionState
+    } else {
+      guard let pushedState = graph.extensionsToState[extensionDecl] else {
+        fatalError("\(TypeGraph.GraphFailure.staleDependency)")
+      }
+      state = pushedState
+    }
     // Note: The initial access at index `(0,0,0)` is safe because `members` is
     // nonempty according to `ExtensionDependency`, and `dependencies`
     // is nonempty by the `stack` invariant. However, `decls` can be empty
@@ -1096,9 +1045,11 @@ extension TypeGraph._CycleDetectorFrame {
     var previousIndex = stack[0].idx
     for (ext, idx) in stack.dropFirst() {
       // Extensions introducing a dependency's declarations must be admitted and bound
-      let state = graph.extensionsToState[ext, default: TypeGraph.internalError(.staleDependency)]
-      guard case .success(let extendedType) = state.resolvedType else {
-        TypeGraph.internalError(.staleDependency, resultType: Never.self)
+      guard let state = graph.extensionsToState[ext], case .success(let extendedType) = state.resolvedType else {
+        fatalError("\(TypeGraph.GraphFailure.staleDependency)")
+      }
+      guard let boundType = graph.getGlobalNominalTypeReference(name: extendedType) else {
+        fatalError("\(TypeGraph.GraphFailure.danglingExtension)")
       }
       // The previous extension's current decl introduced this extension (so it exists)
       let introducingDecl = previousState.dependencies[previousIndex.dependency].members[previousIndex.member]
@@ -1107,8 +1058,7 @@ extension TypeGraph._CycleDetectorFrame {
         TypeResolver.ExtensionCycleElement(
           introducingTypeDecl: introducingDecl.typeDecl.node,
           extensionDecl: ext.node,
-          boundType: graph.getGlobalNominalTypeReference(name: extendedType)
-            ?? TypeGraph.internalError(.danglingExtension)
+          boundType: boundType
         )
       )
       (previousState, previousIndex) = (state, idx)
@@ -1175,12 +1125,17 @@ extension TypeGraph {
         // their enclosing extensions might)
         let dependencyExtension = memberDecl?.introducingExtensionOrMainDecl,
         // Stop if we already have a cycle
-        visitedExtensions.insert(dependencyExtension).inserted,
-        // Skip if it has no dependencies
-        !extensionsToState[dependencyExtension, default: Self.internalError(.staleDependency)]
-          .dependencies.isEmpty
+        visitedExtensions.insert(dependencyExtension).inserted
       else {
         // No transitive dependencies; just advance
+        frame.advance(newIndex: newIndex)
+        continue
+      }
+      guard let dependencyState = extensionsToState[dependencyExtension] else {
+        fatalError("\(GraphFailure.staleDependency)")
+      }
+      // Skip if it has no dependencies
+      guard !dependencyState.dependencies.isEmpty else {
         frame.advance(newIndex: newIndex)
         continue
       }
@@ -1528,21 +1483,26 @@ extension TypeGraph {
     symbolTable: borrowing SymbolTable
   ) {
     // TODO: Find right error
-    let extensionState = extensionsToState[extensionDecl, default: Self.internalError(.danglingExtension)]
+    guard let extensionState = extensionsToState[extensionDecl] else {
+      fatalError("\(GraphFailure.danglingExtension)")
+    }
     // TODO: Find right error
-    let extensionFileInfo = symbolTable.getFileInfo(extensionDecl.fileRoot) ?? Self.internalError(.danglingExtension)
+    guard let extensionFileInfo = symbolTable.getFileInfo(extensionDecl.fileRoot) else {
+      fatalError("\(GraphFailure.danglingExtension)")
+    }
 
     // If bound, remove members
     if case .success(let extendedTypeName) = extensionState.resolvedType {
       // Get the extended-type name
-      let extendedType = namesToTypes[extendedTypeName, default: Self.internalError(.danglingExtension)]
+      guard let extendedType = namesToTypes[extendedTypeName] else {
+        fatalError("\(GraphFailure.danglingExtension)")
+      }
 
       // Find the members
       // TODO: Find right error
-      let extensionMembers = extendedType.boundExtensions[extensionFileInfo.module, default: [:]][
-        extensionDecl,
-        default: Self.internalError(.danglingExtension)
-      ]
+      guard let extensionMembers = extendedType.boundExtensions[extensionFileInfo.module]?[extensionDecl] else {
+        fatalError("\(GraphFailure.danglingExtension)")
+      }
 
       for (memberName, memberDecls) in extensionMembers.typeMembersToDecls {
         _evictMemberType(
@@ -1597,12 +1557,15 @@ extension TypeGraph {
     //
     // Note: We use a `while` loop because `_evictExtension` is recursive and can,
     // thus, change `namesToTypes[...].dependents` between iterations.
-    while let dependent = namesToTypes[dependencyTypeName, default: Self.internalError(.evictedDependencyType)]
-      .dependents
-      .last(where: { dependent in
-        dependencyMembers.typeMembersToDecls[dependent.memberType] != nil
-      })
-    {
+    while true {
+      guard let dependencyType = namesToTypes[dependencyTypeName] else {
+        fatalError("Dependency type isn't admitted")
+      }
+      guard
+        let dependent = dependencyType.dependents.last(where: { dependent in
+          dependencyMembers.typeMembersToDecls[dependent.memberType] != nil
+        })
+      else { break }
       log("Found conflict \(dependent.debugDescription)")
       _evictExtension(
         dependent.dependentExtension,
