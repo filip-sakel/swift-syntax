@@ -446,12 +446,12 @@ extension TypeGraph {
       self.dependencies = dependencies
     }
 
-    /// Add the given dependency, maintainign unique dependencies
+    /// Add the given dependency, maintaining unique dependencies
     fileprivate mutating func _addLookupDependency(
       baseTypeName: TypeGraph.GlobalTypeName,
       memberTypeName: Identifier,
       performLookup: (TypeGraph.GlobalTypeName, Identifier) -> QualifiedLookupDependency
-    ) -> QualifiedLookupDependency {
+    ) -> [(declGroupParent: Attached<DeclGroupSyntaxType>, typeDecl: Attached<TypeDeclSyntax>)] {
       // Try to find existing request
       //
       // Note: Although this takes O(n) time where `n` is the number of dependencies,
@@ -460,13 +460,13 @@ extension TypeGraph {
       if let existingResult = dependencies.first(where: {
         $0.baseTypeName == baseTypeName && $0.member == memberTypeName
       }) {
-        return existingResult
+        return existingResult.memberDecls
       }
 
       // Otherwise, compute and add
       let result = performLookup(baseTypeName, memberTypeName)
       dependencies.append(result)
-      return result
+      return result.memberDecls
     }
   }
 }
@@ -1824,14 +1824,14 @@ extension TypeGraph {
     }
 
     // Add to the dependency tracker or get existing value
-    let result = dependencyTracker._addLookupDependency(
+    let memberDecls = dependencyTracker._addLookupDependency(
       baseTypeName: baseTypeReference.name,
       memberTypeName: memberTypeName,
       performLookup: directLookup(baseTypeName:memberTypeName:)
     )
 
-    // Distill to type declarations (throw away declaration groups)
-    return .success(result.memberDecls)
+    // Return type declarations
+    return .success(memberDecls)
   }
 }
 
