@@ -17,7 +17,9 @@ final class TypeGraphInvariantTests2: XCTestCase {
     struct A {            // `structA`
       typealias B = C     // `typealiasB`
     }
-    struct B {}           // `structB`
+    struct B {            // `structB`
+      struct D {}         // `structD`
+    }
     extension A {}        // `extensionA`
     extension B {}        // `extensionB`
     extension A.B {}      // `extensionAB`
@@ -27,6 +29,7 @@ final class TypeGraphInvariantTests2: XCTestCase {
   // Attached declarations we reference in the tests.
   let structA = fileA.attachedChildren(ofType: NominalTypeDeclSyntax.self)[0]
   let structB = fileA.attachedChildren(ofType: NominalTypeDeclSyntax.self)[1]
+  let structD = fileA.attachedChildren(ofType: NominalTypeDeclSyntax.self)[2]
   let extensionA = fileA.attachedChildren(ofType: ExtensionDeclSyntax.self)[0]
   let extensionB = fileA.attachedChildren(ofType: ExtensionDeclSyntax.self)[1]
   let extensionAB = fileA.attachedChildren(ofType: ExtensionDeclSyntax.self)[2]
@@ -284,7 +287,6 @@ extension TypeGraphInvariantTests2 {
     )
   }
 
-  // FIXME: Why is this failing only when running whole test suite?
   func testStaleDependency() {
     assertInvariantViolation(
       expected: .staleDependency,
@@ -307,6 +309,35 @@ extension TypeGraphInvariantTests2 {
             ],
             // Use generic failure to avoid binding
             resolvedType: .failure(.extensionNotBoundYet)
+          )
+        ]
+      )
+    )
+  }
+
+  func testParentlessType() {
+    assertInvariantViolation(
+      expected: .parentlessType,
+      graph: TypeGraph(
+        _uncheckedNamesToTypes: [
+          // Admit nested type but no parent
+          Name._mock(nameDescription: "_(FileA.swift)::B", "_(FileA.swift)::D"): Nominal(
+            _uncheckedMainDecl: structD
+          )
+        ]
+      )
+    )
+  }
+
+  func testDependencyCycle() {
+    // TODO: Copy our pathological example
+    assertInvariantViolation(
+      expected: .none,
+      graph: TypeGraph(
+        _uncheckedNamesToTypes: [
+          // Admit nested type but no parent
+          Name._mock(nameDescription: "_(FileA.swift)::B", "_(FileA.swift)::D"): Nominal(
+            _uncheckedMainDecl: structD
           )
         ]
       )
