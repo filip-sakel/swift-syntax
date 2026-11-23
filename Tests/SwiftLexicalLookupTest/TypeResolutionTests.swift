@@ -15,6 +15,15 @@ import SwiftIfConfig
 import SwiftSyntax
 import XCTest
 
+extension TypeGraph.ExtensionDependency {
+  fileprivate init(baseType: TypeGraph.GlobalTypeName, members: [IdentifierWrapper]) {
+    let mappedMembers: [(name: Identifier, decls: [Member])] = members.map({ member in
+      (name: member.identifier, decls: [])
+    })
+    self.init(dependencyTypeName: baseType, members: mappedMembers)
+  }
+}
+
 final class TypeResolutionTests: XCTestCase {
   typealias ExtensionState = TypeGraph.ExtensionState
   typealias ExtensionDependency = TypeGraph.ExtensionDependency

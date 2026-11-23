@@ -1869,8 +1869,8 @@ extension TypeGraph {
   /// Creates a mock graph without checking for invariants; only use for tests.
   @_spi(_QualifiedLookupTests)
   public init(
-    _uncheckedNamesToTypes namesToTypes: [TypeGraph.GlobalTypeName: NominalType],
-    extensionsToState: [Attached<ExtensionDeclSyntax>: ExtensionState]
+    _uncheckedNamesToTypes namesToTypes: [TypeGraph.GlobalTypeName: NominalType] = [:],
+    extensionsToState: [Attached<ExtensionDeclSyntax>: ExtensionState] = [:]
   ) {
     self.namesToTypes = namesToTypes
     self.extensionsToState = extensionsToState
@@ -1885,8 +1885,8 @@ extension TypeGraph.NominalType {
   @_spi(_QualifiedLookupTests)
   public init(
     _uncheckedMainDecl mainDecl: Attached<NominalTypeDeclSyntax>,
-    boundExtensions: [ModuleName: [Attached<ExtensionDeclSyntax>]],
-    dependents: [(memberType: Identifier, dependentExtension: Attached<ExtensionDeclSyntax>)]
+    boundExtensions: [ModuleName: [Attached<ExtensionDeclSyntax>]] = [:],
+    dependents: [(memberType: Identifier, dependentExtension: Attached<ExtensionDeclSyntax>)] = []
   ) {
     self.mainDecl = mainDecl
     self.mainDeclMembers = TypeGraph.TypeTable(typeMembersToDecls: mainDecl._groupTypeMembers(configuredRegions: nil))
