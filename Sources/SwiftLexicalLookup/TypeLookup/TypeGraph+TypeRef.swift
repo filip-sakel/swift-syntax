@@ -358,7 +358,6 @@ extension TypeGraph.GlobalTypeName {
   /// produce the right debug description, but `TypeGraph` will only see
   /// one component; thus, testing invariants like `parentlessType` requires
   /// passing each member description separately.
-  /// TODO: Maybe just make current uses of nested mock names use multiple `componentStrings`.
   @_spi(_QualifiedLookupTests)
   public static func _mock(
     nameDescription componentStrings: String...,

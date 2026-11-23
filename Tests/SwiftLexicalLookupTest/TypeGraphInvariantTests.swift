@@ -89,11 +89,8 @@ final class TypeGraphInvariantTests2: XCTestCase {
 }
 
 extension TypeGraph.ExtensionDependency {
-  init(baseType nameDescription: String, members: [(name: Identifier, decls: [Member])]) {
-    self.init(
-      dependencyTypeName: TypeGraph.GlobalTypeName._mock(nameDescription: nameDescription),
-      members: members
-    )
+  fileprivate init(type: TypeGraph.GlobalTypeName, members: [(name: Identifier, decls: [Member])]) {
+    self.init(dependencyTypeName: type, members: members)
   }
 }
 
@@ -105,13 +102,9 @@ extension TypeGraphInvariantTests2 {
       expected: .duplicateMainDecl,
       graph: TypeGraph(
         _uncheckedNamesToTypes: [
-          Name._mock(nameDescription: "_(FileA.swift)::A"): Nominal(
-            _uncheckedMainDecl: structA,
-          ),
+          "_(FileA.swift)::A": Nominal(_uncheckedMainDecl: structA),
           // Re-register `struct A {}` under different file
-          Name._mock(nameDescription: "_(FileB.swift)::A"): Nominal(
-            _uncheckedMainDecl: structA,
-          ),
+          "_(FileB.swift)::A": Nominal(_uncheckedMainDecl: structA),
         ]
       )
     )
@@ -121,12 +114,10 @@ extension TypeGraphInvariantTests2 {
     assertInvariantViolation(
       expected: .noFileInfo,
       graph: TypeGraph(
+        // As explained in the `assertInvariantViolation` docstring,
+        // "struct A {}" below is detached.
         _uncheckedNamesToTypes: [
-          Name._mock(nameDescription: "_(FileA.swift)::A"): Nominal(
-            // As noted in the `assertInvariantViolation` docstring,
-            // "struct A {}" below is detached.
-            _uncheckedMainDecl: "struct A {}",
-          )
+          "_(FileA.swift)::A": Nominal(_uncheckedMainDecl: "struct A {}")
         ]
       )
     )
@@ -140,7 +131,7 @@ extension TypeGraphInvariantTests2 {
           // Extension points to unadmitted type
           extensionUnknown: Extension(
             dependencies: [],
-            resolvedType: .success(Name._mock(nameDescription: "_(FileA.swift)::Unknown"))
+            resolvedType: .success("_(FileA.swift)::Unknown")
           )
         ]
       )
@@ -151,16 +142,14 @@ extension TypeGraphInvariantTests2 {
     assertInvariantViolation(
       expected: .unboundExtension,
       graph: TypeGraph(
+        // Admitted type doesn't reference extension
         _uncheckedNamesToTypes: [
-          // Admitted type doesn't reference extension
-          Name._mock(nameDescription: "_(FileA.swift)::A"): Nominal(
-            _uncheckedMainDecl: structA,
-          )
+          "_(FileA.swift)::A": Nominal(_uncheckedMainDecl: structA)
         ],
         extensionsToState: [
           extensionUnknown: Extension(
             dependencies: [],
-            resolvedType: .success(Name._mock(nameDescription: "_(FileA.swift)::A"))
+            resolvedType: .success("_(FileA.swift)::A")
           )
         ]
       )
@@ -174,7 +163,7 @@ extension TypeGraphInvariantTests2 {
       graph: TypeGraph(
         _uncheckedNamesToTypes: [
           // Admitted type binds invalid extension
-          Name._mock(nameDescription: "_(FileA.swift)::A"): Nominal(
+          "_(FileA.swift)::A": Nominal(
             _uncheckedMainDecl: structA,
             boundExtensions: ["MyModule": [extensionUnknown]]
           )
@@ -193,12 +182,12 @@ extension TypeGraphInvariantTests2 {
       graph: TypeGraph(
         _uncheckedNamesToTypes: [
           // Admitted type binds invalid extension
-          Name._mock(nameDescription: "_(FileA.swift)::A"): Nominal(
+          "_(FileA.swift)::A": Nominal(
             _uncheckedMainDecl: structA,
             boundExtensions: ["MyModule": [extensionB]]
           ),
           // Admit the other type (to avoid `.danglingExtension` and `.unboundExtension`)
-          Name._mock(nameDescription: "_(FileA.swift)::B"): Nominal(
+          "_(FileA.swift)::B": Nominal(
             _uncheckedMainDecl: structB,
             boundExtensions: ["MyModule": [extensionB]]
           ),
@@ -206,7 +195,7 @@ extension TypeGraphInvariantTests2 {
         extensionsToState: [
           extensionB: Extension(
             dependencies: [],
-            resolvedType: .success(Name._mock(nameDescription: "_(FileA.swift)::B"))
+            resolvedType: .success("_(FileA.swift)::B")
           )
         ]
       )
@@ -220,9 +209,9 @@ extension TypeGraphInvariantTests2 {
         extensionsToState: [
           extensionAB: Extension(
             dependencies: [
-              Dependency(baseType: "_(FileA.swift)::A", members: [("B", [])]),
+              Dependency(type: "_(FileA.swift)::A", members: [("B", [])]),
               // Create new dependency for the same type as above
-              Dependency(baseType: "_(FileA.swift)::A", members: [("C", [])]),
+              Dependency(type: "_(FileA.swift)::A", members: [("C", [])]),
             ],
             // Use generic failure to avoid binding (binding surfaces more Invariants)
             resolvedType: .failure(.extensionNotBoundYet)
@@ -238,10 +227,8 @@ extension TypeGraphInvariantTests2 {
       graph: TypeGraph(
         extensionsToState: [
           extensionAB: Extension(
-            dependencies: [
-              // `_(FileA.swift)::A` is unadmitted
-              Dependency(baseType: "_(FileA.swift)::A", members: [("B", [typealiasB])])
-            ],
+            // `_(FileA.swift)::A` is unadmitted
+            dependencies: [Dependency(type: "_(FileA.swift)::A", members: [("B", [typealiasB])])],
             // Use generic failure to avoid binding
             resolvedType: .failure(.extensionNotBoundYet)
           )
@@ -256,15 +243,11 @@ extension TypeGraphInvariantTests2 {
       graph: TypeGraph(
         _uncheckedNamesToTypes: [
           // Admit type but don't register extension as dependent
-          Name._mock(nameDescription: "_(FileA.swift)::A"): Nominal(
-            _uncheckedMainDecl: structA
-          )
+          "_(FileA.swift)::A": Nominal(_uncheckedMainDecl: structA)
         ],
         extensionsToState: [
           extensionAB: Extension(
-            dependencies: [
-              Dependency(baseType: "_(FileA.swift)::A", members: [("B", [typealiasB])])
-            ],
+            dependencies: [Dependency(type: "_(FileA.swift)::A", members: [("B", [typealiasB])])],
             // Use generic failure to avoid binding
             resolvedType: .failure(.extensionNotBoundYet)
           )
@@ -279,7 +262,7 @@ extension TypeGraphInvariantTests2 {
       graph: TypeGraph(
         _uncheckedNamesToTypes: [
           // Admit type and register dependent
-          Name._mock(nameDescription: "_(FileA.swift)::A"): Nominal(
+          "_(FileA.swift)::A": Nominal(
             _uncheckedMainDecl: structA,
             dependents: [("B", extensionAB)]
           )
@@ -302,19 +285,16 @@ extension TypeGraphInvariantTests2 {
       graph: TypeGraph(
         _uncheckedNamesToTypes: [
           // Admit type and register dependent
-          Name._mock(nameDescription: "_(FileA.swift)::A"): Nominal(
+          "_(FileA.swift)::A": Nominal(
             _uncheckedMainDecl: structA,
             dependents: [("B", extensionAB)]
           )
         ],
         extensionsToState: [
           extensionAB: Extension(
+            // We say there are no declarations, but there's actually a `typealias B` member
             dependencies: [
-              // We say there are no declarations, but there's actually a `typealias B` member
-              Dependency(
-                dependencyTypeName: Name._mock(nameDescription: "_(FileA.swift)::A"),
-                members: [(name: "B", decls: [])]
-              )
+              Dependency(dependencyTypeName: "_(FileA.swift)::A", members: [(name: "B", decls: [])])
             ],
             // Use generic failure to avoid binding
             resolvedType: .failure(.extensionNotBoundYet)
@@ -330,6 +310,9 @@ extension TypeGraphInvariantTests2 {
       graph: TypeGraph(
         _uncheckedNamesToTypes: [
           // Admit nested type but no parent
+          //
+          // Note: We use `GlobalTypeName._mock` because we want `TypeGraph` to see this as
+          // a multi-component `GlobalTypeName`
           Name._mock(nameDescription: "_(FileA.swift)::B", "_(FileA.swift)::D"): Nominal(
             _uncheckedMainDecl: structD
           )
@@ -343,8 +326,8 @@ extension TypeGraphInvariantTests2 {
       expected: .dependencyCycle,
       graph: TypeGraph(
         _uncheckedNamesToTypes: [
-          // Admit a type that binds an extension dependent on it (cyclical)
-          Name._mock(nameDescription: "_(FileA.swift)::A"): Nominal.init(
+          // Admit a type that binds an extension that's dependent on said type (cyclical)
+          "_(FileA.swift)::A": Nominal.init(
             _uncheckedMainDecl: structA,
             boundExtensions: ["MyModule": [extensionAB]],
             dependents: [("B", extensionAB), ("A", extensionAB)]
@@ -354,13 +337,13 @@ extension TypeGraphInvariantTests2 {
           extensionAB: Extension(
             dependencies: [
               Dependency(
-                baseType: "_(FileA.swift)::A",
+                type: "_(FileA.swift)::A",
                 // The `_(FileA.swift)::A > A` member resolves to the
                 // `nestedStructA` declaration to avoid a `.staleDependency` violation
                 members: [(name: "B", decls: [typealiasB]), (name: "A", decls: [nestedStructA])]
               )
             ],
-            resolvedType: .success(Name._mock(nameDescription: "_(FileA.swift)::A"))
+            resolvedType: .success("_(FileA.swift)::A")
           )
         ]
       )
