@@ -14,18 +14,22 @@ final class TypeGraphInvariantTests2: XCTestCase {
 
   /// The contents of the main file `FileA.swift`
   static let fileA: SourceFileSyntax = """
+    // Top-level
     struct A {            // `structA`
-      typealias B = C     // `typealiasB`
+      typealias B = A     // `typealiasB`
     }
+    // Second top-level
     struct B {            // `structB`
       struct D {}         // `structD`
     }
+    // Extensions
     extension A {}        // `extensionA`
     extension B {}        // `extensionB`
-    extension A.B {}      // `extensionAB`
-    extension Unknown {}  // `invalidExtension`
+    extension A.B {       // `extensionAB`
+      struct A {}         // `nestedStructA`
+    }
+    extension Unknown {}  // `extensionUnknown`
     """
-
   // Attached declarations we reference in the tests.
   let structA = fileA.attachedChildren(ofType: NominalTypeDeclSyntax.self)[0]
   let structB = fileA.attachedChildren(ofType: NominalTypeDeclSyntax.self)[1]
@@ -33,11 +37,15 @@ final class TypeGraphInvariantTests2: XCTestCase {
   let extensionA = fileA.attachedChildren(ofType: ExtensionDeclSyntax.self)[0]
   let extensionB = fileA.attachedChildren(ofType: ExtensionDeclSyntax.self)[1]
   let extensionAB = fileA.attachedChildren(ofType: ExtensionDeclSyntax.self)[2]
-  let invalidExtension = fileA.attachedChildren(ofType: ExtensionDeclSyntax.self)[3]
+  let extensionUnknown = fileA.attachedChildren(ofType: ExtensionDeclSyntax.self)[3]
   // Members for dependencies
   let typealiasB = Dependency.Member(
     introducingExtensionOrMainDecl: nil,
     typeDecl: fileA.attachedChildren(ofType: TypeDeclSyntax.self)[1]
+  )
+  let nestedStructA = Dependency.Member(
+    introducingExtensionOrMainDecl: fileA.attachedChildren(ofType: ExtensionDeclSyntax.self)[2],  // `extensionAB`
+    typeDecl: fileA.attachedChildren(ofType: TypeDeclSyntax.self)[4]
   )
 
   /// The symbol table using the above files/declarations
@@ -46,6 +54,7 @@ final class TypeGraphInvariantTests2: XCTestCase {
     moduleToSources: [
       "MyModule": [
         "FileA.swift": fileA,
+        // Different file gives us more `[GlobalType]Name`s
         "FileB.swift": "",
       ]
     ],
@@ -129,7 +138,7 @@ extension TypeGraphInvariantTests2 {
       graph: TypeGraph(
         extensionsToState: [
           // Extension points to unadmitted type
-          invalidExtension: Extension(
+          extensionUnknown: Extension(
             dependencies: [],
             resolvedType: .success(Name._mock(nameDescription: "_(FileA.swift)::Unknown"))
           )
@@ -149,7 +158,7 @@ extension TypeGraphInvariantTests2 {
           )
         ],
         extensionsToState: [
-          invalidExtension: Extension(
+          extensionUnknown: Extension(
             dependencies: [],
             resolvedType: .success(Name._mock(nameDescription: "_(FileA.swift)::A"))
           )
@@ -167,11 +176,11 @@ extension TypeGraphInvariantTests2 {
           // Admitted type binds invalid extension
           Name._mock(nameDescription: "_(FileA.swift)::A"): Nominal(
             _uncheckedMainDecl: structA,
-            boundExtensions: ["MyModule": [invalidExtension]]
+            boundExtensions: ["MyModule": [extensionUnknown]]
           )
         ],
         extensionsToState: [
-          invalidExtension: Extension(
+          extensionUnknown: Extension(
             dependencies: [],
             resolvedType: .failure(.noTypeInScope)
           )
@@ -330,14 +339,28 @@ extension TypeGraphInvariantTests2 {
   }
 
   func testDependencyCycle() {
-    // TODO: Copy our pathological example
     assertInvariantViolation(
-      expected: .none,
+      expected: .dependencyCycle,
       graph: TypeGraph(
         _uncheckedNamesToTypes: [
-          // Admit nested type but no parent
-          Name._mock(nameDescription: "_(FileA.swift)::B", "_(FileA.swift)::D"): Nominal(
-            _uncheckedMainDecl: structD
+          // Admit a type that binds an extension dependent on it (cyclical)
+          Name._mock(nameDescription: "_(FileA.swift)::A"): Nominal.init(
+            _uncheckedMainDecl: structA,
+            boundExtensions: ["MyModule": [extensionAB]],
+            dependents: [("B", extensionAB), ("A", extensionAB)]
+          )
+        ],
+        extensionsToState: [
+          extensionAB: Extension(
+            dependencies: [
+              Dependency(
+                baseType: "_(FileA.swift)::A",
+                // The `_(FileA.swift)::A > A` member resolves to the
+                // `nestedStructA` declaration to avoid a `staleDependency` violation
+                members: [(name: "B", decls: [typealiasB]), (name: "A", decls: [nestedStructA])]
+              )
+            ],
+            resolvedType: .success(Name._mock(nameDescription: "_(FileA.swift)::A"))
           )
         ]
       )
