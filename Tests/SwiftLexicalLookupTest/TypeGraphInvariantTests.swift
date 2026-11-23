@@ -356,7 +356,7 @@ extension TypeGraphInvariantTests2 {
               Dependency(
                 baseType: "_(FileA.swift)::A",
                 // The `_(FileA.swift)::A > A` member resolves to the
-                // `nestedStructA` declaration to avoid a `staleDependency` violation
+                // `nestedStructA` declaration to avoid a `.staleDependency` violation
                 members: [(name: "B", decls: [typealiasB]), (name: "A", decls: [nestedStructA])]
               )
             ],
