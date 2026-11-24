@@ -13,7 +13,8 @@
 import SwiftIfConfig
 import SwiftSyntax
 
-@_spi(_QualifiedLookup) public struct DeclGroupSyntaxType: SyntaxProtocol, SyntaxHashable {
+@_spi(_QualifiedLookup)
+public struct DeclGroupSyntaxType: SyntaxProtocol, SyntaxHashable {
   public internal(set) var _syntaxNode: Syntax
 
   public init?(_ node: __shared some SyntaxProtocol) {
@@ -30,7 +31,8 @@ import SwiftSyntax
   ])
 }
 
-@_spi(_QualifiedLookup) extension DeclGroupSyntaxType: DeclGroupSyntax {
+@_spi(_QualifiedLookup)
+extension DeclGroupSyntaxType: DeclGroupSyntax {
   private func _getGroupProp<T>(_ prop: KeyPath<(any DeclGroupSyntax), T>) -> T {
     switch _syntaxNode.as(SyntaxEnum.self) {
     case .structDecl(let declGroup):
@@ -124,90 +126,10 @@ import SwiftSyntax
 
 // MARK: Lookup
 
-private func _visitDirectMembersOfDecl(
-  decl: DeclSyntax,
-  configuredRegions: ConfiguredRegions?,
-  visit: (ValueDeclSyntax) -> Void
-) {
-  /// Process a member or a member nested inside an if-config declaration.
-  ///
-  /// This pattern is similar to the SyntaxVisitor pattern, but a SyntaxVisitor
-  /// doesn't work because we use custom syntax like `ValueDeclSyntax`
-  func processMember(decl: DeclSyntax) {
-    // Get only value declarations
-    if let valueDecl = decl.as(ValueDeclSyntax.self) {
-      visit(valueDecl)
-    }
-    // Visit variable declarations to get identifier patterns
-    else if let varDecl = decl.as(VariableDeclSyntax.self) {
-      for binding in varDecl.bindings {
-        guard let valueDecl = ValueDeclSyntax(binding.pattern.as(IdentifierPatternSyntax.self)) else { continue }
-        visit(valueDecl)
-      }
-    }
-    // Visit enum cases to get enum elements
-    else if let enumCase = decl.as(EnumCaseDeclSyntax.self) {
-      for enumElement in enumCase.elements {
-        visit(ValueDeclSyntax(enumElement))
-      }
-    }
-    // If configuredRegions is set, visit the members of the active clause (if it exists)
-    //
-    // We do this recursively to handle nested if-config declarations
-    else if let ifConfigDecl = decl.as(IfConfigDeclSyntax.self),
-      let configuredRegions,
-      case .decls(let members) = configuredRegions.activeClause(for: ifConfigDecl)?.elements
-    {
-      for member in members {
-        processMember(decl: member.decl)
-      }
-    }
-    // If configuredRegions is nil, visit all if-config clauses
-    else if let ifConfigDecl = decl.as(IfConfigDeclSyntax.self),
-      configuredRegions == nil
-    {
-      for clause in ifConfigDecl.clauses {
-        guard case .decls(let members) = clause.elements else { return }
-        for member in members {
-          processMember(decl: member.decl)
-        }
-      }
-    }
-  }
-
-  // Find all ValueDeclSyntax members in this declaration
-  processMember(decl: decl)
-}
-
-extension CodeBlockItemListSyntax {
-  func _visitDirectMembers(
-    configuredRegions: ConfiguredRegions?,
-    visit: (ValueDeclSyntax) -> Void
-  ) {
-    for listItem in self {
-      guard case .decl(let decl) = listItem.item else { continue }
-      _visitDirectMembersOfDecl(
-        decl: decl,
-        configuredRegions: configuredRegions,
-        visit: visit
-      )
-    }
-  }
-}
-
-extension DeclGroupSyntax {
-  @_spi(_QualifiedLookup) public func visitDirectMembers(
-    configuredRegions: ConfiguredRegions?,
-    visit: (ValueDeclSyntax) -> Void
-  ) {
-    // If we're in a disabled region, visit nothing
-    if let configuredRegions, configuredRegions.isActive(self) != .active { return }
-
-    for member in memberBlock.members {
-      _visitDirectMembersOfDecl(decl: member.decl, configuredRegions: configuredRegions, visit: visit)
-    }
-  }
-
+// Note: We need `Self: DeclContextSyntaxProtocol` because `DeclGroupSyntax`
+// doesn't inherit from `DeclContextSyntaxProtocol` (though all conforming types do).
+@_spi(_QualifiedLookup)
+extension DeclGroupSyntax where Self: DeclContextSyntaxProtocol {
   /// Find named member declarations in the given group declaration.
   ///
   /// Results are filtered in the following ways:
@@ -218,7 +140,7 @@ extension DeclGroupSyntax {
   ///
   /// Note that implicit members such as `self`, `Type`, or `Protocol` aren't
   /// value declarations (they're not actual members) and we don't return them here.
-  @_spi(_QualifiedLookup) public func findDirectMembers(
+  public func findDirectMembers(
     name: DeclNameReference?,
     kind memberKind: MemberKind = .default,
     configuredRegions: ConfiguredRegions? = nil
@@ -241,27 +163,6 @@ extension DeclGroupSyntax {
       }
     )
     return valueDecls
-  }
-}
-
-// TODO: Consider simplifying/merging lookup methods
-extension Attached where Node: DeclGroupSyntax {
-  internal func _groupTypeMembers(
-    configuredRegions: ConfiguredRegions?
-  ) -> [Identifier: [Attached<TypeDeclSyntax>]] {
-    var result = [Identifier: [Attached<TypeDeclSyntax>]]()
-    node.visitDirectMembers(
-      configuredRegions: configuredRegions,
-      visit: { valueDecl in
-        guard let typeDecl = valueDecl.as(TypeDeclSyntax.self) else { return }
-        guard let typeIdentifier = Identifier(validating: typeDecl.name) else { return }
-        // Since these are our children, they will also be scope in the file,
-        // so we can force-unwrap.
-        let wrappedTypeDecl = Attached<TypeDeclSyntax>(typeDecl)!
-        result[typeIdentifier, default: []].append(wrappedTypeDecl)
-      }
-    )
-    return result
   }
 }
 
