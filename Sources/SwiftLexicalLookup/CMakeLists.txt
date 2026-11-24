@@ -28,7 +28,6 @@ add_swift_syntax_library(SwiftLexicalLookup
   QualifiedLookup/DeclContextSyntax.swift
   QualifiedLookup/DeclGroupLookup.swift
   QualifiedLookup/DeclName.swift
-  QualifiedLookup/DeclScope.swift
   QualifiedLookup/MemberKind.swift
   QualifiedLookup/ModuleLookup.swift
   QualifiedLookup/NominalTypeDeclSyntax.swift
