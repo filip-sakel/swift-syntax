@@ -1751,12 +1751,12 @@ extension TypeGraph {
       guard let declFileInfo = symbolTable.getFileInfo(nominalTypeDecl.fileRoot) else {
         return .failure(QualifiedTypeLookupFailure.unregisteredFileRoot(nominalTypeDecl.fileRoot))
       }
-      // TODO: Directly collect members, rather than building hash map & then getting specific member
-      //
       // Local decls don't have extensions (=> no dependencies generated); just
       // look into the main declaration.
-      let groupedTypeMembers = nominalTypeDecl._groupTypeMembers(configuredRegions: declFileInfo.configuredRegions)
-      let typeMembers = groupedTypeMembers[memberTypeName, default: []]
+      let typeMembers = nominalTypeDecl._findDirectMemberTypes(
+        named: memberTypeName,
+        configuredRegions: declFileInfo.configuredRegions
+      )
       return .success(
         typeMembers.map({ (declGroupParent: Attached<DeclGroupSyntaxType>(nominalTypeDecl), typeDecl: $0) })
       )

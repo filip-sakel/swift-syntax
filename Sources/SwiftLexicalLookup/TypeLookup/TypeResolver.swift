@@ -248,20 +248,6 @@ extension TypeResolver {
 // MARK: Unqualified References
 
 extension TypeResolver {
-  enum DeclContext {
-    case declGroup(Attached<DeclGroupSyntaxType>)
-    case codeBlock(Attached<CodeBlockItemListSyntax>)
-
-    fileprivate var syntax: Syntax {
-      switch self {
-      case .declGroup(let syntax):
-        return Syntax(syntax.node)
-      case .codeBlock(let syntax):
-        return Syntax(syntax.node)
-      }
-    }
-  }
-
   /// Performs top-level unqualified lookup for types, optionally
   /// just in an external module.
   ///
@@ -337,7 +323,7 @@ extension TypeResolver {
       case .nonNestedTypeDecl(let typeDecl, redeclarations: _, let parentCodeBlock):
         enclosingType = resolveTypeDecl(
           typeDecl: typeDecl,
-          declContext: DeclContext.codeBlock(parentCodeBlock),
+          declContext: Attached<DeclContextSyntax>(parentCodeBlock),
           originatingSyntax: Attached<TypeLikeSyntax>(typeComponent.introducingSyntax)
         )
         lookForSelectedMember = false
@@ -451,22 +437,20 @@ extension TypeResolver {
     }
     return resolveTypeDecl(
       typeDecl: topLevelType,
-      declContext: DeclContext.codeBlock(topLevelType.fileRootStatements),
+      declContext: Attached<DeclContextSyntax>(topLevelType.fileRootStatements),
       originatingSyntax: Attached<TypeLikeSyntax>(typeComponent.introducingSyntax)
     )
   }
 
   /// Helper for `resolveDeclGroup`
-  fileprivate func _findDeclContext(ofDeclGroup node: Attached<DeclGroupSyntaxType>) -> DeclContext {
+  fileprivate func _findDeclContext(ofDeclGroup node: Attached<DeclGroupSyntaxType>) -> Attached<DeclContextSyntax> {
     var currentAncestor: Attached<Syntax>? = node.parent
     while let ancestor = currentAncestor {
-      if let codeBlockScope = ancestor.as(CodeBlockItemListSyntax.self),
+      if let declContext = ancestor.as(DeclContextSyntax.self),
         // `#if` aren't true scopes
-        codeBlockScope.parent?.is(IfConfigClauseSyntax.self) != true
+        declContext.parent?.is(IfConfigClauseSyntax.self) != true
       {
-        return DeclContext.codeBlock(codeBlockScope)
-      } else if let declGroupScope = ancestor.as(DeclGroupSyntaxType.self) {
-        return DeclContext.declGroup(declGroupScope)
+        return declContext
       } else {
         currentAncestor = ancestor.parent
       }
@@ -484,7 +468,7 @@ extension TypeResolver {
     declGroup: Attached<DeclGroupSyntaxType>,
     originatingSyntax: Attached<TypeLikeSyntax>
   ) -> Result<ResolvedTypeSyntax, Failure> {
-    let declContext: DeclContext = _findDeclContext(ofDeclGroup: declGroup)
+    let declContext: Attached<DeclContextSyntax> = _findDeclContext(ofDeclGroup: declGroup)
 
     if let nominalTypeDecl = declGroup.as(NominalTypeDeclSyntax.self) {
       return resolveNominalTypeDecl(
@@ -495,8 +479,7 @@ extension TypeResolver {
 
     } else if let extensionDecl = declGroup.as(ExtensionDeclSyntax.self) {
       guard
-        case .codeBlock(let fileStatements) = declContext,
-        fileStatements.node == extensionDecl.fileRoot.statements
+        declContext.as(CodeBlockItemListSyntax.self)?.node == extensionDecl.fileRoot.statements
       else {
         return .failure(Failure.extensionNotAtFileScope(extensionDecl: extensionDecl.node))
       }
@@ -582,11 +565,11 @@ extension TypeResolver {
   /// Resolves the nominal-type declaration in the given declaration context.
   fileprivate mutating func resolveNominalTypeDecl(
     nominalDecl: Attached<NominalTypeDeclSyntax>,
-    declContext: DeclContext,
+    declContext: Attached<DeclContextSyntax>,
     originatingSyntax: Attached<TypeLikeSyntax>
   ) -> Result<ResolvedTypeSyntax, Failure> {
     assert(
-      declContext.syntax.range.contains(nominalDecl.node.range),
+      declContext.node.range.contains(nominalDecl.node.range),
       "[SwiftLexicalLookup] Internal error: Decl context doesn't contain declaration."
     )
 
@@ -598,23 +581,13 @@ extension TypeResolver {
     let declFile = nominalDecl.fileRoot
     let declFileInfo = extractFileInfo(syntax: nominalDecl)
 
-    switch declContext {
-    case .codeBlock(let codeBlockScope):
+    if let codeBlockScope = declContext.as(CodeBlockItemListSyntax.self) {
       let isGlobal: Bool = codeBlockScope.node == declFile.statements
 
       // Gather type decls with the same name
-      var scopeTypeDecls = [TypeDeclSyntax]()
-      codeBlockScope.node._visitDirectMembers(
-        configuredRegions: extractFileInfo(syntax: codeBlockScope).configuredRegions,
-        visit: { valueDecl in
-          guard
-            let typeDecl = valueDecl.as(TypeDeclSyntax.self),
-            typeDecl.name.identifier == declName
-          else {
-            return
-          }
-          scopeTypeDecls.append(typeDecl)
-        }
+      var scopeTypeDecls = declContext._findDirectMemberTypes(
+        named: declName,
+        configuredRegions: extractFileInfo(syntax: codeBlockScope).configuredRegions
       )
       // If we're at top-level, consider other internal declarations
       //
@@ -626,21 +599,20 @@ extension TypeResolver {
           moduleSelector: declFileInfo.module,
           name: declName
         )
-        scopeTypeDecls.append(contentsOf: topLevelTypes.map(\.node))
+        scopeTypeDecls.append(contentsOf: topLevelTypes)
       }
 
       // Diagnose redeclarations
 
-      let disambiguatedTypeDecls = disambiguateResults(
-
+      let disambiguatedTypeDecls: [Attached<TypeDeclSyntax>] = disambiguateResults(
         results: scopeTypeDecls,
-        declOfResult: { $0 },
+        declOfResult: \.node,
         callsite: Syntax(nominalDecl.node)
       )
 
-      guard disambiguatedTypeDecls == [TypeDeclSyntax(nominalDecl.node)] else {
+      guard disambiguatedTypeDecls == [Attached<TypeDeclSyntax>(nominalDecl)] else {
         // Results are already sorted from lookup
-        return .failure(Failure.ambiguousTypeDecl(scopeTypeDecls))
+        return .failure(Failure.ambiguousTypeDecl(scopeTypeDecls.map(\.node)))
       }
 
       // Admit the type
@@ -669,7 +641,9 @@ extension TypeResolver {
       }
 
       return .success(resolvedReference)
-    case .declGroup(let declGroupParent):
+    } else {
+      // Otherwise, the context is a declaration group
+      let declGroupParent = declContext.as(DeclGroupSyntaxType.self)!
       // Find the base type
       let baseResult: Result<ResolvedTypeSyntax, Failure> = resolveDeclGroup(
         declGroup: declGroupParent,
@@ -755,11 +729,11 @@ extension TypeResolver {
   /// declarations.
   fileprivate mutating func resolveTypeDecl(
     typeDecl: Attached<TypeDeclSyntax>,
-    declContext: DeclContext,
+    declContext: Attached<DeclContextSyntax>,
     originatingSyntax: Attached<TypeLikeSyntax>
   ) -> TypeResult {
     assert(
-      declContext.syntax.range.contains(typeDecl.node.range),
+      declContext.node.range.contains(typeDecl.node.range),
       "[SwiftLexicalLookup] Internal error: Decl context doesn't contain declaration."
     )
 
@@ -921,7 +895,7 @@ extension TypeResolver {
       // Resolve this type declaration and add it to the results
       let typeDeclResult: TypeResult = resolveTypeDecl(
         typeDecl: memberTypeDecl,
-        declContext: DeclContext.declGroup(memberDeclGroupParent),
+        declContext: Attached<DeclContextSyntax>(memberDeclGroupParent),
         originatingSyntax: Attached<TypeLikeSyntax>(typeMember.introducingSyntax)
       )
       // Surface any failures
@@ -997,8 +971,7 @@ extension TypeResolver {
     // Ensure extension is at file scope
     let declContext = _findDeclContext(ofDeclGroup: Attached<DeclGroupSyntaxType>(extensionDecl))
     guard
-      case DeclContext.codeBlock(let scope) = declContext,
-      scope.node == extensionDecl.fileRoot.statements
+      declContext.as(CodeBlockItemListSyntax.self)?.node == extensionDecl.fileRoot.statements
     else {
       return .failure(Failure.extensionNotAtFileScope(extensionDecl: extensionDecl.node))
     }
