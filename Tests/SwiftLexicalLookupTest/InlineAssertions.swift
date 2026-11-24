@@ -516,7 +516,7 @@ private class SyntaxAsTypeVisitor<T: SyntaxProtocol>: SyntaxAnyVisitor {
   }
 }
 extension SyntaxProtocol {
-  /// Helper for tests that want to get the child nodes of a particular type.
+  /// Helper for tests that want to get a particular type of child nodes.
   ///
   /// This is particularly useful for tests that require that some syntax have
   /// parent nodes for context. For instance, to determine if the name introduced
@@ -531,6 +531,10 @@ extension SyntaxProtocol {
 }
 
 extension SourceFileSyntax {
+  /// Helper for tests that want to get a particular type of child nodes of a
+  /// `SourceFileSyntax`.
+  ///
+  /// Like `SyntaxProtocol/children` but returns `Attached<T>` children.
   func attachedChildren<T: SyntaxProtocol>(ofType syntaxType: T.Type) -> [Attached<T>] {
     children(ofType: syntaxType).map({
       // Children of a `SourceFileSyntax` are attached by definition.
