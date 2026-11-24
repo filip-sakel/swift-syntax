@@ -14,7 +14,8 @@ import SwiftSyntax
 
 /// Protocol encapsulating `NominalTypeDeclSyntax`. Only `[Struct/Enum/Class/Actor/Protocol]DeclSyntax`
 /// should conform.
-@_spi(_QualifiedLookup) public protocol NominalTypeDeclSyntaxProtocol: DeclGroupSyntax, NamedDeclSyntax {}
+@_spi(_QualifiedLookup)
+public protocol NominalTypeDeclSyntaxProtocol: DeclGroupSyntax, DeclContextSyntaxProtocol, NamedDeclSyntax {}
 
 /// A nominal type declaration (struct, enum, class, actor, protocol).
 @_spi(_QualifiedLookup) public struct NominalTypeDeclSyntax: NominalTypeDeclSyntaxProtocol, SyntaxHashable {
