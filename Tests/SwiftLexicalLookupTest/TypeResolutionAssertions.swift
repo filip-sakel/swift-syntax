@@ -13,6 +13,7 @@
 import SwiftIfConfig
 @_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) import SwiftLexicalLookup
 import SwiftSyntax
+import SwiftSyntaxBuilder
 import XCTest
 
 /// Asserts the given annotated `TypeSyntax` resolves to the right `NominalTypeDeclSyntax`

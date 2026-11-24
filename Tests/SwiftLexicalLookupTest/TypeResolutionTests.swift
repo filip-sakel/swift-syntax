@@ -13,6 +13,7 @@
 import SwiftIfConfig
 @_spi(_QualifiedLookup) @_spi(_QualifiedLookupTests) import SwiftLexicalLookup
 import SwiftSyntax
+import SwiftSyntaxBuilder
 import XCTest
 
 extension TypeGraph.ExtensionDependency {
