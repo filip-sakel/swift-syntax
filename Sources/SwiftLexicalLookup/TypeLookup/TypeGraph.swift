@@ -1579,20 +1579,14 @@ extension TypeGraph {
 // MARK: Extension Admission
 
 extension TypeGraph {
-  // TODO: Clarify who uses these
-
+  /// Helper that forms a reference to the given `GlobalTypeName`, or returns
+  /// `nil` if it's not in the graph.
+  ///
+  /// Useful for getting the final version of a nominal type after binding extensions.
   func getGlobalNominalTypeReference(name: GlobalTypeName) -> TypeGraph.GlobalTypeRef? {
     namesToTypes[name].map({
       TypeGraph.GlobalTypeRef(name: name, nominal: $0)
     })
-  }
-
-  /// Gets the final nominal-type reference with the given qualified name
-  /// using the current graph.
-  ///
-  /// Useful for getting the final version of a nominal type after binding extensions.
-  func getNominalTypeReference(name: GlobalTypeName) -> TypeRef? {
-    getGlobalNominalTypeReference(name: name).map(TypeRef.global(_:))
   }
 }
 
