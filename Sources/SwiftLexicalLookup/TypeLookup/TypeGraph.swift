@@ -938,6 +938,29 @@ extension TypeGraph {
 
 }
 
+// MARK: TypeRef Helpers
+
+extension TypeGraph.GlobalTypeRef {
+  init(
+    name: TypeGraph.GlobalTypeName,
+    nominal: __shared TypeGraph.NominalType
+  ) {
+    self.init(name: name, mainDecl: nominal.mainDecl, _version: nominal.version)
+  }
+}
+
+extension TypeGraph {
+  /// Helper that forms a reference to the given `GlobalTypeName`, or returns
+  /// `nil` if it's not in the graph.
+  ///
+  /// Useful for getting the final version of a nominal type after binding extensions.
+  func getGlobalNominalTypeReference(name: GlobalTypeName) -> TypeGraph.GlobalTypeRef? {
+    namesToTypes[name].map({
+      TypeGraph.GlobalTypeRef(name: name, nominal: $0)
+    })
+  }
+}
+
 // MARK: - Cycle Detection
 
 extension TypeGraph {
@@ -1150,15 +1173,6 @@ extension TypeGraph {
 }
 
 // MARK: Type Admission
-
-extension TypeGraph.GlobalTypeRef {
-  init(
-    name: TypeGraph.GlobalTypeName,
-    nominal: __shared TypeGraph.NominalType
-  ) {
-    self.init(name: name, mainDecl: nominal.mainDecl, _version: nominal.version)
-  }
-}
 
 extension TypeGraph {
   enum TypeAdmissionFailure: Error {
@@ -1577,18 +1591,6 @@ extension TypeGraph {
 }
 
 // MARK: Extension Admission
-
-extension TypeGraph {
-  /// Helper that forms a reference to the given `GlobalTypeName`, or returns
-  /// `nil` if it's not in the graph.
-  ///
-  /// Useful for getting the final version of a nominal type after binding extensions.
-  func getGlobalNominalTypeReference(name: GlobalTypeName) -> TypeGraph.GlobalTypeRef? {
-    namesToTypes[name].map({
-      TypeGraph.GlobalTypeRef(name: name, nominal: $0)
-    })
-  }
-}
 
 extension TypeGraph {
   enum ExtensionAdmissionFailure: Error {
