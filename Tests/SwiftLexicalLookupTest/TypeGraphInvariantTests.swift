@@ -55,7 +55,7 @@ final class TypeGraphInvariantTests2: XCTestCase {
     moduleToSources: [
       "MyModule": [
         "FileA.swift": fileA,
-        // Different file gives us more `[GlobalType]Name`s
+        // Different file gives us more `GlobalTypeName`s
         "FileB.swift": "",
       ]
     ],
