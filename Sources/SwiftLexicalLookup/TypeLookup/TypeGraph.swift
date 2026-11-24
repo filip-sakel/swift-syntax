@@ -1109,6 +1109,8 @@ extension TypeGraph {
   /// Preconditions:
   /// - Every extension introducing a member of `dependencies` recursively,
   ///   is admitted and bound (*Extensions depend on type members*)
+  /// Complexity: `O(n)` where `n` is the number of the given extension's
+  /// transitive-dependency declarations.
   fileprivate func _firstCycle(
     extensionDecl: Attached<ExtensionDeclSyntax>,
     extensionState: ExtensionState,
